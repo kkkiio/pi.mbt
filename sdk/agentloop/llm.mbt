@@ -1,14 +1,44 @@
 ///|
 pub(open) trait LLM {
-  fn generate(Self, ArrayView[AgentMessage]) -> &AssistantMessageEventStream
+  fn generate(Self, Context) -> &AssistantMessageEventStream
 }
 
 ///|
-pub enum AgentMessage {
-  User(Array[InputMessageContent])
-  Assistant(Array[AssistantMessageContent])
-  System(Array[InputMessageContent])
+pub(all) struct Context {
+  system_prompt : String
+  messages : ArrayView[AgentMessage]
+  tools : ArrayView[ToolDefinition]
+}
+
+///|
+pub(all) enum AgentMessage {
+  User(ArrayView[InputMessageContent])
+  Assistant(ArrayView[AssistantMessageContent])
+  // System(Array[InputMessageContent])
   ToolResult(ToolResultMessage)
+}
+
+///|
+pub(all) enum ToolDefinition {
+  WebSearch
+  Function(FunctionTool)
+  Custom(FunctionTool)
+}
+
+///|
+pub(all) struct FunctionTool {
+  name : String
+  description : String
+  parameters : Json
+  strict : Bool
+}
+
+///|
+pub(all) struct CustomTool {
+  name : String
+  description : String
+  parameters : Json
+  strict : Bool
 }
 
 ///|
@@ -29,7 +59,7 @@ pub struct ToolResultMessage {
 }
 
 ///|
-pub trait AssistantMessageEventStream {
+pub(open) trait AssistantMessageEventStream {
   async fn next(Self) -> AssistantMessageEvent
   fn close(Self) -> Unit
 }
@@ -54,25 +84,25 @@ pub(all) enum AssistantMessageEvent {
   ToolCallEnd(Int, ToolCall, PartialAssistantMessage)
   Done(OkStopReason, AssistantMessage)
   Error(ErrorStopReason, AssistantMessage)
-}
+} derive(Debug)
 
 ///|
-pub enum OkStopReason {
+pub(all) enum OkStopReason {
   Stop
   /// The model stopped because it reached the maximum number of tokens allowed.
   Length
   ToolUse
-}
+} derive(Debug)
 
 ///|
-pub enum ErrorStopReason {
+pub(all) enum ErrorStopReason {
   /// The model was aborted by the user or system.
   Aborted
   Error
-}
+} derive(Debug)
 
 ///|
-enum StopReason {
+pub(all) enum StopReason {
   Stop
   /// The model stopped because it reached the maximum number of tokens allowed.
   Length
@@ -80,33 +110,34 @@ enum StopReason {
   /// The model was aborted by the user or system.
   Aborted
   Error
-}
+} derive(Debug)
 
 ///|
 pub(all) struct PartialAssistantMessage {
-  content : Array[AssistantMessageContent]
-}
+  content : ArrayView[AssistantMessageContent]
+} derive(Debug)
 
 ///|
 pub(all) struct AssistantMessage {
   content : Array[AssistantMessageContent]
   stop_reason : StopReason
   usage : Usage?
-}
+} derive(Debug)
 
 ///|
 pub(all) enum AssistantMessageContent {
-  Text(String)
-  Thinking(String)
-  ToolCall(ToolCall)
-}
+  Text(String, signature~ : Json)
+  Thinking(String, signature~ : Json)
+  ToolCall(ToolCall, signature~ : Json)
+  BuiltinToolCall(String, signature~ : Json)
+} derive(Debug)
 
 ///|
 pub(all) struct ToolCall {
   id : String
   name : String
   arguments : Json
-}
+} derive(Debug)
 
 ///|
 pub(all) struct Usage {
@@ -121,7 +152,7 @@ pub(all) struct Usage {
   reasoning : Int?
   total_tokens : Int
   cost : UsageCost
-}
+} derive(Debug)
 
 ///|
 pub(all) struct UsageCost {
@@ -130,4 +161,4 @@ pub(all) struct UsageCost {
   cache_read : Float
   cache_write : Float
   total : Float
-}
+} derive(Debug)

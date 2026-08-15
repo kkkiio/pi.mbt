@@ -2,7 +2,9 @@
 /// Runs the agent loop, which generates messages from the LLM and executes tools as needed.
 pub async fn run_agent_loop(
   llm : &LLM,
+  system_prompt : String,
   messages : Array[AgentMessage],
+  tools : ArrayView[ToolDefinition],
   prompts : ArrayView[UserMessage],
   tool_executor~ : async (ToolCall, ToolExecUpdateSink) -> ToolResult,
   steer_channel? : () -> ArrayView[UserMessage] = fn() { [] },
@@ -24,7 +26,7 @@ pub async fn run_agent_loop(
       event_sink(AgentEvent::MessageStart(AgentMessage::User(prompt.content)))
     }
     pending_prompts = []
-    let stream = llm.generate(messages)
+    let stream = llm.generate({ system_prompt, messages, tools })
     pending_stream = Some(stream)
     let assistant_message : AssistantMessage = for ;; {
       match stream.next() {
@@ -74,8 +76,8 @@ pub async fn run_agent_loop(
     match assistant_message.stop_reason {
       Aborted | Error => ()
       _ =>
-        for c in assistant_message.content {
-          guard c is AssistantMessageContent::ToolCall(tool_call) else {
+        for content in assistant_message.content {
+          guard content is AssistantMessageContent::ToolCall(tool_call, ..) else {
             continue
           }
           event_sink(AgentEvent::ToolExecutionStart(tool_call))
