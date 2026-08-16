@@ -4,4 +4,5 @@ import {
   "moonbitlang/core/json",
   "moonbitlang/core/env",
   "moonbitlang/core/random",
+  "moonbitlang/core/string",
 }

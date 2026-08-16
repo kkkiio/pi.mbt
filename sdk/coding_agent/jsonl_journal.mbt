@@ -63,18 +63,40 @@ pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
 }
 
 ///|
-pub async fn fetch_entries(path : String) -> Array[@agent_session.SessionEntry] {
-  let content = @fs.read_file(path).text()
+pub async fn fetch_entries(path : String) -> Array[@agent_session.SessionEntry] raise Failure {
+  let content = try {
+    @fs.read_file(path).text()
+  } catch {
+    err => fail("failed to read session journal at \{path}: \{err}")
+  }
   let lines = content
     .split("\n")
     .to_array()
     .filter(fn(line) { line.length() > 0 })
   let entries = []
   for i = 1; i < lines.length(); i = i + 1 {
-    let json = @json.parse(lines[i])
-    guard json is Json::Object(fields) else { continue }
-    if parse_entry(fields) is Some(entry) {
-      entries.push(entry)
+    let last = i == lines.length() - 1
+    let json = try {
+      Some(@json.parse(lines[i]))
+    } catch {
+      _ => None
+    }
+    match json {
+      None =>
+        if last {
+          // tolerate a torn final line (crash mid-append)
+          continue
+        } else {
+          fail("session journal has invalid JSON at line \{i + 1}")
+        }
+      Some(json) => {
+        let entry = try {
+          @json.from_json(json)
+        } catch {
+          err => fail("session journal has invalid entry at line \{i + 1}: \{err}")
+        }
+        entries.push(entry)
+      }
     }
   }
   entries
@@ -92,193 +114,4 @@ pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
   W,
 ] with fn generate_id(self) -> String {
   make_id(self.rand, self.ids)
-}
-
-///|
-fn parse_entry(fields : Map[String, Json]) -> @agent_session.SessionEntry? {
-  let id = match fields.get("id") {
-    Some(Json::String(id)) => id
-    _ => return None
-  }
-  let s = match fields.get("timestamp") {
-    Some(Json::String(s)) => s
-    _ => return None
-  }
-  let timestamp = @string.parse_uint64(s) catch { _ => return None }
-  let content = match fields.get("content") {
-    Some(Json::Object(content_fields)) => content_fields
-    _ => return None
-  }
-  let content = match parse_session_entry_content(content) {
-    Some(c) => c
-    None => return None
-  }
-  Some({ id, timestamp, content })
-}
-
-///|
-fn parse_session_entry_content(
-  fields : Map[String, Json],
-) -> @agent_session.SessionEntryContent? {
-  match fields.get("type") {
-    Some(Json::String("message")) =>
-      match fields.get("message") {
-        Some(json) =>
-          match parse_agent_message(json) {
-            Some(message) =>
-              Some(@agent_session.SessionEntryContent::Message(message))
-            None => None
-          }
-        None => None
-      }
-    Some(Json::String("model_change")) => {
-      let provider = match fields.get("provider") {
-        Some(Json::String(s)) => s
-        _ => return None
-      }
-      let model_id = match fields.get("model_id") {
-        Some(Json::String(s)) => s
-        _ => return None
-      }
-      Some(
-        @agent_session.SessionEntryContent::ModelChanage(provider~, model_id~),
-      )
-    }
-    Some(Json::String("compaction")) =>
-      Some(@agent_session.SessionEntryContent::Compaction)
-    Some(Json::String("custom_message")) =>
-      Some(@agent_session.SessionEntryContent::CustomMessage)
-    _ => None
-  }
-}
-
-///|
-fn parse_agent_message(json : Json) -> @agent_loop.AgentMessage? {
-  guard json is Json::Object(fields) else { return None }
-  match fields.get("role") {
-    Some(Json::String("user")) =>
-      match fields.get("content") {
-        Some(Json::Array(items)) => {
-          let contents = []
-          for item in items {
-            if parse_input_content(item) is Some(content) {
-              contents.push(content)
-            }
-          }
-          Some(@agent_loop.AgentMessage::User(contents))
-        }
-        _ => None
-      }
-    Some(Json::String("assistant")) =>
-      match fields.get("content") {
-        Some(Json::Array(items)) => {
-          let contents = []
-          for item in items {
-            if parse_assistant_content(item) is Some(content) {
-              contents.push(content)
-            }
-          }
-          Some(@agent_loop.AgentMessage::Assistant(contents))
-        }
-        _ => None
-      }
-    Some(Json::String("tool")) => {
-      let tool_call_id = match fields.get("tool_call_id") {
-        Some(Json::String(s)) => s
-        _ => return None
-      }
-      let tool_name = match fields.get("name") {
-        Some(Json::String(s)) => s
-        _ => return None
-      }
-      let content = match fields.get("content") {
-        Some(Json::Array(items)) => {
-          let cs = []
-          for item in items {
-            if parse_input_content(item) is Some(c) {
-              cs.push(c)
-            }
-          }
-          cs
-        }
-        _ => return None
-      }
-      Some(
-        @agent_loop.AgentMessage::ToolResult({
-          tool_call_id,
-          tool_name,
-          content,
-          is_error: false,
-          timestamp: 0,
-          terminate: false,
-        }),
-      )
-    }
-    _ => None
-  }
-}
-
-///|
-fn parse_input_content(json : Json) -> @agent_loop.InputMessageContent? {
-  guard json is Json::Object(fields) else { return None }
-  match fields.get("type") {
-    Some(Json::String("text")) =>
-      match fields.get("text") {
-        Some(Json::String(text)) =>
-          Some(@agent_loop.InputMessageContent::Text(text))
-        _ => None
-      }
-    _ => None
-  }
-}
-
-///|
-fn parse_assistant_content(json : Json) -> @agent_loop.AssistantMessageContent? {
-  guard json is Json::Object(fields) else { return None }
-  let signature = match fields.get("signature") {
-    Some(value) => value
-    None => Json::empty_object()
-  }
-  match fields.get("type") {
-    Some(Json::String("text")) =>
-      match fields.get("text") {
-        Some(Json::String(text)) =>
-          Some(@agent_loop.AssistantMessageContent::Text(text, signature~))
-        _ => None
-      }
-    Some(Json::String("thinking")) =>
-      match fields.get("thinking") {
-        Some(Json::String(text)) =>
-          Some(@agent_loop.AssistantMessageContent::Thinking(text, signature~))
-        _ => None
-      }
-    Some(Json::String("tool_call")) => {
-      let id = match fields.get("id") {
-        Some(Json::String(s)) => s
-        _ => return None
-      }
-      let name = match fields.get("name") {
-        Some(Json::String(s)) => s
-        _ => return None
-      }
-      let arguments = match fields.get("arguments") {
-        Some(value) => value
-        None => Json::empty_object()
-      }
-      Some(
-        @agent_loop.AssistantMessageContent::ToolCall(
-          { id, name, arguments },
-          signature~,
-        ),
-      )
-    }
-    Some(Json::String("hosted_tool_call")) =>
-      Some(
-        @agent_loop.AssistantMessageContent::HostedToolCall(
-          @agent_loop.HostedTool::WebSearch,
-          signature~,
-        ),
-      )
-    _ => None
-  }
 }

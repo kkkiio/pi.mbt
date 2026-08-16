@@ -34,6 +34,36 @@ pub impl ToJson for SessionEntry with fn to_json(self) -> Json {
 }
 
 ///|
+pub impl FromJson for SessionEntry with fn from_json(json, path) {
+  match json {
+    {
+      "id": String(id),
+      "timestamp": String(ts),
+      "content": Object(content_fields),
+      ..
+    } => {
+      let timestamp = @string.parse_uint64(ts) catch {
+        _ => decode_error(path, "SessionEntry::from_json: invalid timestamp")
+      }
+      {
+        id,
+        timestamp,
+        content: parse_session_entry_content(
+          content_fields,
+          path.add_key("content"),
+        ),
+      }
+    }
+    _ => decode_error(path, "SessionEntry::from_json: invalid shape")
+  }
+}
+
+///|
+fn[T] decode_error(path : @json.JsonPath, msg : String) -> T raise @json.JsonDecodeError {
+  raise @json.JsonDecodeError((path, msg))
+}
+
+///|
 fn session_entry_content_to_json(content : SessionEntryContent) -> Json {
   match content {
     Message(message) =>
@@ -115,6 +145,108 @@ fn assistant_content_to_json(
 fn hosted_tool_to_json(tool : @agent_loop.HostedTool) -> Json {
   match tool {
     WebSearch => "web_search"
+  }
+}
+
+///|
+fn parse_session_entry_content(
+  fields : Map[String, Json],
+  path : @json.JsonPath,
+) -> SessionEntryContent raise @json.JsonDecodeError {
+  match fields {
+    { "type": "message", "message": message_json, .. } =>
+      Message(parse_agent_message(message_json, path.add_key("message")))
+    { "type": "model_change", "provider": String(provider), "model_id": String(model_id), .. } =>
+      ModelChanage(provider~, model_id~)
+    { "type": "compaction", .. } => Compaction
+    { "type": "custom_message", .. } => CustomMessage
+    _ => decode_error(path, "unknown content type")
+  }
+}
+
+///|
+fn parse_agent_message(json : Json, path : @json.JsonPath) -> @agent_loop.AgentMessage raise @json.JsonDecodeError {
+  match json {
+    { "role": "user", "content": Array(items), .. } => {
+      let contents = []
+      for i, item in items {
+        contents.push(
+          parse_input_content(item, path.add_key("content").add_index(i)),
+        )
+      }
+      User(contents)
+    }
+    { "role": "assistant", "content": Array(items), .. } => {
+      let contents = []
+      for i, item in items {
+        contents.push(
+          parse_assistant_content(
+            item,
+            path.add_key("content").add_index(i),
+          ),
+        )
+      }
+      Assistant(contents)
+    }
+    {
+      "role": "tool",
+      "tool_call_id": String(tool_call_id),
+      "name": String(tool_name),
+      "content": Array(items),
+      ..
+    } => {
+      let content = []
+      for i, item in items {
+        content.push(
+          parse_input_content(item, path.add_key("content").add_index(i)),
+        )
+      }
+      ToolResult(
+        {
+          tool_call_id,
+          tool_name,
+          content,
+          is_error: false,
+          timestamp: 0,
+          terminate: false,
+        },
+      )
+    }
+    _ => decode_error(path, "AgentMessage: invalid shape")
+  }
+}
+
+///|
+fn parse_input_content(json : Json, path : @json.JsonPath) -> @agent_loop.InputMessageContent raise @json.JsonDecodeError {
+  match json {
+    { "type": "text", "text": String(text), .. } => Text(text)
+    _ => decode_error(path, "InputMessageContent: invalid shape")
+  }
+}
+
+///|
+fn parse_assistant_content(
+  json : Json,
+  path : @json.JsonPath,
+) -> @agent_loop.AssistantMessageContent raise @json.JsonDecodeError {
+  let signature = match json {
+    { "signature": sig, .. } => sig
+    _ => Json::empty_object()
+  }
+  match json {
+    { "type": "text", "text": String(text), .. } => Text(text, signature~)
+    { "type": "thinking", "thinking": String(text), .. } =>
+      Thinking(text, signature~)
+    { "type": "tool_call", "id": String(id), "name": String(name), .. } => {
+      let arguments = match json {
+        { "arguments": args, .. } => args
+        _ => Json::empty_object()
+      }
+      ToolCall({ id, name, arguments }, signature~)
+    }
+    { "type": "hosted_tool_call", .. } =>
+      HostedToolCall(@agent_loop.HostedTool::WebSearch, signature~)
+    _ => decode_error(path, "AssistantMessageContent: invalid shape")
   }
 }
 
