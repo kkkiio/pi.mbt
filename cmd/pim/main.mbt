@@ -1,7 +1,19 @@
 ///|
 async fn main {
   let matches = @argparse.parse(
-    Command("pim", options=[OptionArg("print", short='p')]),
+    Command(
+      "pim",
+      options=[
+        OptionArg("print", short='p', about="prompt text"),
+        OptionArg(
+          "session_dir",
+          long="session-dir",
+          env="PIM_SESSION_DIR",
+          about="directory to store session JSONL files",
+        ),
+      ],
+    ),
+    env=@env.get_env_vars(),
   ) catch {
     err => arg_error("\{err}")
   }
@@ -15,9 +27,26 @@ async fn main {
   let llm = deepseek.new_llm("deepseek-v4-flash") catch {
     err => fatal("Error: \{clean_error_message("\{err}")}")
   }
+  let cwd = @env.current_dir().unwrap()
+  let session_dir = match matches.values.get("session_dir") {
+    Some(dirs) if dirs.length() > 0 => Some(dirs[0])
+    _ => None
+  }
+  let jsonl_journal = match session_dir {
+    Some(dir) => {
+      @fs.mkdir(dir, recursive=true)
+      let rand = @random.Rand::new()
+      let timestamp = @env.now().to_string()
+      let id = rand.uint64().to_string()
+      let path = "\{dir}/\{timestamp}_\{id}.jsonl"
+      Some(@coding_agent.JsonlSessionJournal::new(path~))
+    }
+    None => None
+  }
   let session = @coding_agent.new_coding_session(
     llm,
-    cwd=@env.current_dir().unwrap(),
+    cwd~,
+    journal?=jsonl_journal.map(v => v as &@agent_session.SessionJournal),
   )
   let mut last_message : @agent_loop.AgentMessage? = None
   session.subscribe(event => {
@@ -31,6 +60,9 @@ async fn main {
       content: [@agent_loop.InputMessageContent::Text(p)],
     }),
   )
+  if jsonl_journal is Some(journal) {
+    journal.close()
+  }
   guard last_message is Some(Assistant([_, ..] as reply)) else {
     fatal("no reply from agent")
   }
@@ -84,6 +116,7 @@ fn clean_error_message(error_text : String) -> String {
 
 ///|
 async fn write_stdout(message : String) -> Unit {
+  // pi 的 print mode 对每段文本输出带尾部换行(`writeRawStdout`),这里对齐。
   @stdio.stdout.write("\{message}\n") catch {
     e => fatal("failed to write stdout: \{e}")
   }

@@ -2,7 +2,7 @@
 using @agent_loop {type AgentMessage}
 
 ///|
-pub trait SessionJournal {
+pub(open) trait SessionJournal {
   async fn persist(Self, ArrayView[SessionEntry]) -> Unit
   async fn fetch_entries(Self) -> ArrayView[SessionEntry]
   fn generate_id(Self) -> String
@@ -17,7 +17,7 @@ pub(all) struct SessionEntry {
 }
 
 ///|
-pub enum SessionEntryContent {
+pub(all) enum SessionEntryContent {
   Message(AgentMessage)
   ModelChanage(provider~ : String, model_id~ : String)
   Compaction

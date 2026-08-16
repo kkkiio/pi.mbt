@@ -75,7 +75,7 @@ pub fn OutputAccumulator::OutputAccumulator(
   max_lines~ : Int,
   max_bytes~ : Int,
   max_rolling_bytes? : Int = @cmp.maximum(max_bytes * 2, 1),
-  temp_file_prefix? : String = "pi-output",
+  temp_file_prefix? : String = "pim-output",
 ) -> OutputAccumulator {
   {
     max_lines,

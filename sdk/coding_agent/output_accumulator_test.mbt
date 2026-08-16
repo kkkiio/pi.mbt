@@ -41,7 +41,7 @@ async test "output accumulator persists the original bytes after truncation" {
   let output = @coding_agent.OutputAccumulator(
     max_lines=10,
     max_bytes=4,
-    temp_file_prefix="pi-output-accumulator-test",
+    temp_file_prefix="pim-output-accumulator-test",
   )
   output.append(b"abc")
   output.append(b"def")

@@ -1,11 +1,14 @@
 import {
   "moonbitlang/async",
+  "moonbitlang/async/fs",
   "moonbitlang/async/stdio",
   "moonbitlang/core/argparse",
   "moonbitlang/core/env",
+  "moonbitlang/core/random",
   "KKKIIO/pi/sdk/coding_agent",
   "KKKIIO/pi/sdk/providers",
   "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/agent_session",
 }
 
 pkgtype(kind: "executable")
