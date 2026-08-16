@@ -2,8 +2,8 @@
 pub fn build_system_prompt(
   cwd~ : String,
   guidelines? : ArrayView[String] = [],
-  project_instructions? : ArrayView[(String, String)] = [],
-  skills? : ArrayView[(String, String, String)] = [],
+  project_context_files? : ArrayView[ProjectContextFile] = [],
+  skills? : ArrayView[Skill] = [],
 ) -> String {
   let builder = StringBuilder()
   builder <+
@@ -22,17 +22,17 @@ pub fn build_system_prompt(
     builder <+
       #|
   }
-  if project_instructions.length() > 0 {
+  if project_context_files.length() > 0 {
     builder <+
       #|<project_context>
       #|
       #|Project-specific instructions and guidelines:
       #|
-    for i in project_instructions {
+    for file in project_context_files {
       builder <+
-        $|<project_instructions path="\{i.0}">
+        $|<project_instructions path="\{file.path}">
         $|
-        $|\{i.1}
+        $|\{file.content}
         $|
         $|</project_instructions>
         $|
@@ -42,7 +42,6 @@ pub fn build_system_prompt(
       #|
       #|
   }
-  // TODO: support skills
   if skills.length() > 0 {
     builder <+
       #|<available_skills>
@@ -50,9 +49,9 @@ pub fn build_system_prompt(
     for skill in skills {
       builder <+
         $|  <skill>
-        $|    <name>\{escape(skill.0)}</name>
-        $|    <description>\{escape(skill.1)}</description>
-        $|    <location>\{escape(skill.2)}</location>
+        $|    <name>\{escape(skill.name)}</name>
+        $|    <description>\{escape(skill.description)}</description>
+        $|    <location>\{escape(skill.path)}</location>
         $|  </skill>
         $|
     }
