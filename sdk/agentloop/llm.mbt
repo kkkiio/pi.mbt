@@ -20,25 +20,37 @@ pub(all) enum AgentMessage {
 
 ///|
 pub(all) enum ToolDefinition {
-  WebSearch
+  Hosted(HostedTool)
   Function(FunctionTool)
-  Custom(FunctionTool)
 }
+
+///|
+pub(all) enum HostedTool {
+  WebSearch
+} derive(Debug)
 
 ///|
 pub(all) struct FunctionTool {
   name : String
   description : String
   parameters : Json
-  strict : Bool
+  constrained_sampling : ConstrainedSampling
 }
 
 ///|
-pub(all) struct CustomTool {
-  name : String
-  description : String
-  parameters : Json
-  strict : Bool
+pub(all) enum ConstrainedSampling {
+  JsonSchema(strict~ : Bool)
+  Grammar(
+    format~ : GrammarFormat,
+    definition~ : String,
+    input_property~ : String
+  )
+}
+
+///|
+pub(all) enum GrammarFormat {
+  Lark
+  Regex
 }
 
 ///|
@@ -53,7 +65,7 @@ pub struct ToolResultMessage {
   tool_name : String
   content : Array[InputMessageContent]
   is_error : Bool
-  timestamp : Int
+  timestamp : UInt64
   /// Whether the tool wants to exit the agent loop, like yielding control back to the user or system. For example, a ui tool may want to exit the loop and wait for user input before continuing.
   terminate : Bool
 }
@@ -129,7 +141,7 @@ pub(all) enum AssistantMessageContent {
   Text(String, signature~ : Json)
   Thinking(String, signature~ : Json)
   ToolCall(ToolCall, signature~ : Json)
-  BuiltinToolCall(String, signature~ : Json)
+  HostedToolCall(HostedTool, signature~ : Json)
 } derive(Debug)
 
 ///|

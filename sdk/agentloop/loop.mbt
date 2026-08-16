@@ -8,18 +8,17 @@ pub async fn run_agent_loop(
   prompts : ArrayView[UserMessage],
   tool_executor~ : async (ToolCall, ToolExecUpdateSink) -> ToolResult,
   steer_channel? : () -> ArrayView[UserMessage] = fn() { [] },
-  event_sink? : (AgentEvent) -> Unit = fn(_) { () },
-  clock~ : () -> Int,
+  // TODO: support follow-up channel
+  event_sink? : async (AgentEvent) -> Unit = fn(_) { () },
 ) -> LoopStopReason {
-  event_sink(AgentEvent::AgentStart)
-  defer (fn() { event_sink(AgentEvent::AgentEnd(messages)) })()
   let mut pending_stream : &AssistantMessageEventStream? = None
   defer (fn() { if pending_stream is Some(stream) { stream.close() } })()
+  event_sink(AgentEvent::AgentStart)
   let mut pending_prompts = prompts
   if steer_channel() is ([_, ..] as steer_messages) {
     pending_prompts += steer_messages
   }
-  for ;; {
+  let reason : LoopStopReason = for ;; {
     event_sink(AgentEvent::TurnStart)
     for prompt in pending_prompts {
       messages.push(AgentMessage::User(prompt.content))
@@ -81,7 +80,7 @@ pub async fn run_agent_loop(
             continue
           }
           event_sink(AgentEvent::ToolExecutionStart(tool_call))
-          let call_timestamp = clock()
+          let call_timestamp = @env.now()
           let tool_result = if assistant_message.stop_reason is Length {
             ToolResultMessage::{
               tool_call_id: tool_call.id,
@@ -115,8 +114,8 @@ pub async fn run_agent_loop(
     pending_stream = None
     stream.close()
     match assistant_message.stop_reason {
-      Aborted => return Aborted
-      Error => return Error
+      Aborted => break Aborted
+      Error => break Error
       _ => ()
     }
     if tool_results.any(r => !r.terminate) {
@@ -126,8 +125,10 @@ pub async fn run_agent_loop(
     if pending_prompts.length() > 0 {
       continue
     }
-    return Stop
+    break Stop
   }
+  event_sink(AgentEvent::AgentEnd(messages))
+  reason
 }
 
 ///|

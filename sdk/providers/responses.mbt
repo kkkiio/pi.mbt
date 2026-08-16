@@ -2,6 +2,7 @@
 pub async fn[R : @io.Reader] read_responses_sse_stream(
   reader : R,
   out : @aqueue.Queue[@agentloop.AssistantMessageEvent],
+  custom_tool_input_properties? : Map[String, String] = Map([]),
 ) -> Unit {
   let idle_timeout_ms : Int = 120_000
   let data_lines : Array[StringView] = []
@@ -15,7 +16,9 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
       Some(Some(raw)) => {
         let trimmed = raw.trim()
         if trimmed.is_empty() {
-          if flush_sse_event(data_lines, out, acc, slots) {
+          if flush_sse_event(
+              data_lines, out, acc, slots, custom_tool_input_properties,
+            ) {
             break
           }
         } else {
@@ -26,7 +29,9 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
       Some(None) => "Responses stream ended before a terminal event"
       None => "Responses stream idle for \{idle_timeout_ms}ms"
     }
-    if flush_sse_event(data_lines, out, acc, slots) {
+    if flush_sse_event(
+        data_lines, out, acc, slots, custom_tool_input_properties,
+      ) {
       break
     }
     fail(reason)
@@ -38,13 +43,14 @@ priv enum ResponsesOutputSlot {
   Thinking(Int)
   Text(Int)
   FunctionCall(Int, String)
-  CustomToolCall(Int, String)
-  BuiltinToolCall(Int)
+  CustomToolCall(Int, String, String)
+  HostedToolCall(Int)
 }
 
 ///|
 fn encode_responses_input(context : @agentloop.Context) -> Array[Json] raise {
   let input : Array[Json] = []
+  let custom_call_ids : Map[String, Bool] = Map([])
   for message in context.messages {
     match message {
       User(contents) =>
@@ -96,7 +102,7 @@ fn encode_responses_input(context : @agentloop.Context) -> Array[Json] raise {
               input.push(item)
             }
             Thinking(_, signature~) => input.push(signature)
-            BuiltinToolCall(_, signature~) => input.push(signature)
+            HostedToolCall(_, signature~) => input.push(signature)
             ToolCall(call, signature~) => {
               guard signature
                 is { "type": String(signature_type), "id": String(item_id), .. } else {
@@ -111,9 +117,20 @@ fn encode_responses_input(context : @agentloop.Context) -> Array[Json] raise {
                   "arguments": call.arguments.stringify(),
                 })
               } else if signature_type == "custom_tool_call" {
-                guard call.arguments is { "input": String(custom_input), .. } else {
+                guard signature
+                  is { "input_property": String(input_property), .. } else {
+                  fail(
+                    "Responses custom tool-call signature is missing input_property",
+                  )
+                }
+                guard call.arguments is Json::Object(arguments) else {
+                  fail("Responses custom tool call requires object arguments")
+                }
+                guard arguments.get(input_property)
+                  is Some(String(custom_input)) else {
                   fail("Responses custom tool call is missing string input")
                 }
+                custom_call_ids[call.id] = true
                 input.push({
                   "type": "custom_tool_call",
                   "id": item_id,
@@ -130,12 +147,7 @@ fn encode_responses_input(context : @agentloop.Context) -> Array[Json] raise {
           }
         }
       ToolResult(result) => {
-        let is_custom = context.tools.any(tool => {
-          match tool {
-            Custom(definition) => definition.name == result.tool_name
-            _ => false
-          }
-        })
+        let is_custom = custom_call_ids.get(result.tool_call_id) == Some(true)
         input.push({
           "type": if is_custom {
             "custom_tool_call_output"
@@ -164,6 +176,7 @@ async fn flush_sse_event(
   out : @aqueue.Queue[@agentloop.AssistantMessageEvent],
   acc : Array[@agentloop.AssistantMessageContent],
   slots : Map[Int, ResponsesOutputSlot],
+  custom_tool_input_properties : Map[String, String],
 ) -> Bool {
   if data_lines.length() == 0 {
     return false
@@ -184,7 +197,14 @@ async fn flush_sse_event(
   guard (event, data.is_empty()) is (Some(event), false) else {
     fail("Malformed Responses SSE event")
   }
-  guard parse_sse_event(event, data.to_string(), acc, slots) is Some(evt) else {
+  guard parse_sse_event(
+      event,
+      data.to_string(),
+      acc,
+      slots,
+      custom_tool_input_properties~,
+    )
+    is Some(evt) else {
     return false
   }
   out.put(evt)
@@ -200,6 +220,7 @@ fn parse_sse_event(
   data : StringView,
   acc : Array[@agentloop.AssistantMessageContent],
   slots : Map[Int, ResponsesOutputSlot],
+  custom_tool_input_properties? : Map[String, String] = Map([]),
 ) -> @agentloop.AssistantMessageEvent? raise {
   let json = @json.parse(data)
   let partial = () => @agentloop.PartialAssistantMessage::{ content: acc }
@@ -282,27 +303,40 @@ fn parse_sse_event(
         }
         "custom_tool_call" => {
           let item : ResponseCustomToolCall = @json.from_json(item_json)
+          let input_property = custom_tool_input_properties
+            .get(item.name)
+            .unwrap_or("input")
+          let arguments : Map[String, String] = Map([])
+          arguments[input_property] = item.input
           acc.push(
             @agentloop.AssistantMessageContent::ToolCall(
               {
                 id: item.call_id,
                 name: item.name,
-                arguments: { "input": item.input },
+                arguments: @json.to_json(arguments),
               },
-              signature={ "type": "custom_tool_call", "id": item.id },
+              signature={
+                "type": "custom_tool_call",
+                "id": item.id,
+                "input_property": input_property,
+              },
             ),
           )
-          slots[output_index] = CustomToolCall(content_index, item.input)
+          slots[output_index] = CustomToolCall(
+            content_index,
+            item.input,
+            input_property,
+          )
           Some(@agentloop.ToolCallStart(content_index, partial()))
         }
         "web_search_call" => {
           acc.push(
-            @agentloop.AssistantMessageContent::BuiltinToolCall(
-              "web_search",
+            @agentloop.AssistantMessageContent::HostedToolCall(
+              @agentloop.HostedTool::WebSearch,
               signature=item_json,
             ),
           )
-          slots[output_index] = BuiltinToolCall(content_index)
+          slots[output_index] = HostedToolCall(content_index)
           None
         }
         _ => None
@@ -374,7 +408,7 @@ fn parse_sse_event(
       let output_index = payload.output_index
       let delta = payload.delta
       guard slots.get(output_index)
-        is Some(CustomToolCall(content_index, current)) else {
+        is Some(CustomToolCall(content_index, current, input_property)) else {
         return None
       }
       guard acc[content_index]
@@ -382,12 +416,14 @@ fn parse_sse_event(
         return None
       }
       let input = current + delta
-      slots[output_index] = CustomToolCall(content_index, input)
+      slots[output_index] = CustomToolCall(content_index, input, input_property)
+      let arguments : Map[String, String] = Map([])
+      arguments[input_property] = input
       acc[content_index] = @agentloop.AssistantMessageContent::ToolCall(
         {
           id: tool_call.id,
           name: tool_call.name,
-          arguments: { "input": input },
+          arguments: @json.to_json(arguments),
         },
         signature~,
       )
@@ -487,32 +523,41 @@ fn parse_sse_event(
             @agentloop.ToolCallEnd(content_index, final_tool_call, partial()),
           )
         }
-        ("custom_tool_call", Some(CustomToolCall(content_index, _))) => {
+        (
+          "custom_tool_call",
+          Some(CustomToolCall(content_index, _, input_property)),
+        ) => {
           let item : ResponseCustomToolCall = @json.from_json(item_json)
           guard acc[content_index]
             is @agentloop.AssistantMessageContent::ToolCall(tool_call, ..) else {
             fail("Custom tool call output slot has invalid content")
           }
+          let arguments : Map[String, String] = Map([])
+          arguments[input_property] = item.input
           let final_tool_call : @agentloop.ToolCall = {
             id: tool_call.id,
             name: tool_call.name,
-            arguments: { "input": item.input },
+            arguments: @json.to_json(arguments),
           }
           acc[content_index] = @agentloop.AssistantMessageContent::ToolCall(
             final_tool_call,
-            signature={ "type": "custom_tool_call", "id": item.id },
+            signature={
+              "type": "custom_tool_call",
+              "id": item.id,
+              "input_property": input_property,
+            },
           )
           slots.remove(output_index)
           Some(
             @agentloop.ToolCallEnd(content_index, final_tool_call, partial()),
           )
         }
-        ("web_search_call", Some(BuiltinToolCall(content_index))) => {
+        ("web_search_call", Some(HostedToolCall(content_index))) => {
           guard acc[content_index]
-            is @agentloop.AssistantMessageContent::BuiltinToolCall(name, ..) else {
+            is @agentloop.AssistantMessageContent::HostedToolCall(name, ..) else {
             fail("Web search output slot has invalid content")
           }
-          acc[content_index] = @agentloop.AssistantMessageContent::BuiltinToolCall(
+          acc[content_index] = @agentloop.AssistantMessageContent::HostedToolCall(
             name,
             signature=item_json,
           )
@@ -547,15 +592,12 @@ fn parse_sse_event(
                 break
               }
             }
-            @agentloop.AssistantMessageContent::BuiltinToolCall(
-              name,
-              signature~
-            ) => {
+            @agentloop.AssistantMessageContent::HostedToolCall(name, signature~) => {
               guard signature is { "id": String(signature_id), .. } else {
                 continue
               }
               if item_type == "web_search_call" && terminal_id == signature_id {
-                acc[index] = @agentloop.AssistantMessageContent::BuiltinToolCall(
+                acc[index] = @agentloop.AssistantMessageContent::HostedToolCall(
                   name,
                   signature=terminal_item,
                 )

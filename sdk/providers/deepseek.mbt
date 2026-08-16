@@ -3,17 +3,34 @@
 const BASE_URL = "https://api.deepseek.com"
 
 ///|
+struct DeepSeekProvider {}
+
+///|
+pub fn DeepSeekProvider::DeepSeekProvider() -> DeepSeekProvider {
+  DeepSeekProvider::{  }
+}
+
+///|
+pub impl LLMProvider for DeepSeekProvider with fn new_llm(self, model_id) {
+  ignore(self)
+  guard @env.get_env_var("DEEPSEEK_API_KEY") is Some(api_key) else {
+    fail("miss DEEPSEEK_API_KEY")
+  }
+  DeepSeekResponsesAPILLM(api_key, model_id~)
+}
+
+///|
 struct DeepSeekResponsesAPILLM {
   api_key : String
-  model : String
+  model_id : String
 }
 
 ///|
 pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(
   api_key : String,
-  model? : String = "deepseek-v4-flash",
+  model_id? : String = "deepseek-v4-flash",
 ) -> DeepSeekResponsesAPILLM {
-  { api_key, model }
+  { api_key, model_id }
 }
 
 ///|
@@ -24,7 +41,7 @@ pub impl @agentloop.LLM for DeepSeekResponsesAPILLM with fn generate(
   let q = @async.Queue(kind=@aqueue.Blocking(0))
   QueueStream::{
     q,
-    f: () => stream(self.api_key, self.model, context, q),
+    f: () => stream(self.api_key, self.model_id, context, q),
     task: None,
   }
 }
@@ -43,34 +60,47 @@ async fn stream(
   })
   defer client.close()
   let input = encode_responses_input(context)
+  let custom_tool_input_properties : Map[String, String] = Map([])
+  let tools : Array[Json] = []
+  for definition in context.tools {
+    match definition {
+      @agentloop.ToolDefinition::Hosted(WebSearch) =>
+        tools.push({ "type": "web_search" })
+      @agentloop.ToolDefinition::Function(tool) =>
+        match tool.constrained_sampling {
+          JsonSchema(strict~) =>
+            tools.push({
+              "type": "function",
+              "name": tool.name,
+              "description": tool.description,
+              "parameters": tool.parameters,
+              "strict": strict,
+            })
+          Grammar(format~, definition=grammar_definition, input_property~) => {
+            custom_tool_input_properties[tool.name] = input_property
+            tools.push({
+              "type": "custom",
+              "name": tool.name,
+              "description": tool.description,
+              "format": {
+                "type": "grammar",
+                "syntax": match format {
+                  Lark => "lark"
+                  Regex => "regex"
+                },
+                "definition": grammar_definition,
+              },
+            })
+          }
+        }
+    }
+  }
   let body : Json = {
     "model": model,
     "instructions": context.system_prompt,
     "stream": true,
     "reasoning": { "effort": "high" },
-    "tools": [
-      ..[
-        for f in context.tools => {
-          match f {
-            WebSearch => ({ "type": "web_search" } : Json)
-            Function(tool) =>
-              {
-                "type": "function",
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-                "strict": tool.strict,
-              }
-            Custom(tool) =>
-              {
-                "type": "custom",
-                "name": tool.name,
-                "description": tool.description,
-              }
-          }
-        }
-      ],
-    ],
+    "tools": tools,
     "tool_choice": "auto",
     "input": input,
   }
@@ -82,7 +112,7 @@ async fn stream(
     fail(message)
   }
 
-  read_responses_sse_stream(client, out)
+  read_responses_sse_stream(client, out, custom_tool_input_properties~)
 }
 
 ///|
