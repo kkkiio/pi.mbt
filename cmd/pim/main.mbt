@@ -1,15 +1,23 @@
 ///|
 async fn main {
   let matches = @argparse.parse(
-    Command("pim", options=[
-      OptionArg("print", short='p', about="prompt text"),
-      OptionArg(
-        "session_dir",
-        long="session-dir",
-        env="PIM_SESSION_DIR",
-        about="directory to store session JSONL files",
-      ),
-    ]),
+    Command(
+      "pim",
+      options=[
+        OptionArg("print", short='p', about="prompt text"),
+        OptionArg(
+          "session_dir",
+          long="session-dir",
+          env="PIM_SESSION_DIR",
+          about="directory to store session JSONL files",
+        ),
+        OptionArg(
+          "mode",
+          long="mode",
+          about="output mode: text or json (default text)",
+        ),
+      ],
+    ),
     env=@env.get_env_vars(),
   ) catch {
     err => arg_error("\{err}")
@@ -17,6 +25,10 @@ async fn main {
   let prompts = match matches.values {
     { "print": prompts, .. } => prompts
     _ => fatal("Error: only '-p' support for now")
+  }
+  let mode = match matches.values {
+    { "mode": [m, ..], .. } => m
+    _ => "text"
   }
   let deepseek = @providers.DeepSeekProvider()
   // provider 构造失败(如缺 DEEPSEEK_API_KEY)是诊断,按输出流契约走 stderr;
@@ -54,32 +66,157 @@ async fn main {
   defer cleanup()
   let session = @coding_agent.new_coding_session(llm, cwd~, journal~)
   let mut last_message : @agent_loop.AgentMessage? = None
-  session.subscribe(event => {
-    match event {
-      MessageEnd(m) => last_message = Some(m)
-      _ => ()
-    }
-  })
+  if mode == "json" {
+    // JSONL 模式:每个 AgentEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。
+    session.subscribe(event => {
+      write_stdout(agent_event_to_json(event).stringify())
+    })
+  } else {
+    session.subscribe(event => {
+      match event {
+        MessageEnd(m) => last_message = Some(m)
+        _ => ()
+      }
+    })
+  }
   session.prompt(
     prompts.map(p => @agent_loop.UserMessage::{
       content: [@agent_loop.InputMessageContent::Text(p)],
     }),
   )
-  guard last_message is Some(Assistant({ content: [_, ..] as reply, .. })) else {
-    fatal("no reply from agent")
-  }
-  let output = StringBuilder()
-  for content in reply {
-    match content {
-      Text(text, ..) => output.write_string(text)
-      ToolCall(_, ..) => fatal("unexpected tool call in reply")
-      Thinking(_, ..) => ()
-      HostedToolCall(WebSearch, ..) =>
-        fatal("unexpected hosted tool call in reply")
+  if mode != "json" {
+    guard last_message
+      is Some(Assistant({ content: [_, ..] as reply, .. })) else {
+      fatal("no reply from agent")
     }
+    let output = StringBuilder()
+    for content in reply {
+      match content {
+        Text(text, ..) => output.write_string(text)
+        ToolCall(_, ..) => fatal("unexpected tool call in reply")
+        Thinking(_, ..) => ()
+        HostedToolCall(WebSearch, ..) =>
+          fatal("unexpected hosted tool call in reply")
+      }
+    }
+    write_stdout(output.to_string())
   }
-  write_stdout(output.to_string())
 }
+
+///|
+/// 把 AgentEvent 投影成 JSONL 事件(对齐 pi `--mode json` 的事件形状)。
+fn agent_event_to_json(event : @agent_loop.AgentEvent) -> Json {
+  match event {
+    AgentStart => { "type": "agent_start" }
+    TurnStart => { "type": "turn_start" }
+    MessageStart(message) =>
+      { "type": "message_start", "message": agent_message_to_json(message) }
+    MessageUpdate(message) =>
+      { "type": "message_update", "message": agent_message_to_json(message) }
+    MessageEnd(message) =>
+      { "type": "message_end", "message": agent_message_to_json(message) }
+    ToolExecutionStart(call) =>
+      {
+        "type": "tool_execution_start",
+        "toolName": call.name,
+        "args": call.arguments,
+      }
+    ToolExecutionEnd(result) =>
+      {
+        "type": "tool_execution_end",
+        "toolName": result.tool_name,
+        "content": [
+          for c in result.content => input_content_to_json(c)
+        ],
+        "isError": result.is_error,
+      }
+    TurnEnd(assistant_message, tool_results) =>
+      {
+        "type": "turn_end",
+        "message": assistant_message_to_json(assistant_message),
+        "toolCalls": [for r in tool_results => r.tool_name],
+      }
+    AgentEnd(_) => { "type": "agent_end" }
+  }
+}
+
+///|
+fn agent_message_to_json(message : @agent_loop.AgentMessage) -> Json {
+  match message {
+    User(contents) =>
+      {
+        "role": "user",
+        "content": [for c in contents => input_content_to_json(c)],
+      }
+    Assistant(contents) =>
+      {
+        "role": "assistant",
+        "content": [
+          for c in contents => assistant_content_to_json(c)
+        ],
+      }
+    ToolResult(result) =>
+      {
+        "role": "tool",
+        "toolName": result.tool_name,
+        "content": [for c in result.content => input_content_to_json(c)],
+        "isError": result.is_error,
+      }
+  }
+}
+
+///|
+fn assistant_message_to_json(message : @agent_loop.AssistantMessage) -> Json {
+  let error_message : Json = match message.error_message {
+    Some(message) => Json::string(message)
+    None => Json::null()
+  }
+  {
+    "content": [for c in message.content => assistant_content_to_json(c)],
+    "stop_reason": stop_reason_to_string(message.stop_reason),
+    "error_message": error_message,
+  }
+}
+
+///|
+fn assistant_content_to_json(content : @agent_loop.AssistantMessageContent) -> Json {
+  match content {
+    Text(text, signature~) =>
+      { "type": "text", "text": text, "signature": signature }
+    Thinking(text, signature~) =>
+      { "type": "thinking", "text": text, "signature": signature }
+    ToolCall(call, signature~) =>
+      {
+        "type": "tool_call",
+        "id": call.id,
+        "name": call.name,
+        "arguments": call.arguments,
+        "signature": signature,
+      }
+    HostedToolCall(WebSearch, signature~) =>
+      { "type": "web_search_call", "signature": signature }
+  }
+}
+
+///|
+fn input_content_to_json(content : @agent_loop.InputMessageContent) -> Json {
+  match content {
+    Text(text) => { "type": "text", "text": text }
+    Image(_) => { "type": "image" }
+  }
+}
+
+///|
+fn stop_reason_to_string(reason : @agent_loop.StopReason) -> String {
+  match reason {
+    Stop => "stop"
+    Length => "length"
+    ToolUse => "toolUse"
+    Aborted => "aborted"
+    Error => "error"
+  }
+}
+
 
 ///|
 /// 把 argparse 错误按 pi 风格输出到 stderr 并退出：
