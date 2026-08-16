@@ -1,0 +1,6 @@
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "moonbitlang/core/cmp",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/encoding/utf8",
+}

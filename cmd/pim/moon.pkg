@@ -1,0 +1,13 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/stdio",
+  "moonbitlang/core/argparse",
+  "moonbitlang/core/env",
+  "KKKIIO/pi/sdk/coding_agent",
+  "KKKIIO/pi/sdk/providers",
+  "KKKIIO/pi/sdk/agent_loop",
+}
+
+pkgtype(kind: "executable")
+
+supported_targets = "+native"
