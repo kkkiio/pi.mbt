@@ -1,91 +1,120 @@
 ///|
-async test "JsonlSessionJournal writes a session header line" {
-  let temp_dir = @fs.tmpdir(prefix="pim-jsonl-session-journal-test-")
-  let path = "\{temp_dir}/journal.jsonl"
-  let journal = @coding_agent.JsonlSessionJournal::new(path~)
-  journal.close()
-  let content = @fs.read_file(path).text()
-  let lines = content.split("\n").to_array().filter(fn(line) {
-    line.length() > 0
-  })
-  inspect(lines.length(), content="1")
-  let header = @json.parse(lines[0])
-  guard header is Json::Object(fields) else { fail("header should be object") }
-  guard fields.get("type") is Some(Json::String("session")) else {
-    fail("header type should be session")
-  }
-  guard fields.get("version") is Some(Json::Number(1, ..)) else {
-    fail("header version should be 1")
-  }
-  guard fields.get("id") is Some(Json::String(_)) else { fail("header id should be string") }
-  guard fields.get("cwd") is Some(Json::String(_)) else { fail("header cwd should be string") }
-  @fs.remove(path)
-  @fs.rmdir(temp_dir)
+/// A test-only `@io.Writer` that accumulates bytes in a `@buffer.Buffer`.
+/// Used instead of a real file so tests can snapshot the written JSONL.
+struct BufferWriter {
+  buf : @buffer.Buffer
 }
 
 ///|
-async test "JsonlSessionJournal round-trips model change entries" {
-  let temp_dir = @fs.tmpdir(prefix="pim-jsonl-session-journal-test-")
-  let path = "\{temp_dir}/journal.jsonl"
-  let journal = @coding_agent.JsonlSessionJournal::new(path~)
-  let entry : @agent_session.SessionEntry = {
-    id: journal.generate_id(),
-    timestamp: 42,
-    content: @agent_session.SessionEntryContent::ModelChanage(
-      provider="deepseek",
-      model_id="deepseek-v4-flash",
-    ),
-  }
-  journal.persist([entry])
-  journal.close()
-  let entries = journal.fetch_entries()
-  inspect(entries.length(), content="1")
-  guard entries[0].content is ModelChanage(provider="deepseek", model_id="deepseek-v4-flash") else {
-    fail("expected model change entry")
-  }
-  @fs.remove(path)
-  @fs.rmdir(temp_dir)
+pub fn BufferWriter::BufferWriter() -> BufferWriter {
+  { buf: @buffer.Buffer::Buffer() }
 }
 
 ///|
-async test "JsonlSessionJournal round-trips user message entries" {
-  let temp_dir = @fs.tmpdir(prefix="pim-jsonl-session-journal-test-")
-  let path = "\{temp_dir}/journal.jsonl"
-  let journal = @coding_agent.JsonlSessionJournal::new(path~)
-  let user_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::User(
-    [@agent_loop.InputMessageContent::Text("hello")],
+pub impl @io.Writer for BufferWriter with fn write_once(
+  self : BufferWriter,
+  bytes : Bytes,
+  offset~ : Int,
+  len~ : Int,
+) -> Int {
+  self.buf.write_bytes(bytes[offset:offset + len])
+  len
+}
+
+///|
+fn writer_text(writer : BufferWriter) -> String {
+  @utf8.decode_lossy(writer.buf.to_bytes())
+}
+
+///|
+async test "persists various entries in memory and as JSONL" {
+  let writer = BufferWriter::BufferWriter()
+  let preloaded : @agent_session.SessionEntry = {
+    id: "e0",
+    timestamp: 0,
+    content: @agent_session.SessionEntryContent::Compaction,
+  }
+  let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
+    writer,
+    entries=[preloaded],
+    rand=@random.Rand::chacha8(),
+    cwd="/workspaces/pi.mbt",
+    now=1786903823973,
   )
-  let entry : @agent_session.SessionEntry = {
-    id: journal.generate_id(),
-    timestamp: 42,
-    content: @agent_session.SessionEntryContent::Message(user_message),
-  }
-  journal.persist([entry])
-  journal.close()
-  let entries = journal.fetch_entries()
-  inspect(entries.length(), content="1")
-  guard entries[0].content is Message(@agent_loop.AgentMessage::User(contents)) else {
-    fail("expected user message entry")
-  }
-  inspect(contents.length(), content="1")
-  guard contents[0] is @agent_loop.InputMessageContent::Text("hello") else {
-    fail("expected text content")
-  }
-  @fs.remove(path)
-  @fs.rmdir(temp_dir)
+
+  let user_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::User([
+    @agent_loop.InputMessageContent::Text("hello"),
+  ])
+  journal.persist([
+    {
+      id: "e1",
+      timestamp: 1,
+      content: @agent_session.SessionEntryContent::ModelChanage(
+        provider="deepseek",
+        model_id="v4",
+      ),
+    },
+    {
+      id: "e2",
+      timestamp: 2,
+      content: @agent_session.SessionEntryContent::Message(user_message),
+    },
+  ])
+
+  // In-memory entries include the preloaded one plus the two persisted ones.
+  json_inspect(journal.get_entries(), content=[
+    { "id": "e0", "timestamp": "0", "content": { "type": "compaction" } },
+    {
+      "id": "e1",
+      "timestamp": "1",
+      "content": {
+        "type": "model_change",
+        "provider": "deepseek",
+        "model_id": "v4",
+      },
+    },
+    {
+      "id": "e2",
+      "timestamp": "2",
+      "content": {
+        "type": "message",
+        "message": {
+          "role": "user",
+          "content": [{ "type": "text", "text": "hello" }],
+        },
+      },
+    },
+  ])
+
+  // The writer received the header plus one line per entry.
+  inspect(
+    writer_text(writer),
+    content=(
+      #|{"type":"session","version":1,"id":"13219109","createdAt":"1786903823973","cwd":"/workspaces/pi.mbt"}
+      #|{"id":"e1","timestamp":"1","content":{"type":"model_change","provider":"deepseek","model_id":"v4"}}
+      #|{"id":"e2","timestamp":"2","content":{"type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}}
+      #|
+    ),
+  )
 }
 
 ///|
-async test "JsonlSessionJournal becomes no-op after close" {
+async test "fetch_entries reads persisted entries from disk" {
   let temp_dir = @fs.tmpdir(prefix="pim-jsonl-session-journal-test-")
   let path = "\{temp_dir}/journal.jsonl"
-  let journal = @coding_agent.JsonlSessionJournal::new(path~)
-  journal.close()
-  // After close the file should only contain the header.
-  let before = @fs.read_file(path).text()
-  journal.close()
-  let after = @fs.read_file(path).text()
-  inspect(after, content=before)
+  let file = @fs.create(path, allow_existing=true)
+  let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(file)
+  let entry : @agent_session.SessionEntry = {
+    id: "disk1",
+    timestamp: 7,
+    content: @agent_session.SessionEntryContent::Compaction,
+  }
+  journal.persist([entry])
+  file.close()
+
+  let entries = @coding_agent.fetch_entries(path)
+  inspect(entries.length(), content="1")
+  inspect(entries[0].id, content="disk1")
   @fs.remove(path)
   @fs.rmdir(temp_dir)
 }

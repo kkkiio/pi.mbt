@@ -6,184 +6,69 @@
 /// `pi` session journals: a header plus a stream of append-only records.
 
 ///|
-pub struct JsonlSessionJournal {
-  path : String
-  mut file : @fs.File?
+pub struct JsonlSessionJournal[W] {
+  writer : W
+  entries : Array[@agent_session.SessionEntry]
   ids : Set[String]
   rand : @random.Rand
 }
 
 ///|
-/// Create a new JSONL session journal at `path`. The file is truncated if it
-/// already exists. A session header line is written immediately.
-pub async fn JsonlSessionJournal::new(path~ : String) -> JsonlSessionJournal {
-  let file = @fs.create(path, allow_existing=true)
-  let journal = { path, file: Some(file), ids: Set([]), rand: @random.Rand::new() }
-  journal.write_header()
-  journal
+/// Create a new JSONL session journal that writes to the given `writer`.
+/// A session header line is written immediately. The caller is responsible for
+/// any parent directories, filename choice, and closing `writer` when done.
+pub async fn[W : @io.Writer] JsonlSessionJournal::JsonlSessionJournal(
+  writer : W,
+  entries? : Array[@agent_session.SessionEntry] = [],
+  rand? : @random.Rand = @random.Rand::new(),
+  cwd? : String = @env.current_dir().unwrap_or(""),
+  now? : UInt64 = @env.now(),
+) -> JsonlSessionJournal[W] {
+  let ids = Set([])
+  writer.write(
+    (
+      {
+        "type": "session",
+        "version": 1,
+        "id": make_id(rand, ids),
+        "createdAt": now,
+        "cwd": cwd,
+      } : Json).stringify(),
+  )
+  writer.write("\n")
+  { writer, entries, ids, rand }
 }
 
 ///|
-/// Close the underlying file. Subsequent `persist` calls become no-ops for the
-/// file.
-pub fn JsonlSessionJournal::close(self : JsonlSessionJournal) -> Unit {
-  if self.file is Some(file) {
-    file.close()
-    self.file = None
-  }
-}
-
-///|
-async fn JsonlSessionJournal::write_header(self : JsonlSessionJournal) -> Unit {
-  guard self.file is Some(file) else { return }
-  let header : Json = {
-    "type": "session",
-    "version": 1,
-    "id": self.make_id(),
-    "createdAt": @env.now().to_string(),
-    "cwd": @env.current_dir().unwrap_or(""),
-  }
-  file.write(header.stringify())
-  file.write("\n")
-}
-
-///|
-fn JsonlSessionJournal::make_id(self : JsonlSessionJournal) -> String {
+fn make_id(rand : @random.Rand, ids : Set[String]) -> String {
   for _ in 0..<100 {
-    let id = self.rand.uint64().to_string()[:8].to_owned()
-    if !self.ids.contains(id) {
+    let id = rand.uint64().to_string()[:8].to_owned()
+    if !ids.contains(id) {
       return id
     }
   }
-  self.rand.uint64().to_string()[:8].to_owned()
+  rand.uint64().to_string()[:8].to_owned()
 }
 
 ///|
-fn entry_to_json(entry : @agent_session.SessionEntry) -> Json {
-  {
-    "id": entry.id,
-    "timestamp": entry.timestamp.to_string(),
-    "content": session_entry_content_to_json(entry.content),
-  }
-}
-
-///|
-fn session_entry_content_to_json(
-  content : @agent_session.SessionEntryContent,
-) -> Json {
-  match content {
-    Message(message) => {
-      "type": "message",
-      "message": agent_message_to_json(message),
-    }
-    ModelChanage(provider~, model_id~) => {
-      "type": "model_change",
-      "provider": provider,
-      "model_id": model_id,
-    }
-    Compaction => { "type": "compaction" }
-    CustomMessage => { "type": "custom_message" }
-  }
-}
-
-///|
-fn agent_message_to_json(message : @agent_loop.AgentMessage) -> Json {
-  match message {
-    User(contents) => {
-      let cs : Array[Json] = []
-      for content in contents {
-        cs.push(input_content_to_json(content))
-      }
-      { "role": "user", "content": cs }
-    }
-    Assistant(contents) => {
-      let cs : Array[Json] = []
-      for content in contents {
-        cs.push(assistant_content_to_json(content))
-      }
-      { "role": "assistant", "content": cs }
-    }
-    ToolResult(result) => {
-      let cs : Array[Json] = []
-      for content in result.content {
-        cs.push(input_content_to_json(content))
-      }
-      {
-        "role": "tool",
-        "tool_call_id": result.tool_call_id,
-        "name": result.tool_name,
-        "content": cs,
-      }
-    }
-  }
-}
-
-///|
-fn input_content_to_json(content : @agent_loop.InputMessageContent) -> Json {
-  match content {
-    Text(text) => { "type": "text", "text": text }
-    Image(bytes) => { "type": "image", "length": bytes.length() }
-  }
-}
-
-///|
-fn assistant_content_to_json(
-  content : @agent_loop.AssistantMessageContent,
-) -> Json {
-  match content {
-    Text(text, signature~) => {
-      "type": "text",
-      "text": text,
-      "signature": signature,
-    }
-    Thinking(text, signature~) => {
-      "type": "thinking",
-      "thinking": text,
-      "signature": signature,
-    }
-    ToolCall(tool_call, signature~) => {
-      "type": "tool_call",
-      "id": tool_call.id,
-      "name": tool_call.name,
-      "arguments": tool_call.arguments,
-      "signature": signature,
-    }
-    HostedToolCall(tool, signature~) => {
-      "type": "hosted_tool_call",
-      "tool": hosted_tool_to_json(tool),
-      "signature": signature,
-    }
-  }
-}
-
-///|
-fn hosted_tool_to_json(tool : @agent_loop.HostedTool) -> Json {
-  match tool {
-    WebSearch => "web_search"
-  }
-}
-
-///|
-pub impl @agent_session.SessionJournal for JsonlSessionJournal with fn persist(
-  self : JsonlSessionJournal,
-  entries,
-) {
-  guard self.file is Some(file) else { return }
+pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
+  W,
+] with fn persist(self, entries) {
   for entry in entries {
     self.ids.add(entry.id)
-    file.write(entry_to_json(entry).stringify())
-    file.write("\n")
+    self.entries.push(entry)
+    self.writer.write(ToJson::to_json(entry).stringify())
+    self.writer.write("\n")
   }
 }
 
 ///|
-pub impl @agent_session.SessionJournal for JsonlSessionJournal with fn fetch_entries(
-  self : JsonlSessionJournal,
-) {
-  let content = @fs.read_file(self.path).text()
-  let lines = content.split("\n").to_array().filter(fn(line) {
-    line.length() > 0
-  })
+pub async fn fetch_entries(path : String) -> Array[@agent_session.SessionEntry] {
+  let content = @fs.read_file(path).text()
+  let lines = content
+    .split("\n")
+    .to_array()
+    .filter(fn(line) { line.length() > 0 })
   let entries = []
   for i = 1; i < lines.length(); i = i + 1 {
     let json = @json.parse(lines[i])
@@ -196,10 +81,17 @@ pub impl @agent_session.SessionJournal for JsonlSessionJournal with fn fetch_ent
 }
 
 ///|
-pub impl @agent_session.SessionJournal for JsonlSessionJournal with fn generate_id(
-  self : JsonlSessionJournal,
-) -> String {
-  self.make_id()
+pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
+  W,
+] with fn get_entries(self : JsonlSessionJournal[W]) {
+  self.entries
+}
+
+///|
+pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
+  W,
+] with fn generate_id(self) -> String {
+  make_id(self.rand, self.ids)
 }
 
 ///|
@@ -212,11 +104,7 @@ fn parse_entry(fields : Map[String, Json]) -> @agent_session.SessionEntry? {
     Some(Json::String(s)) => s
     _ => return None
   }
-  let timestamp = try {
-    @string.parse_uint64(s)
-  } catch {
-    _ => return None
-  }
+  let timestamp = @string.parse_uint64(s) catch { _ => return None }
   let content = match fields.get("content") {
     Some(Json::Object(content_fields)) => content_fields
     _ => return None
@@ -230,7 +118,7 @@ fn parse_entry(fields : Map[String, Json]) -> @agent_session.SessionEntry? {
 
 ///|
 fn parse_session_entry_content(
-  fields : Map[String, Json]
+  fields : Map[String, Json],
 ) -> @agent_session.SessionEntryContent? {
   match fields.get("type") {
     Some(Json::String("message")) =>
@@ -253,10 +141,7 @@ fn parse_session_entry_content(
         _ => return None
       }
       Some(
-        @agent_session.SessionEntryContent::ModelChanage(
-          provider~,
-          model_id~,
-        ),
+        @agent_session.SessionEntryContent::ModelChanage(provider~, model_id~),
       )
     }
     Some(Json::String("compaction")) =>
@@ -334,9 +219,7 @@ fn parse_agent_message(json : Json) -> @agent_loop.AgentMessage? {
 }
 
 ///|
-fn parse_input_content(
-  json : Json
-) -> @agent_loop.InputMessageContent? {
+fn parse_input_content(json : Json) -> @agent_loop.InputMessageContent? {
   guard json is Json::Object(fields) else { return None }
   match fields.get("type") {
     Some(Json::String("text")) =>
@@ -350,9 +233,7 @@ fn parse_input_content(
 }
 
 ///|
-fn parse_assistant_content(
-  json : Json
-) -> @agent_loop.AssistantMessageContent? {
+fn parse_assistant_content(json : Json) -> @agent_loop.AssistantMessageContent? {
   guard json is Json::Object(fields) else { return None }
   let signature = match fields.get("signature") {
     Some(value) => value

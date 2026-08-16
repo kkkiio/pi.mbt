@@ -21,7 +21,14 @@ pub fn AgentSession::AgentSession(
     fanout: FanOutListener::FanOutListener(),
     llm,
     system_prompt,
-    message_buffer: [],
+    message_buffer: journal
+    .get_entries()
+    .filter_map(e => {
+      match e.content {
+        Message(m) => Some(m)
+        _ => None
+      }
+    }),
     active_run_exists: false,
   }
 }

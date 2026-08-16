@@ -1,18 +1,15 @@
 ///|
 async fn main {
   let matches = @argparse.parse(
-    Command(
-      "pim",
-      options=[
-        OptionArg("print", short='p', about="prompt text"),
-        OptionArg(
-          "session_dir",
-          long="session-dir",
-          env="PIM_SESSION_DIR",
-          about="directory to store session JSONL files",
-        ),
-      ],
-    ),
+    Command("pim", options=[
+      OptionArg("print", short='p', about="prompt text"),
+      OptionArg(
+        "session_dir",
+        long="session-dir",
+        env="PIM_SESSION_DIR",
+        about="directory to store session JSONL files",
+      ),
+    ]),
     env=@env.get_env_vars(),
   ) catch {
     err => arg_error("\{err}")
@@ -32,22 +29,24 @@ async fn main {
     Some(dirs) if dirs.length() > 0 => Some(dirs[0])
     _ => None
   }
-  let jsonl_journal = match session_dir {
+  let (journal, cleanup) = match session_dir {
     Some(dir) => {
       @fs.mkdir(dir, recursive=true)
       let rand = @random.Rand::new()
       let timestamp = @env.now().to_string()
       let id = rand.uint64().to_string()
       let path = "\{dir}/\{timestamp}_\{id}.jsonl"
-      Some(@coding_agent.JsonlSessionJournal::new(path~))
+      let file = @fs.create(path, allow_existing=true)
+      (
+        @coding_agent.JsonlSessionJournal::JsonlSessionJournal(file)
+        as &@agent_session.SessionJournal,
+        () => file.close(),
+      )
     }
-    None => None
+    None => (@agent_session.InMemorySessionJournal(), () => ())
   }
-  let session = @coding_agent.new_coding_session(
-    llm,
-    cwd~,
-    journal?=jsonl_journal.map(v => v as &@agent_session.SessionJournal),
-  )
+  defer cleanup()
+  let session = @coding_agent.new_coding_session(llm, cwd~, journal~)
   let mut last_message : @agent_loop.AgentMessage? = None
   session.subscribe(event => {
     match event {
@@ -60,9 +59,6 @@ async fn main {
       content: [@agent_loop.InputMessageContent::Text(p)],
     }),
   )
-  if jsonl_journal is Some(journal) {
-    journal.close()
-  }
   guard last_message is Some(Assistant([_, ..] as reply)) else {
     fatal("no reply from agent")
   }
