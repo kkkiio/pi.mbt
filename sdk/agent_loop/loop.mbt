@@ -11,8 +11,6 @@ pub async fn run_agent_loop(
   // TODO: support follow-up channel
   event_sink? : async (AgentEvent) -> Unit = fn(_) { () },
 ) -> LoopStopReason {
-  let mut pending_stream : &AssistantMessageEventStream? = None
-  defer (fn() { if pending_stream is Some(stream) { stream.close() } })()
   event_sink(AgentEvent::AgentStart)
   let mut pending_prompts = prompts
   if steer_channel() is ([_, ..] as steer_messages) {
@@ -25,50 +23,32 @@ pub async fn run_agent_loop(
       event_sink(AgentEvent::MessageStart(AgentMessage::User(prompt.content)))
     }
     pending_prompts = []
-    let stream = llm.generate({ system_prompt, messages, tools })
-    pending_stream = Some(stream)
-    let assistant_message : AssistantMessage = for ;; {
-      match stream.next() {
-        Start => ()
-        TextStart(_, partial)
-        | ThinkingStart(_, partial)
-        | ToolCallStart(_, partial) =>
-          event_sink(
-            AgentEvent::MessageStart(AgentMessage::Assistant(partial.content)),
-          )
-        TextDelta(_, _, partial)
-        | ThinkingDelta(_, _, partial)
-        | ToolCallDelta(_, _, partial) =>
-          event_sink(
-            AgentEvent::MessageUpdate(AgentMessage::Assistant(partial.content)),
-          )
-        TextEnd(_, _, partial)
-        | ThinkingEnd(_, _, partial)
-        | ToolCallEnd(_, _, partial) =>
-          event_sink(
-            AgentEvent::MessageEnd(AgentMessage::Assistant(partial.content)),
-          )
-        Done(reason, message) =>
-          break AssistantMessage::{
-            content: message.content,
-            stop_reason: match reason {
-              Stop => Stop
-              Length => Length
-              ToolUse => ToolUse
-            },
-            usage: None,
-          }
-        Error(reason, message) =>
-          break AssistantMessage::{
-            content: message.content,
-            stop_reason: match reason {
-              Aborted => Aborted
-              Error => Error
-            },
-            usage: None,
-          }
-      }
-    }
+    let assistant_message = llm.generate(
+      { system_prompt, messages, tools },
+      sink=event => {
+        match event {
+          Start => ()
+          TextStart(_, partial)
+          | ThinkingStart(_, partial)
+          | ToolCallStart(_, partial) =>
+            event_sink(
+              AgentEvent::MessageStart(AgentMessage::Assistant(partial.content)),
+            )
+          TextDelta(_, _, partial)
+          | ThinkingDelta(_, _, partial)
+          | ToolCallDelta(_, _, partial) =>
+            event_sink(
+              AgentEvent::MessageUpdate(AgentMessage::Assistant(partial.content)),
+            )
+          TextEnd(_, _, partial)
+          | ThinkingEnd(_, _, partial)
+          | ToolCallEnd(_, _, partial) =>
+            event_sink(
+              AgentEvent::MessageEnd(AgentMessage::Assistant(partial.content)),
+            )
+        }
+      },
+    )
     messages.push(AgentMessage::Assistant(assistant_message.content))
 
     let tool_results = []
@@ -111,8 +91,6 @@ pub async fn run_agent_loop(
     }
 
     event_sink(AgentEvent::TurnEnd(assistant_message, tool_results))
-    pending_stream = None
-    stream.close()
     match assistant_message.stop_reason {
       Aborted => break Aborted
       Error => break Error

@@ -28,24 +28,13 @@ async test "openai streaming example" {
     #| event: response.completed
     #| data: {"type":"response.completed","response":{"id":"resp_67c9fdcecf488190bdd9a0409de3a1ec07b8b0ad4e5eb654","object":"response","created_at":1741290958,"status":"completed","error":null,"incomplete_details":null,"instructions":"You are a helpful assistant.","max_output_tokens":null,"model":"gpt-5.4","output":[{"id":"msg_67c9fdcf37fc8190ba82116e33fb28c507b8b0ad4e5eb654","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Hi there! How can I assist you today?","annotations":[]}]}],"parallel_tool_calls":true,"previous_response_id":null,"reasoning":{"effort":null,"summary":null},"store":true,"temperature":1.0,"text":{"format":{"type":"text"}},"tool_choice":"auto","tools":[],"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":37,"output_tokens":11,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":48},"user":null,"metadata":{}}}
 
-  let q = @aqueue.Queue(kind=@aqueue.Blocking(0))
-  let messages = @async.with_task_group() <| group => {
-    let _ = group.spawn(() => {
-      read_responses_sse_stream(
-        @io.MemoryReader::MemoryReader() <| w => { w.write(response) },
-        q,
-      )
-    })
-    let messages = []
-    for ;; {
-      let event = q.get()
+  let messages = []
+  let final_message = read_responses_sse_stream(
+    @io.MemoryReader::MemoryReader() <| w => { w.write(response) },
+    sink=event => {
       messages.push(event)
-      match event {
-        Done(_) | Error(_) => break messages
-        _ => ()
-      }
-    }
-  }
+    },
+  )
   debug_inspect(
     messages,
     content=(
@@ -104,36 +93,37 @@ async test "openai streaming example" {
       #|        ]>,
       #|    },
       #|  ),
-      #|  Done(
-      #|    Stop,
-      #|    {
-      #|      content: [
-      #|        Text(
-      #|          "Hi there! How can I assist you today?",
-      #|          signature=Object(
-      #|            {
-      #|              "type": String("message"),
-      #|              "id": String("msg_67c9fdcf37fc8190ba82116e33fb28c507b8b0ad4e5eb654"),
-      #|            },
-      #|          ),
-      #|        ),
-      #|      ],
-      #|      stop_reason: Stop,
-      #|      usage: Some(
-      #|        {
-      #|          input: 37,
-      #|          output: 11,
-      #|          cache_read: 0,
-      #|          cache_write: 0,
-      #|          cache_write_1h: None,
-      #|          reasoning: Some(0),
-      #|          total_tokens: 48,
-      #|          cost: { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0 },
-      #|        },
-      #|      ),
-      #|    },
-      #|  ),
       #|]
     ),
   )
+  debug_inspect(final_message, content=(
+    
+    #|{
+    #|  content: [
+    #|    Text(
+    #|      "Hi there! How can I assist you today?",
+    #|      signature=Object(
+    #|        {
+    #|          "type": String("message"),
+    #|          "id": String("msg_67c9fdcf37fc8190ba82116e33fb28c507b8b0ad4e5eb654"),
+    #|        },
+    #|      ),
+    #|    ),
+    #|  ],
+    #|  stop_reason: Stop,
+    #|  error_message: None,
+    #|  usage: Some(
+    #|    {
+    #|      input: 37,
+    #|      output: 11,
+    #|      cache_read: 0,
+    #|      cache_write: 0,
+    #|      cache_write_1h: None,
+    #|      reasoning: Some(0),
+    #|      total_tokens: 48,
+    #|      cost: { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0 },
+    #|    },
+    #|  ),
+    #|}
+  ))
 }
