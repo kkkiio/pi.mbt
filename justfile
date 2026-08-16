@@ -15,3 +15,7 @@ test:
 
 cram:
     moon cram test tests/cram
+
+# Real-provider CLI contract tests; requires DEEPSEEK_API_KEY.
+eval:
+    moon cram test tests/live

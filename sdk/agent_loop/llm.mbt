@@ -1,6 +1,15 @@
 ///|
+/// The LLM interface. `generate` runs one model turn to completion,
+/// delivering streaming deltas through `sink` as they arrive and returning the
+/// final `AssistantMessage` as the terminal outcome. Providers run their
+/// response stream inline in the calling task (no background task), following
+/// the callback/sink model.
 pub(open) trait LLM {
-  fn generate(Self, Context) -> &AssistantMessageEventStream
+  async fn generate(
+    Self,
+    Context,
+    sink~ : async (GenerationEvent) -> Unit,
+  ) -> AssistantMessage
 }
 
 ///|
@@ -60,7 +69,7 @@ pub(all) enum InputMessageContent {
 }
 
 ///|
-pub struct ToolResultMessage {
+pub(all) struct ToolResultMessage {
   tool_call_id : String
   tool_name : String
   content : Array[InputMessageContent]
@@ -71,19 +80,11 @@ pub struct ToolResultMessage {
 }
 
 ///|
-pub(open) trait AssistantMessageEventStream {
-  async fn next(Self) -> AssistantMessageEvent
-  fn close(Self) -> Unit
-}
-
-///|
-/// Event protocol for AssistantMessageEventStream.
-/// 
-/// Streams should emit `start` before partial updates, then terminate with either:
-/// - `done` carrying the final successful AssistantMessage, or
-/// - `error` carrying the final AssistantMessage with stopReason "error" or "aborted"
-///   and errorMessage.
-pub(all) enum AssistantMessageEvent {
+/// Event protocol for `generate`'s sink: the phases of one generation call.
+/// The terminal outcome is not an event — `generate` returns the final
+/// `AssistantMessage`, whose `stop_reason` and `error_message` describe how
+/// the turn ended.
+pub(all) enum GenerationEvent {
   Start
   TextStart(Int, PartialAssistantMessage)
   TextDelta(Int, String, PartialAssistantMessage)
@@ -94,23 +95,6 @@ pub(all) enum AssistantMessageEvent {
   ToolCallStart(Int, PartialAssistantMessage)
   ToolCallDelta(Int, String, PartialAssistantMessage)
   ToolCallEnd(Int, ToolCall, PartialAssistantMessage)
-  Done(OkStopReason, AssistantMessage)
-  Error(ErrorStopReason, AssistantMessage)
-} derive(Debug)
-
-///|
-pub(all) enum OkStopReason {
-  Stop
-  /// The model stopped because it reached the maximum number of tokens allowed.
-  Length
-  ToolUse
-} derive(Debug)
-
-///|
-pub(all) enum ErrorStopReason {
-  /// The model was aborted by the user or system.
-  Aborted
-  Error
 } derive(Debug)
 
 ///|
@@ -133,6 +117,8 @@ pub(all) struct PartialAssistantMessage {
 pub(all) struct AssistantMessage {
   content : Array[AssistantMessageContent]
   stop_reason : StopReason
+  /// Set when `stop_reason` is `Aborted` or `Error`: the failure description.
+  error_message : String?
   usage : Usage?
 } derive(Debug)
 
@@ -174,3 +160,14 @@ pub(all) struct UsageCost {
   cache_write : Float
   total : Float
 } derive(Debug)
+
+///|
+pub impl Show for StopReason with fn to_string(self : StopReason) -> String {
+  match self {
+    Stop => "stop"
+    Length => "length"
+    ToolUse => "tool_use"
+    Aborted => "aborted"
+    Error => "error"
+  }
+}

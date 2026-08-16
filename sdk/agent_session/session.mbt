@@ -85,7 +85,6 @@ pub async fn AgentSession::prompt(
           content: Message(message),
         },
       ])
-      self.message_buffer.push(message)
       self.fanout.on_event(event)
     },
   )

@@ -20,15 +20,16 @@
 │   ├── providers/            # LLM provider(当前: DeepSeek responses API)
 │   └── tools/                # 工具定义
 └── tests/
-    └── cram/                 # CLI 契约离线测试转录(由 moon cram test 执行)
-        └── cli.md
+    ├── cram/                 # CLI 契约离线测试转录(由 moon cram test 执行)
+    │   └── cli.md
+    └── live/                 # 真实 provider 测试转录(opt-in,需 DEEPSEEK_API_KEY)
+        └── deepseek.md
 ```
 
 ### 参考项目
 
-- [Pi](https://github.com/earendil-works/pi) — 上游 TypeScript coding agent,行为参照。
-- [openseek](https://github.com/moonbitlang/openseek) — moon cram test 工作流参照
-  (转录放 `tests/cram/`,直接用 `pim.exe` 调用,不用 shim)。
+- [Pi](https://github.com/earendil-works/pi)
+- [openseek](https://github.com/moonbitlang/openseek)
 
 ## Domain Language
 
@@ -51,6 +52,14 @@ CLI 契约由 `tests/cram/` 下的 `mooncram` 转录持续验证。变更 CLI �
 - 所有 cram 用例必须离线确定:不依赖 API key、不发网络请求;prompt 路径用
   缺 key 失败或参数校验失败覆盖,不包含时间戳、随机值、绝对临时路径或环境相关颜色。
 - 未实现的命令保留红色规格(failing transcript)作为实现目标;不要改写期望输出来掩盖实现缺口。
+
+### Live Provider Test Policy
+
+真实 provider 测试放在 `tests/live/`,与离线套件分离:`just test` 和 CI 不跑它们。
+
+- 运行方式:`DEEPSEEK_API_KEY=sk-... moon cram test tests/live`(或 `just eval`)。
+- 没有 key 时用例会失败,这是预期行为——live 测试是 opt-in,不假装离线可过。
+- 转录只断言稳定契约(如最终回复恰好为 `Paris`),不复现模型输出细节。
 
 ### Output Stream Contract
 
@@ -83,6 +92,12 @@ just test
 
 ```bash
 moon cram test tests/cram
+```
+
+跑真实 provider 的 live 测试(需要 `DEEPSEEK_API_KEY`):
+
+```bash
+moon cram test tests/live
 ```
 
 新增或改动 `mooncram` 转录时,单独跑受影响的文件:

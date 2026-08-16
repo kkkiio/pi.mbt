@@ -60,7 +60,7 @@ async fn[T] arg_error(message : String) -> T {
 
 ///|
 async fn write_stdout(message : String) -> Unit {
-  @stdio.stdout.write(message) catch {
+  @stdio.stdout.write("\{message}\n") catch {
     e => fatal("failed to write stdout: \{e}")
   }
 }
