@@ -2,10 +2,12 @@
 async fn main {
   let matches = @argparse.parse(
     Command("pim", options=[OptionArg("print", short='p')]),
-  )
+  ) catch {
+    err => arg_error("\{err}")
+  }
   let prompts = match matches.values {
     { "print": prompts, .. } => prompts
-    _ => fatal("only '-p' support for now")
+    _ => fatal("Error: only '-p' support for now")
   }
   let deepseek = @providers.DeepSeekProvider()
   let session = @coding_agent.new_coding_session(
@@ -38,6 +40,22 @@ async fn main {
     }
   }
   write_stdout(output.to_string())
+}
+
+///|
+/// 把 argparse 错误按 pi 风格输出到 stderr 并退出：
+/// 只取首行（丢弃 usage 块），去掉小写 "error: " 前缀，改写成单行
+/// `Error: <detail>`。pi 的对应输出例如 `Error: Unknown option: --bogus`。
+async fn[T] arg_error(message : String) -> T {
+  let first_line = match message.split_once("\n") {
+    Some((head, _)) => head.to_owned()
+    None => message
+  }
+  let detail = match first_line.strip_prefix("error: ") {
+    Some(rest) => rest.to_owned()
+    None => first_line
+  }
+  fatal("Error: \{detail}")
 }
 
 ///|
