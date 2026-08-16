@@ -52,8 +52,8 @@ Error: unexpected argument '--bogus' found
 没有 `DEEPSEEK_API_KEY` 时,`-p` 在 provider 构造阶段失败,退出码为 1;失败报告
 目前由 async runtime 输出到 stdout:
 
-```mooncram
+```mooncram {output_stream: stderr}
 $ (unset DEEPSEEK_API_KEY; pim.exe -p hi)
-Failure(sdk/providers/deepseek.mbt:17:5-17:34@KKKIIO/pi FAILED: miss DEEPSEEK_API_KEY)
+Error: miss DEEPSEEK_API_KEY
 [1]
 ```

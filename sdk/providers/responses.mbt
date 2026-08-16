@@ -12,8 +12,7 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
   let data_lines : Array[StringView] = []
   let acc : Array[@agent_loop.AssistantMessageContent] = []
   let slots : Map[Int, ResponsesOutputSlot] = Map([])
-  let mut final_message : @agent_loop.AssistantMessage? = None
-  for ;; {
+  let final_message : @agent_loop.AssistantMessage = for ;; {
     let reason = match
       (@async.with_timeout_opt(idle_timeout_ms) <| () => {
         reader.read_until("\n")
@@ -29,8 +28,7 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
             custom_tool_input_properties,
           )
           if flushed is Some(message) {
-            final_message = Some(message)
-            break
+            break message
           }
         } else {
           data_lines.push(trimmed)
@@ -48,12 +46,11 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
       custom_tool_input_properties,
     )
     if flushed is Some(message) {
-      final_message = Some(message)
-      break
+      break message
     }
     fail(reason)
   }
-  final_message.unwrap()
+  final_message
 }
 
 ///|
@@ -722,18 +719,30 @@ fn parse_sse_event(
           }),
         )
       } else {
+        let error_message = match terminal.error {
+          Some(error) =>
+            match error.message {
+              Some(message) => Some(message)
+              None => incomplete_reason
+            }
+          None => incomplete_reason
+        }
         Some(
           SseOutcome::Terminal({
             content: acc,
             stop_reason: @agent_loop.StopReason::Error,
-            error_message: incomplete_reason,
+            error_message,
             usage,
           }),
         )
       }
     }
     "error" => {
+      // Standard Responses API `error` events carry `message` at the top
+      // level; keep the nested `error.message` fallback for compatible
+      // providers.
       let error_message = match json {
+        { "message": String(message), .. } => Some(message)
         { "error": Object(fields), .. } =>
           match fields.get("message") {
             Some(String(message)) => Some(message)
@@ -863,6 +872,8 @@ priv struct ResponseTerminal {
   status : String?
   /// Reason why an incomplete response stopped.
   incomplete_details : ResponseIncompleteDetails?
+  /// Provider-reported error, set when the response failed.
+  error : ResponseTerminalError?
   /// Token usage reported by the provider.
   usage : ResponseUsage?
   /// Ordered output items. Their discriminant is inspected only when terminal
@@ -875,9 +886,27 @@ priv struct ResponseTerminal {
 priv struct ResponseTerminalWire {
   status : String?
   incomplete_details : Json?
+  error : Json?
   usage : Json?
   output : Array[Json]?
 } derive(FromJson)
+
+///|
+/// OpenAPI `Response.Error`: the diagnostic carried by failed responses.
+priv struct ResponseTerminalError {
+  /// Provider-readable error message.
+  message : String?
+}
+
+///|
+impl @json.FromJson for ResponseTerminalError with fn from_json(json, path) {
+  let message = match json {
+    { "message": String(message), .. } => Some(message)
+    _ => None
+  }
+  ignore(path)
+  { message, }
+}
 
 ///|
 /// OpenAPI `Response.IncompleteDetails`.
@@ -912,9 +941,13 @@ impl @json.FromJson for ResponseTerminal with fn from_json(json, path) {
     Some(value) =>
       Some(@json.from_json(value, path=path.add_key("incomplete_details")))
   }
+  let error = match wire.error {
+    None | Some(Json::Null) => None
+    Some(value) => Some(@json.from_json(value, path=path.add_key("error")))
+  }
   let usage = match wire.usage {
     None | Some(Json::Null) => None
     Some(value) => Some(@json.from_json(value, path=path.add_key("usage")))
   }
-  { status: wire.status, incomplete_details, usage, output: wire.output }
+  { status: wire.status, incomplete_details, error, usage, output: wire.output }
 }

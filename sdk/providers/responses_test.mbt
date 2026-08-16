@@ -96,7 +96,34 @@ async test "openai streaming example" {
       #|]
     ),
   )
-  guard final_message.stop_reason is Stop else {
-    fail("expected Stop stop reason, got \{final_message.stop_reason}")
-  }
+  debug_inspect(final_message, content=(
+    
+    #|{
+    #|  content: [
+    #|    Text(
+    #|      "Hi there! How can I assist you today?",
+    #|      signature=Object(
+    #|        {
+    #|          "type": String("message"),
+    #|          "id": String("msg_67c9fdcf37fc8190ba82116e33fb28c507b8b0ad4e5eb654"),
+    #|        },
+    #|      ),
+    #|    ),
+    #|  ],
+    #|  stop_reason: Stop,
+    #|  error_message: None,
+    #|  usage: Some(
+    #|    {
+    #|      input: 37,
+    #|      output: 11,
+    #|      cache_read: 0,
+    #|      cache_write: 0,
+    #|      cache_write_1h: None,
+    #|      reasoning: Some(0),
+    #|      total_tokens: 48,
+    #|      cost: { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0 },
+    #|    },
+    #|  ),
+    #|}
+  ))
 }

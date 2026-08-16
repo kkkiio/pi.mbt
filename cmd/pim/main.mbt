@@ -10,8 +10,13 @@ async fn main {
     _ => fatal("Error: only '-p' support for now")
   }
   let deepseek = @providers.DeepSeekProvider()
+  // provider 构造失败(如缺 DEEPSEEK_API_KEY)是诊断,按输出流契约走 stderr;
+  // 剥离 MoonBit 的 Failure(<loc> FAILED: msg) 包装,保留干净消息。
+  let llm = deepseek.new_llm("deepseek-v4-flash") catch {
+    err => fatal("Error: \{clean_error_message("\{err}")}")
+  }
   let session = @coding_agent.new_coding_session(
-    deepseek.new_llm("deepseek-v4-flash"),
+    llm,
     cwd=@env.current_dir().unwrap(),
   )
   let mut last_message : @agent_loop.AgentMessage? = None
@@ -56,6 +61,25 @@ async fn[T] arg_error(message : String) -> T {
     None => first_line
   }
   fatal("Error: \{detail}")
+}
+
+///|
+/// 从 Error 的字符串形式中提取干净消息(openseek `failure_message` 的等效实现):
+/// - 去掉 argparse 已带的小写 `error: ` 前缀
+/// - 对 `Failure(<loc> FAILED: <msg>)` 包装,取 ` FAILED: ` 之后的内容并去掉尾部 `)`
+fn clean_error_message(error_text : String) -> String {
+  let without_prefix = match error_text.strip_prefix("error: ") {
+    Some(rest) => rest.to_owned()
+    None => error_text
+  }
+  match without_prefix.rev_split_once(" FAILED: ") {
+    Some((_, message)) =>
+      match message.strip_suffix(")") {
+        Some(rest) => rest.to_owned()
+        None => message.to_owned()
+      }
+    None => without_prefix
+  }
 }
 
 ///|
