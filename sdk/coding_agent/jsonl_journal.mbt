@@ -25,6 +25,9 @@ pub async fn[W : @io.Writer] JsonlSessionJournal::JsonlSessionJournal(
   now? : UInt64 = @env.now(),
 ) -> JsonlSessionJournal[W] {
   let ids = Set([])
+  for entry in entries {
+    ids.add(entry.id)
+  }
   writer.write(
     (
       {

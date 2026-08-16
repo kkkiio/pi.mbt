@@ -66,85 +66,11 @@ fn[T] decode_error(path : @json.JsonPath, msg : String) -> T raise @json.JsonDec
 ///|
 fn session_entry_content_to_json(content : SessionEntryContent) -> Json {
   match content {
-    Message(message) =>
-      { "type": "message", "message": agent_message_to_json(message) }
+    Message(message) => { "type": "message", "message": message.to_json() }
     ModelChanage(provider~, model_id~) =>
       { "type": "model_change", "provider": provider, "model_id": model_id }
     Compaction => { "type": "compaction" }
     CustomMessage => { "type": "custom_message" }
-  }
-}
-
-///|
-fn agent_message_to_json(message : @agent_loop.AgentMessage) -> Json {
-  match message {
-    User(contents) => {
-      let cs : Array[Json] = []
-      for content in contents {
-        cs.push(input_content_to_json(content))
-      }
-      { "role": "user", "content": cs }
-    }
-    Assistant(contents) => {
-      let cs : Array[Json] = []
-      for content in contents {
-        cs.push(assistant_content_to_json(content))
-      }
-      { "role": "assistant", "content": cs }
-    }
-    ToolResult(result) => {
-      let cs : Array[Json] = []
-      for content in result.content {
-        cs.push(input_content_to_json(content))
-      }
-      {
-        "role": "tool",
-        "tool_call_id": result.tool_call_id,
-        "name": result.tool_name,
-        "content": cs,
-      }
-    }
-  }
-}
-
-///|
-fn input_content_to_json(content : @agent_loop.InputMessageContent) -> Json {
-  match content {
-    Text(text) => { "type": "text", "text": text }
-    Image(bytes) => { "type": "image", "length": bytes.length() }
-  }
-}
-
-///|
-fn assistant_content_to_json(
-  content : @agent_loop.AssistantMessageContent,
-) -> Json {
-  match content {
-    Text(text, signature~) =>
-      { "type": "text", "text": text, "signature": signature }
-    Thinking(text, signature~) =>
-      { "type": "thinking", "thinking": text, "signature": signature }
-    ToolCall(tool_call, signature~) =>
-      {
-        "type": "tool_call",
-        "id": tool_call.id,
-        "name": tool_call.name,
-        "arguments": tool_call.arguments,
-        "signature": signature,
-      }
-    HostedToolCall(tool, signature~) =>
-      {
-        "type": "hosted_tool_call",
-        "tool": hosted_tool_to_json(tool),
-        "signature": signature,
-      }
-  }
-}
-
-///|
-fn hosted_tool_to_json(tool : @agent_loop.HostedTool) -> Json {
-  match tool {
-    WebSearch => "web_search"
   }
 }
 
@@ -193,22 +119,30 @@ fn parse_agent_message(json : Json, path : @json.JsonPath) -> @agent_loop.AgentM
       "tool_call_id": String(tool_call_id),
       "name": String(tool_name),
       "content": Array(items),
+      "is_error": is_error_json,
+      "timestamp": String(timestamp_str),
+      "terminate": terminate_json,
       ..
     } => {
+      let is_error = is_error_json is True
+      let terminate = terminate_json is True
       let content = []
       for i, item in items {
         content.push(
           parse_input_content(item, path.add_key("content").add_index(i)),
         )
       }
+      let timestamp = @string.parse_uint64(timestamp_str) catch {
+        _ => decode_error(path, "ToolResult: invalid timestamp")
+      }
       ToolResult(
         {
           tool_call_id,
           tool_name,
           content,
-          is_error: false,
-          timestamp: 0,
-          terminate: false,
+          is_error,
+          timestamp,
+          terminate,
         },
       )
     }
