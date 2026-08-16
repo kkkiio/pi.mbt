@@ -1,12 +1,12 @@
 ///|
 pub async fn[R : @io.Reader] read_responses_sse_stream(
   reader : R,
-  out : @aqueue.Queue[@agentloop.AssistantMessageEvent],
+  out : @aqueue.Queue[@agent_loop.AssistantMessageEvent],
   custom_tool_input_properties? : Map[String, String] = Map([]),
 ) -> Unit {
   let idle_timeout_ms : Int = 120_000
   let data_lines : Array[StringView] = []
-  let acc : Array[@agentloop.AssistantMessageContent] = []
+  let acc : Array[@agent_loop.AssistantMessageContent] = []
   let slots : Map[Int, ResponsesOutputSlot] = Map([])
   for ;; {
     let reason = match
@@ -48,7 +48,7 @@ priv enum ResponsesOutputSlot {
 }
 
 ///|
-fn encode_responses_input(context : @agentloop.Context) -> Array[Json] raise {
+fn encode_responses_input(context : @agent_loop.Context) -> Array[Json] raise {
   let input : Array[Json] = []
   let custom_call_ids : Map[String, Bool] = Map([])
   for message in context.messages {
@@ -173,8 +173,8 @@ fn encode_responses_input(context : @agentloop.Context) -> Array[Json] raise {
 ///|
 async fn flush_sse_event(
   data_lines : Array[StringView],
-  out : @aqueue.Queue[@agentloop.AssistantMessageEvent],
-  acc : Array[@agentloop.AssistantMessageContent],
+  out : @aqueue.Queue[@agent_loop.AssistantMessageEvent],
+  acc : Array[@agent_loop.AssistantMessageContent],
   slots : Map[Int, ResponsesOutputSlot],
   custom_tool_input_properties : Map[String, String],
 ) -> Bool {
@@ -218,14 +218,14 @@ async fn flush_sse_event(
 fn parse_sse_event(
   event : StringView,
   data : StringView,
-  acc : Array[@agentloop.AssistantMessageContent],
+  acc : Array[@agent_loop.AssistantMessageContent],
   slots : Map[Int, ResponsesOutputSlot],
   custom_tool_input_properties? : Map[String, String] = Map([]),
-) -> @agentloop.AssistantMessageEvent? raise {
+) -> @agent_loop.AssistantMessageEvent? raise {
   let json = @json.parse(data)
-  let partial = () => @agentloop.PartialAssistantMessage::{ content: acc }
+  let partial = () => @agent_loop.PartialAssistantMessage::{ content: acc }
   return match event {
-    "response.created" => Some(@agentloop.AssistantMessageEvent::Start)
+    "response.created" => Some(@agent_loop.AssistantMessageEvent::Start)
     "response.in_progress"
     | "response.content_part.added"
     | "response.content_part.done"
@@ -252,7 +252,7 @@ fn parse_sse_event(
         "reasoning" => {
           let item : ResponseReasoningItem = @json.from_json(item_json)
           acc.push(
-            @agentloop.AssistantMessageContent::Thinking(
+            @agent_loop.AssistantMessageContent::Thinking(
               (if item.content is Some(parts) { parts } else { item.summary })
               .iter()
               .map(p => p.text)
@@ -261,7 +261,7 @@ fn parse_sse_event(
             ),
           )
           slots[output_index] = Thinking(content_index)
-          Some(@agentloop.ThinkingStart(content_index, partial()))
+          Some(@agent_loop.ThinkingStart(content_index, partial()))
         }
         "message" => {
           let item : ResponseOutputMessage = @json.from_json(item_json)
@@ -278,18 +278,18 @@ fn parse_sse_event(
             None => { "type": "message", "id": item.id }
           }
           acc.push(
-            @agentloop.AssistantMessageContent::Text(
+            @agent_loop.AssistantMessageContent::Text(
               text.to_string(),
               signature~,
             ),
           )
           slots[output_index] = Text(content_index)
-          Some(@agentloop.TextStart(content_index, partial()))
+          Some(@agent_loop.TextStart(content_index, partial()))
         }
         "function_call" => {
           let item : ResponseFunctionToolCall = @json.from_json(item_json)
           acc.push(
-            @agentloop.AssistantMessageContent::ToolCall(
+            @agent_loop.AssistantMessageContent::ToolCall(
               {
                 id: item.call_id,
                 name: item.name,
@@ -299,7 +299,7 @@ fn parse_sse_event(
             ),
           )
           slots[output_index] = FunctionCall(content_index, item.arguments)
-          Some(@agentloop.ToolCallStart(content_index, partial()))
+          Some(@agent_loop.ToolCallStart(content_index, partial()))
         }
         "custom_tool_call" => {
           let item : ResponseCustomToolCall = @json.from_json(item_json)
@@ -309,7 +309,7 @@ fn parse_sse_event(
           let arguments : Map[String, String] = Map([])
           arguments[input_property] = item.input
           acc.push(
-            @agentloop.AssistantMessageContent::ToolCall(
+            @agent_loop.AssistantMessageContent::ToolCall(
               {
                 id: item.call_id,
                 name: item.name,
@@ -327,12 +327,12 @@ fn parse_sse_event(
             item.input,
             input_property,
           )
-          Some(@agentloop.ToolCallStart(content_index, partial()))
+          Some(@agent_loop.ToolCallStart(content_index, partial()))
         }
         "web_search_call" => {
           acc.push(
-            @agentloop.AssistantMessageContent::HostedToolCall(
-              @agentloop.HostedTool::WebSearch,
+            @agent_loop.AssistantMessageContent::HostedToolCall(
+              @agent_loop.HostedTool::WebSearch,
               signature=item_json,
             ),
           )
@@ -350,14 +350,14 @@ fn parse_sse_event(
         return None
       }
       guard acc[content_index]
-        is @agentloop.AssistantMessageContent::Thinking(current, signature~) else {
+        is @agent_loop.AssistantMessageContent::Thinking(current, signature~) else {
         return None
       }
-      acc[content_index] = @agentloop.AssistantMessageContent::Thinking(
+      acc[content_index] = @agent_loop.AssistantMessageContent::Thinking(
         current + delta,
         signature~,
       )
-      Some(@agentloop.ThinkingDelta(content_index, delta, partial()))
+      Some(@agent_loop.ThinkingDelta(content_index, delta, partial()))
     }
     "response.reasoning_summary_part.done" => {
       let payload : ResponseOutputIndexEvent = @json.from_json(json)
@@ -366,14 +366,14 @@ fn parse_sse_event(
         return None
       }
       guard acc[content_index]
-        is @agentloop.AssistantMessageContent::Thinking(current, signature~) else {
+        is @agent_loop.AssistantMessageContent::Thinking(current, signature~) else {
         return None
       }
-      acc[content_index] = @agentloop.AssistantMessageContent::Thinking(
+      acc[content_index] = @agent_loop.AssistantMessageContent::Thinking(
         current + "\n\n",
         signature~,
       )
-      Some(@agentloop.ThinkingDelta(content_index, "\n\n", partial()))
+      Some(@agent_loop.ThinkingDelta(content_index, "\n\n", partial()))
     }
     "response.output_text.delta" | "response.refusal.delta" => {
       let payload : ResponseDeltaEvent = @json.from_json(json)
@@ -383,14 +383,14 @@ fn parse_sse_event(
         return None
       }
       guard acc[content_index]
-        is @agentloop.AssistantMessageContent::Text(current, signature~) else {
+        is @agent_loop.AssistantMessageContent::Text(current, signature~) else {
         return None
       }
-      acc[content_index] = @agentloop.AssistantMessageContent::Text(
+      acc[content_index] = @agent_loop.AssistantMessageContent::Text(
         current + delta,
         signature~,
       )
-      Some(@agentloop.TextDelta(content_index, delta, partial()))
+      Some(@agent_loop.TextDelta(content_index, delta, partial()))
     }
     "response.function_call_arguments.delta" => {
       let payload : ResponseDeltaEvent = @json.from_json(json)
@@ -401,7 +401,7 @@ fn parse_sse_event(
         return None
       }
       slots[output_index] = FunctionCall(content_index, current + delta)
-      Some(@agentloop.ToolCallDelta(content_index, delta, partial()))
+      Some(@agent_loop.ToolCallDelta(content_index, delta, partial()))
     }
     "response.custom_tool_call_input.delta" => {
       let payload : ResponseDeltaEvent = @json.from_json(json)
@@ -412,14 +412,14 @@ fn parse_sse_event(
         return None
       }
       guard acc[content_index]
-        is @agentloop.AssistantMessageContent::ToolCall(tool_call, signature~) else {
+        is @agent_loop.AssistantMessageContent::ToolCall(tool_call, signature~) else {
         return None
       }
       let input = current + delta
       slots[output_index] = CustomToolCall(content_index, input, input_property)
       let arguments : Map[String, String] = Map([])
       arguments[input_property] = input
-      acc[content_index] = @agentloop.AssistantMessageContent::ToolCall(
+      acc[content_index] = @agent_loop.AssistantMessageContent::ToolCall(
         {
           id: tool_call.id,
           name: tool_call.name,
@@ -427,7 +427,7 @@ fn parse_sse_event(
         },
         signature~,
       )
-      Some(@agentloop.ToolCallDelta(content_index, delta, partial()))
+      Some(@agent_loop.ToolCallDelta(content_index, delta, partial()))
     }
     "response.output_item.done" => {
       guard json
@@ -455,18 +455,18 @@ fn parse_sse_event(
           }
           let final_text = if text.is_empty() {
             match acc[content_index] {
-              @agentloop.AssistantMessageContent::Thinking(value, ..) => value
+              @agent_loop.AssistantMessageContent::Thinking(value, ..) => value
               _ => ""
             }
           } else {
             text.to_string()
           }
-          acc[content_index] = @agentloop.AssistantMessageContent::Thinking(
+          acc[content_index] = @agent_loop.AssistantMessageContent::Thinking(
             final_text,
             signature=item_json,
           )
           slots.remove(output_index)
-          Some(@agentloop.ThinkingEnd(content_index, final_text, partial()))
+          Some(@agent_loop.ThinkingEnd(content_index, final_text, partial()))
         }
         ("message", Some(Text(content_index))) => {
           let item : ResponseOutputMessage = @json.from_json(item_json)
@@ -480,7 +480,7 @@ fn parse_sse_event(
           }
           let final_text = if text.is_empty() {
             match acc[content_index] {
-              @agentloop.AssistantMessageContent::Text(value, ..) => value
+              @agent_loop.AssistantMessageContent::Text(value, ..) => value
               _ => ""
             }
           } else {
@@ -490,17 +490,17 @@ fn parse_sse_event(
             Some(phase) => { "type": "message", "id": item.id, "phase": phase }
             None => { "type": "message", "id": item.id }
           }
-          acc[content_index] = @agentloop.AssistantMessageContent::Text(
+          acc[content_index] = @agent_loop.AssistantMessageContent::Text(
             final_text,
             signature~,
           )
           slots.remove(output_index)
-          Some(@agentloop.TextEnd(content_index, final_text, partial()))
+          Some(@agent_loop.TextEnd(content_index, final_text, partial()))
         }
         ("function_call", Some(FunctionCall(content_index, _))) => {
           let item : ResponseFunctionToolCall = @json.from_json(item_json)
           guard acc[content_index]
-            is @agentloop.AssistantMessageContent::ToolCall(tool_call, ..) else {
+            is @agent_loop.AssistantMessageContent::ToolCall(tool_call, ..) else {
             fail("Function call output slot has invalid content")
           }
           let arguments = item.arguments
@@ -509,18 +509,18 @@ fn parse_sse_event(
           } else {
             @json.parse(arguments)
           }
-          let final_tool_call : @agentloop.ToolCall = {
+          let final_tool_call : @agent_loop.ToolCall = {
             id: tool_call.id,
             name: tool_call.name,
             arguments: parsed_arguments,
           }
-          acc[content_index] = @agentloop.AssistantMessageContent::ToolCall(
+          acc[content_index] = @agent_loop.AssistantMessageContent::ToolCall(
             final_tool_call,
             signature={ "type": "function_call", "id": item.id },
           )
           slots.remove(output_index)
           Some(
-            @agentloop.ToolCallEnd(content_index, final_tool_call, partial()),
+            @agent_loop.ToolCallEnd(content_index, final_tool_call, partial()),
           )
         }
         (
@@ -529,17 +529,17 @@ fn parse_sse_event(
         ) => {
           let item : ResponseCustomToolCall = @json.from_json(item_json)
           guard acc[content_index]
-            is @agentloop.AssistantMessageContent::ToolCall(tool_call, ..) else {
+            is @agent_loop.AssistantMessageContent::ToolCall(tool_call, ..) else {
             fail("Custom tool call output slot has invalid content")
           }
           let arguments : Map[String, String] = Map([])
           arguments[input_property] = item.input
-          let final_tool_call : @agentloop.ToolCall = {
+          let final_tool_call : @agent_loop.ToolCall = {
             id: tool_call.id,
             name: tool_call.name,
             arguments: @json.to_json(arguments),
           }
-          acc[content_index] = @agentloop.AssistantMessageContent::ToolCall(
+          acc[content_index] = @agent_loop.AssistantMessageContent::ToolCall(
             final_tool_call,
             signature={
               "type": "custom_tool_call",
@@ -549,15 +549,15 @@ fn parse_sse_event(
           )
           slots.remove(output_index)
           Some(
-            @agentloop.ToolCallEnd(content_index, final_tool_call, partial()),
+            @agent_loop.ToolCallEnd(content_index, final_tool_call, partial()),
           )
         }
         ("web_search_call", Some(HostedToolCall(content_index))) => {
           guard acc[content_index]
-            is @agentloop.AssistantMessageContent::HostedToolCall(name, ..) else {
+            is @agent_loop.AssistantMessageContent::HostedToolCall(name, ..) else {
             fail("Web search output slot has invalid content")
           }
-          acc[content_index] = @agentloop.AssistantMessageContent::HostedToolCall(
+          acc[content_index] = @agent_loop.AssistantMessageContent::HostedToolCall(
             name,
             signature=item_json,
           )
@@ -580,24 +580,24 @@ fn parse_sse_event(
         }
         for index, content in acc {
           match content {
-            @agentloop.AssistantMessageContent::Thinking(text, signature~) => {
+            @agent_loop.AssistantMessageContent::Thinking(text, signature~) => {
               guard signature is { "id": String(signature_id), .. } else {
                 continue
               }
               if item_type == "reasoning" && terminal_id == signature_id {
-                acc[index] = @agentloop.AssistantMessageContent::Thinking(
+                acc[index] = @agent_loop.AssistantMessageContent::Thinking(
                   text,
                   signature=terminal_item,
                 )
                 break
               }
             }
-            @agentloop.AssistantMessageContent::HostedToolCall(name, signature~) => {
+            @agent_loop.AssistantMessageContent::HostedToolCall(name, signature~) => {
               guard signature is { "id": String(signature_id), .. } else {
                 continue
               }
               if item_type == "web_search_call" && terminal_id == signature_id {
-                acc[index] = @agentloop.AssistantMessageContent::HostedToolCall(
+                acc[index] = @agent_loop.AssistantMessageContent::HostedToolCall(
                   name,
                   signature=terminal_item,
                 )
@@ -624,7 +624,7 @@ fn parse_sse_event(
             Some(details) => details.reasoning_tokens
             None => None
           }
-          Some(@agentloop.Usage::{
+          Some(@agent_loop.Usage::{
             input: if uncached_input > 0 {
               uncached_input
             } else {
@@ -660,21 +660,21 @@ fn parse_sse_event(
         None => None
       }
       let has_tool_call = acc.any(content => {
-        content is @agentloop.AssistantMessageContent::ToolCall(_, ..)
+        content is @agent_loop.AssistantMessageContent::ToolCall(_, ..)
       })
       if status == "completed" {
         let reason = if has_tool_call {
-          @agentloop.OkStopReason::ToolUse
+          @agent_loop.OkStopReason::ToolUse
         } else {
-          @agentloop.OkStopReason::Stop
+          @agent_loop.OkStopReason::Stop
         }
         let stop_reason = if has_tool_call {
-          @agentloop.StopReason::ToolUse
+          @agent_loop.StopReason::ToolUse
         } else {
-          @agentloop.StopReason::Stop
+          @agent_loop.StopReason::Stop
         }
         Some(
-          @agentloop.AssistantMessageEvent::Done(reason, {
+          @agent_loop.AssistantMessageEvent::Done(reason, {
             content: acc,
             stop_reason,
             usage,
@@ -683,27 +683,27 @@ fn parse_sse_event(
       } else if status == "incomplete" &&
         incomplete_reason == Some("max_output_tokens") {
         Some(
-          @agentloop.AssistantMessageEvent::Done(
-            @agentloop.OkStopReason::Length,
-            { content: acc, stop_reason: @agentloop.StopReason::Length, usage },
+          @agent_loop.AssistantMessageEvent::Done(
+            @agent_loop.OkStopReason::Length,
+            { content: acc, stop_reason: @agent_loop.StopReason::Length, usage },
           ),
         )
       } else {
         Some(
-          @agentloop.AssistantMessageEvent::Error(
-            @agentloop.ErrorStopReason::Error,
-            { content: acc, stop_reason: @agentloop.StopReason::Error, usage },
+          @agent_loop.AssistantMessageEvent::Error(
+            @agent_loop.ErrorStopReason::Error,
+            { content: acc, stop_reason: @agent_loop.StopReason::Error, usage },
           ),
         )
       }
     }
     "error" =>
       Some(
-        @agentloop.AssistantMessageEvent::Error(
-          @agentloop.ErrorStopReason::Error,
+        @agent_loop.AssistantMessageEvent::Error(
+          @agent_loop.ErrorStopReason::Error,
           {
             content: acc,
-            stop_reason: @agentloop.StopReason::Error,
+            stop_reason: @agent_loop.StopReason::Error,
             usage: None,
           },
         ),

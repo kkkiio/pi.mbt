@@ -1,5 +1,5 @@
 import {
-  "KKKIIO/pi/sdk/agentloop",
+  "KKKIIO/pi/sdk/agent_loop",
   "moonbitlang/core/json",
   "moonbitlang/core/env",
   "moonbitlang/async/io",
@@ -7,3 +7,5 @@ import {
   "moonbitlang/async/aqueue",
   "moonbitlang/async",
 }
+
+supported_targets = "+native"

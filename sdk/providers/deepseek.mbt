@@ -34,7 +34,7 @@ pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(
 }
 
 ///|
-pub impl @agentloop.LLM for DeepSeekResponsesAPILLM with fn generate(
+pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
   self,
   context,
 ) {
@@ -50,8 +50,8 @@ pub impl @agentloop.LLM for DeepSeekResponsesAPILLM with fn generate(
 async fn stream(
   api_key : String,
   model : String,
-  context : @agentloop.Context,
-  out : @async.Queue[@agentloop.AssistantMessageEvent],
+  context : @agent_loop.Context,
+  out : @async.Queue[@agent_loop.AssistantMessageEvent],
 ) -> Unit {
   let client = @http.post_stream("\{BASE_URL}/v1/responses", headers={
     "Content-Type": "application/json",
@@ -64,9 +64,9 @@ async fn stream(
   let tools : Array[Json] = []
   for definition in context.tools {
     match definition {
-      @agentloop.ToolDefinition::Hosted(WebSearch) =>
+      @agent_loop.ToolDefinition::Hosted(WebSearch) =>
         tools.push({ "type": "web_search" })
-      @agentloop.ToolDefinition::Function(tool) =>
+      @agent_loop.ToolDefinition::Function(tool) =>
         match tool.constrained_sampling {
           JsonSchema(strict~) =>
             tools.push({
@@ -117,13 +117,13 @@ async fn stream(
 
 ///|
 struct QueueStream {
-  q : @async.Queue[@agentloop.AssistantMessageEvent]
+  q : @async.Queue[@agent_loop.AssistantMessageEvent]
   f : async () -> Unit
   mut task : @async.Task[Unit]?
 }
 
 ///|
-pub impl @agentloop.AssistantMessageEventStream for QueueStream with fn next(
+pub impl @agent_loop.AssistantMessageEventStream for QueueStream with fn next(
   self,
 ) {
   if self.task is None {
@@ -133,7 +133,7 @@ pub impl @agentloop.AssistantMessageEventStream for QueueStream with fn next(
 }
 
 ///|
-pub impl @agentloop.AssistantMessageEventStream for QueueStream with fn close(
+pub impl @agent_loop.AssistantMessageEventStream for QueueStream with fn close(
   self,
 ) {
   if self.task is Some(task) {
