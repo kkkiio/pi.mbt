@@ -90,7 +90,7 @@ jobs:
           if [ -n "${{ inputs.include }}" ]; then
             IFS=',' read -ra patterns <<< "${{ inputs.include }}"
             for pattern in "${patterns[@]}"; do
-              args+=( -i "$pattern" )
+              args+=( -i "*$pattern" )
             done
           fi
           if [ "${{ inputs.n_tasks }}" != "0" ]; then
