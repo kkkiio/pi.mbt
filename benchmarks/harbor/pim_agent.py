@@ -72,7 +72,9 @@ class Pim(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             command=(
-                "pim --session-dir /logs/agent/pim/sessions "
+                # --thinking max aligns with DeepSeek's official V4-Flash
+                # agentic benchmark conditions (Terminal-Bench 2.1: 82.7).
+                "pim --session-dir /logs/agent/pim/sessions --thinking max "
                 f"--print {shlex.quote(instruction)} "
                 f"2>&1 </dev/null | stdbuf -oL tee /logs/agent/{self._OUTPUT_FILENAME}"
             ),

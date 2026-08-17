@@ -1,7 +1,7 @@
 ///|
 /// Prefix of the failure raised when the SSE stream stalls past its idle
-/// timeout; provider retry policies (`retry_transient`) match it to classify
-/// the stall as a transient condition.
+/// timeout; the provider's retry window (connection through the first SSE
+/// event) treats the stall as a transient condition.
 const SSE_STREAM_IDLE_FAILURE_PREFIX : String = "Responses stream idle for"
 
 ///|
@@ -24,7 +24,7 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
   let acc : Array[@agent_loop.AssistantMessageContent] = []
   let slots : Map[Int, ResponsesOutputSlot] = Map([])
   let final_message : @agent_loop.AssistantMessage = for ;; {
-    let reason = match
+    let idle_reason : String? = match
       (@async.with_timeout_opt(idle_timeout_ms) <| () => {
         reader.read_until("\n")
       }) {
@@ -50,8 +50,8 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
         }
         continue
       }
-      Some(None) => "Responses stream ended before a terminal event"
-      None => "\{SSE_STREAM_IDLE_FAILURE_PREFIX} \{idle_timeout_ms}ms"
+      Some(None) => None
+      None => Some("\{SSE_STREAM_IDLE_FAILURE_PREFIX} \{idle_timeout_ms}ms")
     }
     let flushed = flush_sse_event(
       data_lines,
@@ -67,7 +67,13 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
     if flushed is Some(message) {
       break message
     }
-    fail(reason)
+    match idle_reason {
+      // A silent stall is a transient provider/network condition: it is
+      // retried (within the caller's retry window, i.e. while no event has
+      // streamed) instead of failing the run.
+      Some(reason) => raise RetryableApiError(reason)
+      None => fail("Responses stream ended before a terminal event")
+    }
   }
   final_message
 }

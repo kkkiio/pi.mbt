@@ -16,6 +16,11 @@ async fn main {
           long="mode",
           about="output mode: text or json (default text)",
         ),
+        OptionArg(
+          "thinking",
+          long="thinking",
+          about="thinking effort level: low, high (default), or max",
+        ),
       ],
     ),
     env=@env.get_env_vars(),
@@ -33,7 +38,18 @@ async fn main {
   let deepseek = @providers.DeepSeekProvider()
   // provider 构造失败(如缺 DEEPSEEK_API_KEY)是诊断,按输出流契约走 stderr;
   // 剥离 MoonBit 的 Failure(<loc> FAILED: msg) 包装,保留干净消息。
-  let llm = deepseek.new_llm("deepseek-v4-flash") catch {
+  let thinking = match matches.values.get("thinking") {
+    Some([level, ..]) => {
+      guard level is ("low" | "high" | "max") else {
+        fatal(
+          "Error: invalid thinking level '\{level}' (expected low, high, or max)",
+        )
+      }
+      level
+    }
+    _ => "high"
+  }
+  let llm = deepseek.new_llm("deepseek-v4-flash", thinking~) catch {
     err => fatal("Error: \{clean_error_message("\{err}")}")
   }
   let cwd = @env.current_dir().unwrap()
@@ -67,14 +83,14 @@ async fn main {
   let session = @coding_agent.new_coding_session(llm, cwd~, journal~)
   let mut last_message : @agent_loop.AgentMessage? = None
   if mode == "json" {
-    // JSONL 模式:每个 AgentEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。
+    // JSONL 模式:每个 AgentSessionEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。
     session.subscribe(event => {
-      write_stdout(agent_event_to_json(event).stringify())
+      write_stdout(session_event_to_json(event).stringify())
     })
   } else {
     session.subscribe(event => {
       match event {
-        MessageEnd(m) => last_message = Some(m)
+        Loop(MessageEnd(m)) => last_message = Some(m)
         _ => ()
       }
     })
@@ -104,6 +120,34 @@ async fn main {
 }
 
 ///|
+/// 把 AgentSessionEvent 投影成 JSONL 事件(对齐 pi `--mode json` 的事件形状):
+/// loop 事件保持原样,auto_retry 事件对齐 pi 的 `auto_retry_start` /
+/// `auto_retry_end` 形状。
+fn session_event_to_json(event : @agent_session.AgentSessionEvent) -> Json {
+  match event {
+    Loop(agent_event) => agent_event_to_json(agent_event)
+    AutoRetryStart(attempt~, max_attempts~, delay_ms~, error_message~) =>
+      {
+        "type": "auto_retry_start",
+        "attempt": attempt,
+        "maxAttempts": max_attempts,
+        "delayMs": delay_ms,
+        "errorMessage": error_message,
+      }
+    AutoRetryEnd(attempt~, success~, final_error~) =>
+      {
+        "type": "auto_retry_end",
+        "success": success,
+        "attempt": attempt,
+        "finalError": match final_error {
+          Some(message) => message.to_json()
+          None => null
+        },
+      }
+  }
+}
+
+///|
 /// 把 AgentEvent 投影成 JSONL 事件(对齐 pi `--mode json` 的事件形状)。
 fn agent_event_to_json(event : @agent_loop.AgentEvent) -> Json {
   match event {
@@ -125,19 +169,22 @@ fn agent_event_to_json(event : @agent_loop.AgentEvent) -> Json {
       {
         "type": "tool_execution_end",
         "toolName": result.tool_name,
-        "content": [for c in result.content => c.to_json()],
+        "content": [
+          for c in result.content => c.to_json()
+        ],
         "isError": result.is_error,
       }
     TurnEnd(assistant_message, tool_results) =>
       {
         "type": "turn_end",
         "message": assistant_message.to_json(),
-        "toolCalls": [for r in tool_results => r.tool_name],
+        "toolCalls": [
+          for r in tool_results => r.tool_name
+        ],
       }
     AgentEnd(_) => { "type": "agent_end" }
   }
 }
-
 
 ///|
 /// 把 argparse 错误按 pi 风格输出到 stderr 并退出：
