@@ -3,41 +3,35 @@
 const BASE_URL = "https://api.deepseek.com"
 
 ///|
-/// Max attempts for the bounded retry around a whole generate call.
-const MAX_STREAM_ATTEMPTS : Int = 3
-
-///|
-/// Base exponential-backoff delay in milliseconds: attempts wait 1s, 2s, 4s.
-const STREAM_BACKOFF_BASE_MS : Int = 1000
-
-///|
-/// Raised by the provider when the API responds with a transient HTTP status
-/// (429 or 5xx). `retry_transient` retries these; when attempts are exhausted
-/// the final error still carries the original HTTP detail for diagnostics.
-pub(all) suberror RetryableHttpError {
-  RetryableHttpError(Int, String)
+/// Marks an attempt failure the retry loop may absorb: the SSE idle timeout
+/// and retryable HTTP statuses (429, 5xx). Carries the already-formatted
+/// public failure message so an exhausted budget re-raises the same text a
+/// non-retrying call would have produced; the type never escapes.
+priv suberror RetryableApiError {
+  RetryableApiError(String)
 }
 
 ///|
-pub impl Show for RetryableHttpError with fn output(self, logger) {
-  let RetryableHttpError(code, detail) = self
-  logger <+ "DeepSeek API error \{code}: \{detail} [retryable]"
-}
+/// Total attempts for the provider-level retry window (connection through the
+/// first SSE event): 1 initial attempt + 2 retries.
+const RETRY_ATTEMPTS : Int = 3
 
 ///|
-/// Retry policy for the DeepSeek provider: transient conditions only. A
-/// socket-level error (e.g. a TCP reset mid-SSE-stream), the SSE idle timeout,
-/// or a retryable HTTP status (429/5xx, signalled via `RetryableHttpError`)
-/// may be retried. Anything else — including cancellation — fails immediately.
-pub fn is_transient_provider_error(err : Error) -> Bool {
-  if @async.is_cancellation_error(err) {
-    // A cancelled (aborted) request must never be retried.
-    return false
-  }
-  let message = "\{err}"
-  message.has_prefix("OSError(") ||
-  message.contains(SSE_STREAM_IDLE_FAILURE_PREFIX) ||
-  message.contains("[retryable]")
+/// Base exponential-backoff delay in milliseconds (doubling per retry, capped
+/// at `MAX_BACKOFF_MS`).
+const RETRY_BACKOFF_MS : Int = 500
+
+///|
+/// Ceiling on a single backoff sleep, so a generous budget cannot accumulate
+/// minutes-long sleeps between attempts.
+const MAX_BACKOFF_MS : Int = 60_000
+
+///|
+/// A response status worth retrying: rate limiting or a server-side failure.
+/// Other 4xx are caller errors (bad key, malformed request) that a retry
+/// cannot fix.
+fn retryable_status(code : Int) -> Bool {
+  code == 429 || (code >= 500 && code < 600)
 }
 
 ///|
@@ -78,14 +72,34 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
 ) -> @agent_loop.AssistantMessage {
   let (body, custom_tool_input_properties) = self.encode_responses_body(context)
-  retry_transient(
-    max_attempts=MAX_STREAM_ATTEMPTS,
-    base_backoff_ms=STREAM_BACKOFF_BASE_MS,
-    is_transient=is_transient_provider_error,
-    attempt=() => {
-      // Each attempt is a fresh request and a fresh SSE stream; transient
-      // failures (TCP reset, idle timeout, HTTP 429/5xx) restart from scratch
-      // and re-emit a fresh Start/.../ event sequence to the sink.
+  // `bail` semantics: the retry window covers connection through the first
+  // SSE event. Once any event has streamed, the completion is live and billed;
+  // a retry would duplicate content downstream, so failures past that point
+  // propagate to the caller instead. Failed attempts emit nothing, keeping the
+  // retry invisible to the sink and downstream consumers.
+  let mut produced = false
+  let attempt_sink = (event : @agent_loop.GenerationEvent) => {
+    produced = true
+    sink(event)
+  }
+  @async.retry(
+    @async.ExponentialDelay(
+      initial=RETRY_BACKOFF_MS,
+      factor=2.0,
+      maximum=MAX_BACKOFF_MS,
+    ),
+    max_retry=RETRY_ATTEMPTS - 1,
+    fatal_error=error => {
+      // Transport-shaped errors and `RetryableApiError` are retried within
+      // the budget; anything else is a final verdict that must not be
+      // replayed: cancellation, plain failures (4xx, malformed payloads,
+      // truncated streams), or an attempt that already produced output.
+      produced ||
+      @async.is_cancellation_error(error) ||
+      error is Failure::Failure(_)
+    },
+    () => {
+      // Each attempt is a fresh request and a fresh SSE stream.
       let client = @http.post_stream("\{BASE_URL}/v1/responses", headers={
         "Content-Type": "application/json",
         "Authorization": "Bearer \{self.api_key}",
@@ -96,21 +110,27 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
       let resp = client.end_request()
       guard resp.code >= 200 && resp.code < 300 else {
         let detail = client.read_all().text()
-        if resp.code == 429 || resp.code >= 500 {
-          raise RetryableHttpError(resp.code, detail)
+        let message = "DeepSeek API error \{resp.code}: \{detail}"
+        if retryable_status(resp.code) {
+          raise RetryableApiError(message)
         }
-        fail("DeepSeek API error \{resp.code}: \{detail}")
+        fail(message)
       }
       read_responses_sse_stream(
         client,
-        sink~,
+        sink=attempt_sink,
         api="openai-responses",
         provider="deepseek",
         model=self.model_id,
         custom_tool_input_properties~,
       )
     },
-  )
+  ) catch {
+    // Budget exhausted (or bailed): surface the same message a non-retrying
+    // call would have produced, via plain failure so the marker never escapes.
+    RetryableApiError(message) => fail(message)
+    error => raise error
+  }
 }
 
 ///|
