@@ -7,9 +7,3 @@ import {
   "moonbitlang/core/random",
   "moonbitlang/core/string",
 }
-
-import {
-  "KKKIIO/pi/sdk/providers",
-} for "test"
-
-supported_targets = "+native"

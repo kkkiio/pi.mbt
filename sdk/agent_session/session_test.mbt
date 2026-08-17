@@ -1,4 +1,22 @@
 ///|
+/// A stub LLM for hydration tests: never called, but `AgentSession` requires
+/// a `&LLM` at construction. Defined here instead of borrowing the real
+/// DeepSeek provider, which would drag a native-only dependency into this
+/// otherwise target-agnostic package.
+struct StubLLM {}
+
+///|
+impl @agent_loop.LLM for StubLLM with fn generate(
+  self : StubLLM,
+  _ctx : @agent_loop.Context,
+  sink~ : async (@agent_loop.GenerationEvent) -> Unit,
+) -> @agent_loop.AssistantMessage {
+  ignore(self)
+  ignore(sink)
+  fail("StubLLM must not be called in hydration tests")
+}
+
+///|
 /// A terminal Error `AssistantMessage` for journal hydration tests.
 fn error_message(text : String) -> @agent_loop.AssistantMessage {
   {
@@ -158,7 +176,7 @@ async test "session hydration drops Error assistant messages from the journal" {
   // The constructor hydrates `message_buffer` from the journal: superseded
   // Error turns are dropped (the journal keeps them), everything else is kept
   // in order, so a resumed session never replays a failure into the prompt.
-  let llm = @providers.DeepSeekResponsesAPILLM("dummy-key")
+  let llm = StubLLM::{  }
   let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
   debug_inspect(session.message_buffer.length(), content="2")
   let user_count = session.message_buffer
