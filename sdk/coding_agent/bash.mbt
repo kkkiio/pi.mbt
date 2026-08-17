@@ -74,7 +74,7 @@ async fn execute_bash_tool(
   let output = OutputAccumulator(
     max_lines=DEFAULT_MAX_LINES,
     max_bytes=DEFAULT_MAX_BYTES,
-    temp_file_prefix="pi-bash",
+    temp_file_prefix="pim-bash",
   )
   let mut acceptingOutput = true
   let mut updateTimer : @async.Task[Unit]? = None
@@ -136,7 +136,7 @@ async fn execute_bash_tool(
     scheduleOutputUpdate()
   }
 
-  let finishOutput = () => {
+  let finish_output = () => {
     acceptingOutput = false
     output.finish()
     clearUpdateTimer()
@@ -206,7 +206,7 @@ async fn execute_bash_tool(
     exitCode
   } catch {
     err => {
-      let snapshot = finishOutput()
+      let snapshot = finish_output()
       let (text, _) = formatOutput(snapshot, "")
       match err.to_string() {
         "aborted" => fail(appendStatus(text, "Command aborted"))
@@ -219,7 +219,7 @@ async fn execute_bash_tool(
     }
   }
 
-  let snapshot = finishOutput()
+  let snapshot = finish_output()
   let (outputText, details) = formatOutput(snapshot, "(no output)")
   if exitCode != 0 {
     fail(appendStatus(outputText, "Command exited with code \{exitCode}"))
@@ -271,11 +271,10 @@ async fn local_bash_exec(params : BashExecParams) -> Int {
         for ;; {
           match reader.read_some(max_len=4096) {
             None => break
-            Some(chunk) => {
+            Some(chunk) =>
               if params.on_data is Some(callback) {
                 callback(chunk)
               }
-            }
           }
         }
         process.wait()

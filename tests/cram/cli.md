@@ -15,8 +15,9 @@ $ pim.exe --help
 Usage: pim [options]
 
 Options:
-  -h, --help           Show help information.
-  -p, --print <print>  
+  -h, --help                   Show help information.
+  -p, --print <print>          prompt text
+  --session-dir <session_dir>  directory to store session JSONL files [env: PIM_SESSION_DIR]
 ```
 
 ## 缺少 -p

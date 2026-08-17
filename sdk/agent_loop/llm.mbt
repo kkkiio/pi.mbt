@@ -5,11 +5,7 @@
 /// response stream inline in the calling task (no background task), following
 /// the callback/sink model.
 pub(open) trait LLM {
-  async fn generate(
-    Self,
-    Context,
-    sink~ : async (GenerationEvent) -> Unit,
-  ) -> AssistantMessage
+  async fn generate(Self, Context, sink~ : async (GenerationEvent) -> Unit) -> AssistantMessage
 }
 
 ///|
@@ -20,23 +16,10 @@ pub(all) struct Context {
 }
 
 ///|
-pub(all) enum AgentMessage {
-  User(ArrayView[InputMessageContent])
-  Assistant(ArrayView[AssistantMessageContent])
-  // System(Array[InputMessageContent])
-  ToolResult(ToolResultMessage)
-}
-
-///|
 pub(all) enum ToolDefinition {
   Hosted(HostedTool)
   Function(FunctionTool)
 }
-
-///|
-pub(all) enum HostedTool {
-  WebSearch
-} derive(Debug)
 
 ///|
 pub(all) struct FunctionTool {
@@ -63,42 +46,32 @@ pub(all) enum GrammarFormat {
 }
 
 ///|
-pub(all) enum InputMessageContent {
-  Text(String)
-  Image(Bytes)
-}
-
-///|
-pub(all) struct ToolResultMessage {
-  tool_call_id : String
-  tool_name : String
-  content : Array[InputMessageContent]
-  is_error : Bool
-  timestamp : UInt64
-  /// Whether the tool wants to exit the agent loop, like yielding control back to the user or system. For example, a ui tool may want to exit the loop and wait for user input before continuing.
-  terminate : Bool
-}
-
-///|
 /// Event protocol for `generate`'s sink: the phases of one generation call.
 /// The terminal outcome is not an event — `generate` returns the final
 /// `AssistantMessage`, whose `stop_reason` and `error_message` describe how
 /// the turn ended.
+///
+/// `Start` carries the in-flight `AssistantMessage` created by the provider
+/// when the stream begins: `api`/`provider`/`model`/`timestamp` are already
+/// known, `stop_reason` is `Pending`, and `content` grows as deltas arrive.
 pub(all) enum GenerationEvent {
-  Start
-  TextStart(Int, PartialAssistantMessage)
-  TextDelta(Int, String, PartialAssistantMessage)
-  TextEnd(Int, String, PartialAssistantMessage)
-  ThinkingStart(Int, PartialAssistantMessage)
-  ThinkingDelta(Int, String, PartialAssistantMessage)
-  ThinkingEnd(Int, String, PartialAssistantMessage)
-  ToolCallStart(Int, PartialAssistantMessage)
-  ToolCallDelta(Int, String, PartialAssistantMessage)
-  ToolCallEnd(Int, ToolCall, PartialAssistantMessage)
+  Start(AssistantMessage)
+  TextStart(Int, AssistantMessage)
+  TextDelta(Int, String, AssistantMessage)
+  TextEnd(Int, String, AssistantMessage)
+  ThinkingStart(Int, AssistantMessage)
+  ThinkingDelta(Int, String, AssistantMessage)
+  ThinkingEnd(Int, String, AssistantMessage)
+  ToolCallStart(Int, AssistantMessage)
+  ToolCallDelta(Int, String, AssistantMessage)
+  ToolCallEnd(Int, ToolCall, AssistantMessage)
 } derive(Debug)
 
 ///|
 pub(all) enum StopReason {
+  /// Streaming is still in progress; replaced by a terminal reason when the
+  /// turn ends. Must never appear in persisted journal entries.
+  Pending
   Stop
   /// The model stopped because it reached the maximum number of tokens allowed.
   Length
@@ -106,35 +79,6 @@ pub(all) enum StopReason {
   /// The model was aborted by the user or system.
   Aborted
   Error
-} derive(Debug)
-
-///|
-pub(all) struct PartialAssistantMessage {
-  content : ArrayView[AssistantMessageContent]
-} derive(Debug)
-
-///|
-pub(all) struct AssistantMessage {
-  content : Array[AssistantMessageContent]
-  stop_reason : StopReason
-  /// Set when `stop_reason` is `Aborted` or `Error`: the failure description.
-  error_message : String?
-  usage : Usage?
-} derive(Debug)
-
-///|
-pub(all) enum AssistantMessageContent {
-  Text(String, signature~ : Json)
-  Thinking(String, signature~ : Json)
-  ToolCall(ToolCall, signature~ : Json)
-  HostedToolCall(HostedTool, signature~ : Json)
-} derive(Debug)
-
-///|
-pub(all) struct ToolCall {
-  id : String
-  name : String
-  arguments : Json
 } derive(Debug)
 
 ///|
@@ -153,6 +97,26 @@ pub(all) struct Usage {
 } derive(Debug)
 
 ///|
+pub impl ToJson for Usage with fn to_json(self : Usage) -> Json {
+  {
+    "input": self.input,
+    "output": self.output,
+    "cacheRead": self.cache_read,
+    "cacheWrite": self.cache_write,
+    "cacheWrite1h": match self.cache_write_1h {
+      Some(n) => n.to_json()
+      None => null
+    },
+    "reasoning": match self.reasoning {
+      Some(n) => n.to_json()
+      None => null
+    },
+    "totalTokens": self.total_tokens,
+    "cost": self.cost,
+  }
+}
+
+///|
 pub(all) struct UsageCost {
   input : Float
   output : Float
@@ -162,12 +126,37 @@ pub(all) struct UsageCost {
 } derive(Debug)
 
 ///|
+pub impl ToJson for UsageCost with fn to_json(self : UsageCost) -> Json {
+  Json::object({
+    "input": self.input.to_json(),
+    "output": self.output.to_json(),
+    "cacheRead": self.cache_read.to_json(),
+    "cacheWrite": self.cache_write.to_json(),
+    "total": self.total.to_json(),
+  })
+}
+
+///|
 pub impl Show for StopReason with fn to_string(self : StopReason) -> String {
   match self {
+    Pending => "pending"
     Stop => "stop"
     Length => "length"
-    ToolUse => "tool_use"
+    ToolUse => "toolUse"
     Aborted => "aborted"
     Error => "error"
+  }
+}
+
+///|
+/// Serialized values match pi's `StopReason` strings.
+pub impl ToJson for StopReason with fn to_json(self : StopReason) -> Json {
+  match self {
+    Pending => "pending".to_json()
+    Stop => "stop".to_json()
+    Length => "length".to_json()
+    ToolUse => "toolUse".to_json()
+    Aborted => "aborted".to_json()
+    Error => "error".to_json()
   }
 }
