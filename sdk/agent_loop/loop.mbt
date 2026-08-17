@@ -126,19 +126,6 @@ pub async fn run_agent_loop(
 }
 
 ///|
-pub enum AgentEvent {
-  AgentStart
-  TurnStart
-  MessageStart(AgentMessage)
-  MessageUpdate(AgentMessage)
-  MessageEnd(AgentMessage)
-  ToolExecutionStart(ToolCall)
-  ToolExecutionEnd(ToolResultMessage)
-  TurnEnd(AssistantMessage, ArrayView[ToolResultMessage])
-  AgentEnd(ArrayView[AgentMessage])
-}
-
-///|
 pub enum LoopStopReason {
   Stop
   /// The model was aborted by the user or system.
