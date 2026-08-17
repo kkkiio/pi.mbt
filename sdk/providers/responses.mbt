@@ -1,4 +1,10 @@
 ///|
+/// Prefix of the failure raised when the SSE stream stalls past its idle
+/// timeout; provider retry policies (`retry_transient`) match it to classify
+/// the stall as a transient condition.
+const SSE_STREAM_IDLE_FAILURE_PREFIX : String = "Responses stream idle for"
+
+///|
 /// Reads a Responses SSE stream inline, delivering each streaming delta to
 /// `sink` and returning the terminal `AssistantMessage` as the function's
 /// result. There is no background task: the caller's task drives the whole
@@ -45,7 +51,7 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
         continue
       }
       Some(None) => "Responses stream ended before a terminal event"
-      None => "Responses stream idle for \{idle_timeout_ms}ms"
+      None => "\{SSE_STREAM_IDLE_FAILURE_PREFIX} \{idle_timeout_ms}ms"
     }
     let flushed = flush_sse_event(
       data_lines,

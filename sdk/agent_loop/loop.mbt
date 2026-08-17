@@ -27,9 +27,19 @@ pub async fn run_agent_loop(
     let assistant_message = llm.generate({ system_prompt, messages, tools }, sink=event => {
       match event {
         Start(m) => {
-          message_started = true
           let msg = AgentMessage::Assistant(m)
-          messages.push(msg)
+          if message_started {
+            // A provider retry restarts the stream: the same generate call
+            // re-emits Start for a fresh attempt after a transient failure
+            // (TCP reset, idle timeout, HTTP 429/5xx retried by the provider).
+            // Treat it as a stream restart: replace the in-flight message so
+            // the failed attempt's partial content is discarded, and re-fire
+            // MessageStart so downstream consumers see the fresh sequence.
+            messages[messages.length() - 1] = msg
+          } else {
+            message_started = true
+            messages.push(msg)
+          }
           event_sink(AgentEvent::MessageStart(msg))
         }
         TextStart(_, m)
