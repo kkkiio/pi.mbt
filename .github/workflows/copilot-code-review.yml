@@ -1,0 +1,32 @@
+# Reference: https://gh.io/AA11tgch — Copilot code review uses its own runner
+# configuration, separate from the Copilot cloud agent's copilot-setup-steps.
+name: "Copilot Code Review Setup"
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-code-review.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-code-review.yml
+
+jobs:
+  # The job MUST be called `copilot-code-review` so Copilot picks it up.
+  copilot-code-review:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Set up MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> $GITHUB_PATH
+
+      - name: Update MoonBit dependencies
+        run: |
+          moon version --all
+          moon update
