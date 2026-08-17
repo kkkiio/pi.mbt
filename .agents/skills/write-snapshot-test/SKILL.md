@@ -14,7 +14,8 @@ Use this skill when adding or updating MoonBit snapshot tests in pi.mbt.
 | 完整 JSONL 文本输出 | `inspect(value, content=(#|...#))` | 文本形状就是契约。 |
 | 实现 `ToJson` 的结构化领域对象（`SessionEntry`、messages 等） | `json_inspect(value)` | snapshot 即 JSON 契约，`--update` 自动维护。 |
 | 实现 `Show` 的标量 | `inspect(value)` | 比 `debug_inspect` 可读。 |
-| 单个可独立推导的不变量（计数、布尔、id 相等） | `assert_eq(a, b)` | 失败定位精确，不必看 snapshot。 |
+| 单个可独立推导的不变量（计数、id 相等） | `assert_eq(a, b)` | 失败定位精确，不必看 snapshot。 |
+| 布尔谓词（`is_retryable(...)` 这类分类/判定函数） | `assert_true(f(x))` / `assert_false(f(x))` | 谓词测试的本质就是真假，`debug_inspect(..., content="true")` 是无信息快照。 |
 | **不可** | 把 `contains` / `length` / `starts_with` 结果包进 `inspect` 或 tuple | 既丢可读性，又丢定位能力。 |
 
 **核心原则：让 `moon test --update` 生成 baseline，不要手写预期数组或字符串。**
