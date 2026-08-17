@@ -1,4 +1,4 @@
-# ADR 0001: Transient-failure retry architecture and journal persistence of error messages
+# ADR 0001: Transient-failure retry architecture and error-message lifecycle
 
 - Status: Accepted
 - Date: 2026-08-17
@@ -13,120 +13,108 @@ agent runs permanently:
 - `Responses stream idle for 120000ms` — SSE stream stall past the idle
   timeout.
 
-PR #11 added a whole-stream retry: the provider retries the entire `generate`
-call even after partial streaming, re-emitting a fresh `Start` event sequence,
-and `loop.mbt` treats a repeated `Start` as a stream restart. This maximizes
-benchmark completion but leaks retry semantics into the agent-loop event
-protocol: consumers of `AgentEvent` must understand that a message sequence
-can restart.
+A first fix (PR #11) retried the whole `generate` call, re-emitting stream
+events, which leaked retry semantics into the agent-loop event protocol.
+Reference implementations (pi in TypeScript, openseek in MoonBit) instead
+split retry handling across layers, and that model is adopted here.
 
-Reference implementations handle this in two layers instead:
+This ADR has two parts: the retry layering, and — the part with the most
+lasting design impact — the **error-message lifecycle**: when an assistant
+turn fails, where does that failed message live, and who ever sees it?
 
-- **pi (TypeScript)**: provider retry covers only request establishment
-  (`client.responses.create().withResponse()`), invisible to callers; a
-  mid-stream failure ends the turn with `stopReason: "error"`; `AgentSession`
-  then auto-retries the whole turn, emitting explicit `auto_retry_start` /
-  `auto_retry_end` session events and removing the failed message from the
-  agent state before re-running.
-- **openseek**: provider retry "bails" once the first complete SSE event
-  arrives — the retry window contains zero observable output, so it is fully
-  caller-invisible.
+## The error-message lifecycle (the core decision)
 
-pi's journal discipline for error messages: `message_end` persists every
-assistant message including failed ones, and resume rebuilds context from the
-full entry path (only `stopReason: "deferred"` is filtered). Live retry
-removes the failed message from agent state, so live context and resumed
-context differ (resume includes the superseded error message). pi accepts
-this inconsistency: prefix caches are provider-side with minute-scale TTLs
-and never survive a process restart anyway.
+When a turn fails with a retryable error and the session auto-retries, the
+failed assistant message (call it A₁) is superseded by the retried turn's
+message (A₂). Three places can each choose to keep or drop A₁:
 
-## Decision
+| | Keep A₁? | Rationale |
+| --- | --- | --- |
+| **Journal (on-disk history)** | **Keep** | The journal is a write-ahead log; failure evidence must not be erased. |
+| **Live context (what the LLM sees during the run)** | **Drop** | Before retrying, A₁ is popped from the in-memory message buffer, so the retried call never sees its own half-produced attempt. |
+| **Resumed context (what the LLM sees after reloading a session)** | **Drop** | Hydration filters out assistant messages with `stop_reason = Error`, so a resumed session never replays a failed turn into the prompt. |
 
-### Layered retry
+Consequences of this combination:
 
-1. **Provider retry window: connection through the first complete SSE event**
-   (openseek's `bail` semantics). A failed attempt emits zero events to the
-   sink, so the retry is invisible to the agent loop and all downstream
-   consumers. This window is slightly wider than pi's (which stops at
-   response headers) and additionally covers "headers received but stream
-   stalls before producing anything".
+- The disk journal may contain `[user, A₁(error), A₂(success), …]` — a
+  complete, honest history.
+- The model never sees A₁, live or after resume — context is always the
+  clean, successful path.
+- Live and resumed behavior are identical by construction.
+
+### Alternatives considered
+
+**Persist everything, resume unfiltered (pi's behavior).**
+pi keeps error messages in the journal and its resume path
+(`buildSessionContext`) filters only `deferred` messages, so a resumed pi
+session *does* replay superseded error messages into the model context,
+while its live retry removes them — live and resume disagree. pi accepts
+this; prefix-cache locality doesn't suffer because provider caches have
+minute-scale TTLs and never survive a process restart. Rejected: we prefer
+live/resume consistency over mimicking pi's incidental behavior.
+
+**Persist only terminal errors.**
+A failed message reaches the journal only when the retry budget is
+exhausted or the error is not retryable; hydration needs no filter because
+the journal already reads as "what the model actually saw". Rejected:
+superseded failures leave no trace in the journal, weakening failure
+forensics — the journal should be self-sufficient as a record of what
+happened.
+
+Note on cross-tool compatibility: pi reading a pim journal includes our
+error messages in context (pi filters nothing else); pim reading any journal
+drops them. Both are safe; the contexts differ only by whether a failed
+attempt is visible to the model.
+
+## Retry layering (the mechanical part)
+
+1. **Provider retry window: connection through the first complete SSE
+   event** (openseek's `bail` semantics). A failed attempt emits zero events
+   to the sink, so retries are invisible to the agent loop. This window is
+   slightly wider than pi's (which stops at response headers) and also
+   covers "headers received but the stream stalls before producing
+   anything".
 2. **Typed classification inside the provider**: a package-private
-   `RetryableApiError` is raised at the raise sites (idle timeout, 429/5xx);
+   `RetryableApiError` is raised at raise sites (idle timeout, 429/5xx);
    `@async.retry`'s `fatal_error` blacklist (cancellation, plain `fail`,
-   produced-any-event) decides retryability. No string matching at this
-   layer.
-3. **Mid-stream failure becomes an error message**: after the first SSE
-   event, failures propagate; the agent loop converts a raised `generate`
-   into an `AssistantMessage` with `stop_reason: Error`, ending the turn
-   normally.
-4. **Session-level auto_retry**: `AgentSession` retries a turn whose
-   assistant message ended with a retryable error, bounded (3 attempts) with
-   exponential backoff, emitting `AgentSessionEvent::AutoRetryStart` /
-   `AutoRetryEnd`. Retryability at this layer pattern-matches `error_message`
-   against pi's blacklist (quota/billing, context overflow) and whitelist
-   (overloaded, rate limit, 5xx, transport) — once errors cross layer
-   boundaries they are text, and pi does the same.
-5. `AgentSessionEvent` is a session-level event union (`Loop(AgentEvent)` plus
-   session events), keeping retry signals out of the loop's `AgentEvent`.
+   already-produced-an-event) decides retryability. No string matching at
+   this layer.
+3. **Mid-stream failure becomes an error message**: the agent loop converts
+   a raised `generate` into an `AssistantMessage` with `stop_reason: Error`,
+   ending the turn normally. The agent loop itself carries no retry logic.
+4. **Session-level auto-retry**: `AgentSession` retries a turn whose
+   terminal message is a retryable error — bounded (3 attempts), exponential
+   backoff, emitting `AgentSessionEvent::AutoRetryStart` / `AutoRetryEnd`.
+   Retryability pattern-matches `error_message` against pi's blacklist
+   (quota/billing, context overflow) and whitelist (overloaded, rate limit,
+   5xx, transport) — across layer boundaries errors are text, and pi does
+   the same.
+5. `AgentSessionEvent` is the session-level event union
+   (`Loop(AgentEvent)` plus session events), keeping retry signals out of
+   the agent loop's `AgentEvent`.
 
-### Journal persistence of error messages (Option C)
+### Alternatives considered for the retry window
 
-6. Error assistant messages are **persisted unconditionally** at
-   `MessageEnd` — the journal is a complete write-ahead log, including failed
-   attempts later superseded by a retry.
-7. **Hydration filters**: when rebuilding `message_buffer` from journal
-   entries, assistant messages with `stop_reason: Error` are dropped, so the
-   restored model context never contains superseded or partial failures.
-   Live and resumed context are identical.
-
-## Considered alternatives
-
-### Retry window
-
-- **Whole-stream retry with event buffering** (PR #11 first draft): buffer an
-  attempt's events and replay them only on success. No duplicate downstream
-  events, but kills live streaming — `--mode json` consumers and any future
-  TUI would see updates arrive in a burst at the end. Rejected.
-- **Whole-stream retry with live re-emission** (PR #11 as merged): best
-  benchmark completion, but the restart contract (`Start` may repeat)
-  becomes part of the event protocol, diverging from pi's clean layering.
-  Superseded by this ADR.
+- **Whole-stream retry with event buffering** (PR #11 first draft): buffer
+  an attempt's events and replay only on success. No duplicate downstream
+  events, but kills live streaming. Rejected.
+- **Whole-stream retry with live re-emission** (PR #11 as merged): the
+  restart contract (`Start` may repeat) becomes part of the event protocol,
+  diverging from pi's clean layering. Superseded by this ADR.
 - **pi's exact window (until response headers)**: narrower than `bail`; a
   stream that stalls before its first event is not retried. Not chosen.
 
-### Error-message persistence and hydration
-
-- **A — pi-faithful**: persist everything, hydration includes error messages
-  (filter only `deferred`, which pim does not have). Live context excludes
-  the superseded error while resumed context includes it — live/resume
-  inconsistency. Rejected for the inconsistency.
-- **B — terminal-only persistence**: error messages reach the journal only
-  when the retry budget is exhausted or the error is not retryable. The
-  journal reads as "what the model actually saw" and hydration needs no
-  filter. Rejected: superseded failures leave no trace in the journal,
-  weakening failure forensics (benchmark trajectories do keep them in harbor
-  logs, but the journal should be self-sufficient).
-- **C — persist all + filter at hydration (chosen)**: complete WAL on disk,
-  clean context in memory, live/resume consistent. The filter is one guard
-  in `AgentSession`'s constructor. Semantic trade-off: a terminally failed
-  session resumes without the failure in context — acceptable, since
-  resuming a failed session is almost always followed by a retry prompt
-  anyway.
-
 ## Consequences
 
-- The agent-loop event protocol carries no retry semantics; `loop.mbt`
-  reverts the stream-restart handling from PR #11.
-- Provider code raises typed retryable errors; classification text-matching
-  exists only at the session layer, mirroring pi.
+- The agent-loop event protocol carries no retry semantics.
+- Provider code raises typed retryable errors; classification
+  text-matching exists only at the session layer, mirroring pi.
 - `AgentSession.subscribe` listeners receive `AgentSessionEvent` instead of
   `AgentEvent` — a breaking change for `cmd/pim` and `--mode json` wiring,
   mechanically a one-layer `Loop(...)` unwrap.
-- pi reading a pim journal (or vice versa) works at the codec level; note
-  that pi's hydration includes error messages while pim's filters them, so
-  cross-tool resume of the same journal produces slightly different contexts
-  (pi keeps the failure, pim drops it). Both are safe; pim is the primary
-  reader of its own journals.
-- Benchmark resilience comes from the session-level auto-retry of a whole
-  turn rather than regeneration of a half-streamed message — slightly more
-  tokens spent per recovery, in exchange for clean protocol semantics.
+- Benchmark resilience comes from whole-turn re-runs rather than
+  regeneration of half-streamed messages — slightly more tokens per
+  recovery, in exchange for clean protocol semantics.
+- The journal contains failed turns that the model never saw. Analysis
+  tooling must be aware that `stopReason: "error"` entries are historical
+  records, not context that was sent to the model.
