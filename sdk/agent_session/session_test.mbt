@@ -54,101 +54,53 @@ fn ok_message() -> @agent_loop.AssistantMessage {
 ///|
 async test "is_retryable_error_message matches pi's retryable patterns" {
   // HTTP 5xx and provider load.
-  debug_inspect(
+  assert_true(
     is_retryable_error_message("DeepSeek API error 503: service unavailable"),
-    content="true",
   )
-  debug_inspect(
+  assert_true(
     is_retryable_error_message(
       "The model is currently overloaded, please try again",
     ),
-    content="true",
   )
-  debug_inspect(
-    is_retryable_error_message("429 Too Many Requests"),
-    content="true",
-  )
-  debug_inspect(
-    is_retryable_error_message("internal server error"),
-    content="true",
-  )
+  assert_true(is_retryable_error_message("429 Too Many Requests"))
+  assert_true(is_retryable_error_message("internal server error"))
   // Rate limiting (any separator, case-insensitive).
-  debug_inspect(
-    is_retryable_error_message("rate limit exceeded"),
-    content="true",
-  )
-  debug_inspect(
-    is_retryable_error_message("rate-limit exceeded"),
-    content="true",
-  )
-  debug_inspect(
-    is_retryable_error_message("RATELIMIT exceeded"),
-    content="true",
-  )
+  assert_true(is_retryable_error_message("rate limit exceeded"))
+  assert_true(is_retryable_error_message("rate-limit exceeded"))
+  assert_true(is_retryable_error_message("RATELIMIT exceeded"))
   // Transport failures.
-  debug_inspect(
-    is_retryable_error_message("reset before headers"),
-    content="true",
-  )
-  debug_inspect(is_retryable_error_message("Socket hang up"), content="true")
-  debug_inspect(
-    is_retryable_error_message("ENOTFOUND api.deepseek.com"),
-    content="true",
-  )
-  debug_inspect(
-    is_retryable_error_message("stream ended before message_stop"),
-    content="true",
-  )
-  debug_inspect(
-    is_retryable_error_message("please retry your request"),
-    content="true",
-  )
-  debug_inspect(
-    is_retryable_error_message("timed out waiting for the stream"),
-    content="true",
-  )
+  assert_true(is_retryable_error_message("reset before headers"))
+  assert_true(is_retryable_error_message("Socket hang up"))
+  assert_true(is_retryable_error_message("ENOTFOUND api.deepseek.com"))
+  assert_true(is_retryable_error_message("stream ended before message_stop"))
+  assert_true(is_retryable_error_message("please retry your request"))
+  assert_true(is_retryable_error_message("timed out waiting for the stream"))
 }
 
 ///|
 async test "is_retryable_error_message rejects non-retryable and limit errors" {
   // Client errors and protocol failures are not transient.
-  debug_inspect(
+  assert_false(
     is_retryable_error_message("DeepSeek API error 404: model not found"),
-    content="false",
   )
-  debug_inspect(
+  assert_false(
     is_retryable_error_message("DeepSeek API error 401: invalid api key"),
-    content="false",
   )
-  debug_inspect(
-    is_retryable_error_message("Malformed Responses SSE event"),
-    content="false",
-  )
-  debug_inspect(
+  assert_false(is_retryable_error_message("Malformed Responses SSE event"))
+  assert_false(
     is_retryable_error_message("Responses stream ended before a terminal event"),
-    content="false",
   )
   // Quota/billing exhaustion is never retried (pi's blacklist).
-  debug_inspect(
+  assert_false(
     is_retryable_error_message(
       "You exceeded your current quota, please check your plan and billing details",
     ),
-    content="false",
   )
-  debug_inspect(
-    is_retryable_error_message("insufficient_quota"),
-    content="false",
-  )
-  debug_inspect(
-    is_retryable_error_message("monthly usage limit reached"),
-    content="false",
-  )
-  debug_inspect(is_retryable_error_message("out of budget"), content="false")
+  assert_false(is_retryable_error_message("insufficient_quota"))
+  assert_false(is_retryable_error_message("monthly usage limit reached"))
+  assert_false(is_retryable_error_message("out of budget"))
   // Unrelated text.
-  debug_inspect(
-    is_retryable_error_message("some unrelated error text"),
-    content="false",
-  )
+  assert_false(is_retryable_error_message("some unrelated error text"))
 }
 
 ///|
@@ -178,11 +130,11 @@ async test "session hydration drops Error assistant messages from the journal" {
   // in order, so a resumed session never replays a failure into the prompt.
   let llm = StubLLM::{  }
   let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
-  debug_inspect(session.message_buffer.length(), content="2")
+  assert_eq(session.message_buffer.length(), 2)
   let user_count = session.message_buffer
     .filter(m => m is @agent_loop.AgentMessage::User(_))
     .length()
-  debug_inspect(user_count, content="1")
+  assert_eq(user_count, 1)
   let text = match session.message_buffer[1] {
     @agent_loop.AgentMessage::Assistant(m) =>
       match m.content {
@@ -191,5 +143,5 @@ async test "session hydration drops Error assistant messages from the journal" {
       }
     _ => ""
   }
-  debug_inspect(text, content="\"final answer\"")
+  assert_eq(text, "final answer")
 }
