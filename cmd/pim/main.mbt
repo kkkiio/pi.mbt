@@ -65,8 +65,7 @@ async fn main {
       content: [@agent_loop.InputMessageContent::Text(p)],
     }),
   )
-  guard last_message
-    is Some(Assistant({ content: [_, ..] as reply, .. })) else {
+  guard last_message is Some(Assistant({ content: [_, ..] as reply, .. })) else {
     fatal("no reply from agent")
   }
   let output = StringBuilder()

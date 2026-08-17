@@ -132,7 +132,10 @@ fn skill_fallback_name(path : String) -> String {
 
 ///|
 /// Parse `name:` and `description:` from a markdown frontmatter block.
-pub fn parse_frontmatter(text : String, fallback_name : String) -> (String, String) {
+pub fn parse_frontmatter(
+  text : String,
+  fallback_name : String,
+) -> (String, String) {
   let mut name = fallback_name
   let mut description = ""
   let lines = [..text.split("\n")]

@@ -31,9 +31,7 @@ async test "openai streaming example" {
   let messages = []
   let final_message = read_responses_sse_stream(
     @io.MemoryReader::MemoryReader() <| w => { w.write(response) },
-    sink=event => {
-      messages.push(event)
-    },
+    sink=event => messages.push(event),
     api="openai-responses",
     provider="deepseek",
     model="deepseek-v4-flash",
@@ -137,42 +135,42 @@ async test "openai streaming example" {
       #|    },
       #|  ),
       #|]
-
     ),
   )
-  debug_inspect(final_message, content=(
-    
-    #|{
-    #|  content: [
-    #|    Text(
-    #|      "Hi there! How can I assist you today?",
-    #|      signature=Object(
-    #|        {
-    #|          "type": String("message"),
-    #|          "id": String("msg_67c9fdcf37fc8190ba82116e33fb28c507b8b0ad4e5eb654"),
-    #|        },
-    #|      ),
-    #|    ),
-    #|  ],
-    #|  api: "openai-responses",
-    #|  provider: "deepseek",
-    #|  model: "deepseek-v4-flash",
-    #|  stop_reason: Stop,
-    #|  error_message: None,
-    #|  usage: Some(
-    #|    {
-    #|      input: 37,
-    #|      output: 11,
-    #|      cache_read: 0,
-    #|      cache_write: 0,
-    #|      cache_write_1h: None,
-    #|      reasoning: Some(0),
-    #|      total_tokens: 48,
-    #|      cost: { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0 },
-    #|    },
-    #|  ),
-    #|  timestamp: 1741290958000,
-    #|}
-
-  ))
+  debug_inspect(
+    final_message,
+    content=(
+      #|{
+      #|  content: [
+      #|    Text(
+      #|      "Hi there! How can I assist you today?",
+      #|      signature=Object(
+      #|        {
+      #|          "type": String("message"),
+      #|          "id": String("msg_67c9fdcf37fc8190ba82116e33fb28c507b8b0ad4e5eb654"),
+      #|        },
+      #|      ),
+      #|    ),
+      #|  ],
+      #|  api: "openai-responses",
+      #|  provider: "deepseek",
+      #|  model: "deepseek-v4-flash",
+      #|  stop_reason: Stop,
+      #|  error_message: None,
+      #|  usage: Some(
+      #|    {
+      #|      input: 37,
+      #|      output: 11,
+      #|      cache_read: 0,
+      #|      cache_write: 0,
+      #|      cache_write_1h: None,
+      #|      reasoning: Some(0),
+      #|      total_tokens: 48,
+      #|      cost: { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0 },
+      #|    },
+      #|  ),
+      #|  timestamp: 1741290958000,
+      #|}
+    ),
+  )
 }

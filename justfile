@@ -6,6 +6,9 @@ default:
 check:
     moon check --deny-warn
 
+fmt:
+    moon fmt
+
 build:
     moon build --target native
 

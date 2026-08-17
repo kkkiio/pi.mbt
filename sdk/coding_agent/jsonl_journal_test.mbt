@@ -53,13 +53,12 @@ async test "persists various entries in memory and as JSONL" {
   let user_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::User([
     @agent_loop.InputMessageContent::Text("hello"),
   ])
-  let assistant_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::Assistant(
-    {
+  let assistant_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::Assistant({
       content: [
-        @agent_loop.AssistantMessageContent::Text(
-          "hi",
-          signature={ "type": "message", "id": "msg_1" },
-        ),
+        @agent_loop.AssistantMessageContent::Text("hi", signature={
+          "type": "message",
+          "id": "msg_1",
+        }),
       ],
       api: "openai-responses",
       provider: "deepseek",
@@ -70,8 +69,7 @@ async test "persists various entries in memory and as JSONL" {
       timestamp: 1786903823973,
     },
   )
-  let tool_result : @agent_loop.AgentMessage = @agent_loop.AgentMessage::ToolResult(
-    {
+  let tool_result : @agent_loop.AgentMessage = @agent_loop.AgentMessage::ToolResult({
       tool_call_id: "call_1",
       tool_name: "bash",
       content: [@agent_loop.InputMessageContent::Text("ok")],
@@ -88,13 +86,91 @@ async test "persists various entries in memory and as JSONL" {
         model_id="v4",
       ),
     },
-    { id: "e2", content: @agent_session.SessionEntryContent::Message(user_message, terminate=false) },
-    { id: "e3", content: @agent_session.SessionEntryContent::Message(assistant_message, terminate=false) },
-    { id: "e4", content: @agent_session.SessionEntryContent::Message(tool_result, terminate=false) },
+    {
+      id: "e2",
+      content: @agent_session.SessionEntryContent::Message(
+        user_message,
+        terminate=false,
+      ),
+    },
+    {
+      id: "e3",
+      content: @agent_session.SessionEntryContent::Message(
+        assistant_message,
+        terminate=false,
+      ),
+    },
+    {
+      id: "e4",
+      content: @agent_session.SessionEntryContent::Message(
+        tool_result,
+        terminate=false,
+      ),
+    },
   ])
 
   // The journal assigns seq/parentId/timestamp at append time.
-  json_inspect(stored, content=([{"id":"e1","seq":2,"parentId":"e0","timestamp":1786903823973,"type":"model_change","provider":"deepseek","modelId":"v4"},{"id":"e2","seq":3,"parentId":"e1","timestamp":1786903823973,"type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}]}},{"id":"e3","seq":4,"parentId":"e2","timestamp":1786903823973,"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"hi","textSignature":"{\"type\":\"message\",\"id\":\"msg_1\"}"}],"api":"openai-responses","provider":"deepseek","model":"deepseek-v4-flash","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":1786903823973}},{"id":"e4","seq":5,"parentId":"e3","timestamp":1786903823973,"type":"message","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"ok"}],"isError":false,"timestamp":1786903823973}}]))
+  json_inspect(stored, content=[
+    {
+      "id": "e1",
+      "seq": 2,
+      "parentId": "e0",
+      "timestamp": 1786903823973,
+      "type": "model_change",
+      "provider": "deepseek",
+      "modelId": "v4",
+    },
+    {
+      "id": "e2",
+      "seq": 3,
+      "parentId": "e1",
+      "timestamp": 1786903823973,
+      "type": "message",
+      "message": {
+        "role": "user",
+        "content": [{ "type": "text", "text": "hello" }],
+      },
+    },
+    {
+      "id": "e3",
+      "seq": 4,
+      "parentId": "e2",
+      "timestamp": 1786903823973,
+      "type": "message",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "hi",
+            "textSignature": "{\"type\":\"message\",\"id\":\"msg_1\"}",
+          },
+        ],
+        "api": "openai-responses",
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "stopReason": "stop",
+        "errorMessage": null,
+        "usage": null,
+        "timestamp": 1786903823973,
+      },
+    },
+    {
+      "id": "e4",
+      "seq": 5,
+      "parentId": "e3",
+      "timestamp": 1786903823973,
+      "type": "message",
+      "message": {
+        "role": "toolResult",
+        "toolCallId": "call_1",
+        "toolName": "bash",
+        "content": [{ "type": "text", "text": "ok" }],
+        "isError": false,
+        "timestamp": 1786903823973,
+      },
+    },
+  ])
 
   // In-memory entries include the preloaded one plus the four appended ones.
   inspect(journal.get_entries().length(), content="5")
@@ -106,7 +182,67 @@ async test "persists various entries in memory and as JSONL" {
   file.write(writer_text(writer))
   file.close()
   let fetched = @coding_agent.fetch_entries(path)
-  json_inspect(fetched, content=([{"id":"e1","seq":2,"parentId":"e0","timestamp":1786903823973,"type":"model_change","provider":"deepseek","modelId":"v4"},{"id":"e2","seq":3,"parentId":"e1","timestamp":1786903823973,"type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}]}},{"id":"e3","seq":4,"parentId":"e2","timestamp":1786903823973,"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"hi","textSignature":"{\"type\":\"message\",\"id\":\"msg_1\"}"}],"api":"openai-responses","provider":"deepseek","model":"deepseek-v4-flash","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":1786903823973}},{"id":"e4","seq":5,"parentId":"e3","timestamp":1786903823973,"type":"message","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"ok"}],"isError":false,"timestamp":1786903823973}}]))
+  json_inspect(fetched, content=[
+    {
+      "id": "e1",
+      "seq": 2,
+      "parentId": "e0",
+      "timestamp": 1786903823973,
+      "type": "model_change",
+      "provider": "deepseek",
+      "modelId": "v4",
+    },
+    {
+      "id": "e2",
+      "seq": 3,
+      "parentId": "e1",
+      "timestamp": 1786903823973,
+      "type": "message",
+      "message": {
+        "role": "user",
+        "content": [{ "type": "text", "text": "hello" }],
+      },
+    },
+    {
+      "id": "e3",
+      "seq": 4,
+      "parentId": "e2",
+      "timestamp": 1786903823973,
+      "type": "message",
+      "message": {
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "hi",
+            "textSignature": "{\"type\":\"message\",\"id\":\"msg_1\"}",
+          },
+        ],
+        "api": "openai-responses",
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "stopReason": "stop",
+        "errorMessage": null,
+        "usage": null,
+        "timestamp": 1786903823973,
+      },
+    },
+    {
+      "id": "e4",
+      "seq": 5,
+      "parentId": "e3",
+      "timestamp": 1786903823973,
+      "type": "message",
+      "message": {
+        "role": "toolResult",
+        "toolCallId": "call_1",
+        "toolName": "bash",
+        "content": [{ "type": "text", "text": "ok" }],
+        "isError": false,
+        "timestamp": 1786903823973,
+      },
+    },
+  ])
   @fs.remove(path)
   @fs.rmdir(temp_dir)
 
@@ -120,9 +256,6 @@ async test "persists various entries in memory and as JSONL" {
       #|{"kind":"entry","lane":"main","id":"e3","seq":4,"parentId":"e2","timestamp":1786903823973,"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"hi","textSignature":"{\"type\":\"message\",\"id\":\"msg_1\"}"}],"api":"openai-responses","provider":"deepseek","model":"deepseek-v4-flash","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":1786903823973}}
       #|{"kind":"entry","lane":"main","id":"e4","seq":5,"parentId":"e3","timestamp":1786903823973,"type":"message","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"ok"}],"isError":false,"timestamp":1786903823973}}
       #|
-
-
-
     ),
   )
 }

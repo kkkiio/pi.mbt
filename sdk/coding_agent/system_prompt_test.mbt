@@ -1,6 +1,8 @@
 ///|
 test "trivial system prompt" {
-  let system_prompt = @coding_agent.build_system_prompt(cwd="/workspaces/pi.mbt")
+  let system_prompt = @coding_agent.build_system_prompt(
+    cwd="/workspaces/pi.mbt",
+  )
   inspect(
     system_prompt,
     content=(

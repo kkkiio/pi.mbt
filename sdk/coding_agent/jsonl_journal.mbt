@@ -107,10 +107,10 @@ fn entry_mutation_json(
 }
 
 ///|
-pub async fn fetch_entries(path : String) -> Array[@agent_session.SessionEntry] raise Failure {
-  let content = try {
-    @fs.read_file(path).text()
-  } catch {
+pub async fn fetch_entries(
+  path : String,
+) -> Array[@agent_session.SessionEntry] raise Failure {
+  let content = @fs.read_file(path).text() catch {
     err => fail("failed to read session journal at \{path}: \{err}")
   }
   let has_trailing_newline = content.has_suffix("\n")
@@ -122,23 +122,14 @@ pub async fn fetch_entries(path : String) -> Array[@agent_session.SessionEntry] 
   if lines.length() == 0 {
     return entries
   }
-  let header = try {
-    Some(@json.parse(lines[0]))
-  } catch {
-    _ => None
-  }
-  guard header
-    is Some({ "kind": "header", "version": Number(version, ..), .. }) &&
+  let header = Some(@json.parse(lines[0])) catch { _ => None }
+  guard header is Some({ "kind": "header", "version": Number(version, ..), .. }) &&
     version == 4 else {
     fail("session journal at \{path} has an invalid or unsupported header")
   }
   for i = 1; i < lines.length(); i = i + 1 {
     let last = i == lines.length() - 1 && !has_trailing_newline
-    let json = try {
-      Some(@json.parse(lines[i]))
-    } catch {
-      _ => None
-    }
+    let json = Some(@json.parse(lines[i])) catch { _ => None }
     match json {
       None =>
         if last {
@@ -153,10 +144,9 @@ pub async fn fetch_entries(path : String) -> Array[@agent_session.SessionEntry] 
         if json is { "kind": String(kind), .. } && kind != "entry" {
           continue
         }
-        let entry = try {
-          @json.from_json(json)
-        } catch {
-          err => fail("session journal has invalid entry at line \{i + 1}: \{err}")
+        let entry = @json.from_json(json) catch {
+          err =>
+            fail("session journal has invalid entry at line \{i + 1}: \{err}")
         }
         entries.push(entry)
       }

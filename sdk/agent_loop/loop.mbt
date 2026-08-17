@@ -24,38 +24,35 @@ pub async fn run_agent_loop(
     }
     pending_prompts = []
     let mut message_started = false
-    let assistant_message = llm.generate(
-      { system_prompt, messages, tools },
-      sink=event => {
-        match event {
-          Start(m) => {
+    let assistant_message = llm.generate({ system_prompt, messages, tools }, sink=event => {
+      match event {
+        Start(m) => {
+          message_started = true
+          let msg = AgentMessage::Assistant(m)
+          messages.push(msg)
+          event_sink(AgentEvent::MessageStart(msg))
+        }
+        TextStart(_, m)
+        | TextDelta(_, _, m)
+        | TextEnd(_, _, m)
+        | ThinkingStart(_, m)
+        | ThinkingDelta(_, _, m)
+        | ThinkingEnd(_, _, m)
+        | ToolCallStart(_, m)
+        | ToolCallDelta(_, _, m)
+        | ToolCallEnd(_, _, m) => {
+          let msg = AgentMessage::Assistant(m)
+          if message_started {
+            messages[messages.length() - 1] = msg
+          } else {
             message_started = true
-            let msg = AgentMessage::Assistant(m)
             messages.push(msg)
             event_sink(AgentEvent::MessageStart(msg))
           }
-          TextStart(_, m)
-          | TextDelta(_, _, m)
-          | TextEnd(_, _, m)
-          | ThinkingStart(_, m)
-          | ThinkingDelta(_, _, m)
-          | ThinkingEnd(_, _, m)
-          | ToolCallStart(_, m)
-          | ToolCallDelta(_, _, m)
-          | ToolCallEnd(_, _, m) => {
-            let msg = AgentMessage::Assistant(m)
-            if message_started {
-              messages[messages.length() - 1] = msg
-            } else {
-              message_started = true
-              messages.push(msg)
-              event_sink(AgentEvent::MessageStart(msg))
-            }
-            event_sink(AgentEvent::MessageUpdate(msg))
-          }
+          event_sink(AgentEvent::MessageUpdate(msg))
         }
-      },
-    )
+      }
+    })
     let final_msg = AgentMessage::Assistant(assistant_message)
     if message_started {
       messages[messages.length() - 1] = final_msg

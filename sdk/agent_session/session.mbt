@@ -88,7 +88,7 @@ pub async fn AgentSession::prompt(
       // ToolExecutionEnd.
       let content : SessionEntryContent? = match event {
         MessageStart(User(_) as m) => Some(Message(m, terminate=false))
-        MessageEnd((Assistant(m)) as msg) => {
+        MessageEnd(Assistant(m) as msg) => {
           guard !(m.stop_reason is Pending) else {
             fail("journal cannot persist a message with pending stop_reason")
           }

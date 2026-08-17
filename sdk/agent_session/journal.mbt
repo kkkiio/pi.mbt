@@ -177,13 +177,19 @@ pub impl FromJson for SessionEntry with fn from_json(json, path) {
 }
 
 ///|
-fn[T] decode_error(path : @json.JsonPath, msg : String) -> T raise @json.JsonDecodeError {
+fn[T] decode_error(
+  path : @json.JsonPath,
+  msg : String,
+) -> T raise @json.JsonDecodeError {
   raise @json.JsonDecodeError((path, msg))
 }
 
 ///|
 /// pi stores timestamps as JSON numbers (Unix ms).
-fn parse_timestamp(json : Json?, path : @json.JsonPath) -> UInt64 raise @json.JsonDecodeError {
+fn parse_timestamp(
+  json : Json?,
+  path : @json.JsonPath,
+) -> UInt64 raise @json.JsonDecodeError {
   match json {
     Some(Number(n, ..)) if n >= 0.0 => n.to_int64().reinterpret_as_uint64()
     _ => decode_error(path, "invalid timestamp")
@@ -221,10 +227,7 @@ fn parse_agent_message(
       let contents = []
       for i, item in items {
         contents.push(
-          parse_assistant_content(
-            item,
-            path.add_key("content").add_index(i),
-          ),
+          parse_assistant_content(item, path.add_key("content").add_index(i)),
         )
       }
       guard fields.get("api") is Some(String(api)) else {
@@ -359,7 +362,10 @@ fn parse_assistant_content(
         signature=parse_signature(fields.get("signature")),
       )
     _ =>
-      decode_error(path, "AssistantMessageContent: unknown type \{content_type}")
+      decode_error(
+        path,
+        "AssistantMessageContent: unknown type \{content_type}",
+      )
   }
 }
 
@@ -369,10 +375,7 @@ fn parse_assistant_content(
 /// as plain JSON strings so the round trip stays lossless.
 fn parse_signature(json : Json?) -> Json {
   match json {
-    Some(String(s)) =>
-      @json.parse(s) catch {
-        _ => Json::string(s)
-      }
+    Some(String(s)) => @json.parse(s) catch { _ => Json::string(s) }
     Some(other) => other
     None => Json::empty_object()
   }

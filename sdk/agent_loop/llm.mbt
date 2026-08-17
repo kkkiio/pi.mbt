@@ -16,22 +16,10 @@ pub(all) struct Context {
 }
 
 ///|
-pub(all) enum AgentMessage {
-  User(ArrayView[InputMessageContent])
-  Assistant(AssistantMessage)
-  ToolResult(ToolResultMessage)
-}
-
-///|
 pub(all) enum ToolDefinition {
   Hosted(HostedTool)
   Function(FunctionTool)
 }
-
-///|
-pub(all) enum HostedTool {
-  WebSearch
-} derive(Debug)
 
 ///|
 pub(all) struct FunctionTool {
@@ -55,23 +43,6 @@ pub(all) enum ConstrainedSampling {
 pub(all) enum GrammarFormat {
   Lark
   Regex
-}
-
-///|
-pub(all) enum InputMessageContent {
-  Text(String)
-  Image(Bytes)
-}
-
-///|
-pub(all) struct ToolResultMessage {
-  tool_call_id : String
-  tool_name : String
-  content : Array[InputMessageContent]
-  is_error : Bool
-  timestamp : UInt64
-  /// Whether the tool wants to exit the agent loop, like yielding control back to the user or system. For example, a ui tool may want to exit the loop and wait for user input before continuing.
-  terminate : Bool
 }
 
 ///|
@@ -111,35 +82,6 @@ pub(all) enum StopReason {
 } derive(Debug)
 
 ///|
-pub(all) struct AssistantMessage {
-  content : Array[AssistantMessageContent]
-  api : String
-  provider : String
-  model : String
-  stop_reason : StopReason
-  /// Set when `stop_reason` is `Aborted` or `Error`: the failure description.
-  error_message : String?
-  usage : Usage?
-  /// Unix timestamp in milliseconds, set when the message is created.
-  timestamp : UInt64
-} derive(Debug)
-
-///|
-pub(all) enum AssistantMessageContent {
-  Text(String, signature~ : Json)
-  Thinking(String, signature~ : Json)
-  ToolCall(ToolCall, signature~ : Json)
-  HostedToolCall(HostedTool, signature~ : Json)
-} derive(Debug)
-
-///|
-pub(all) struct ToolCall {
-  id : String
-  name : String
-  arguments : Json
-} derive(Debug)
-
-///|
 pub(all) struct Usage {
   input : Int
   output : Int
@@ -155,6 +97,26 @@ pub(all) struct Usage {
 } derive(Debug)
 
 ///|
+pub impl ToJson for Usage with fn to_json(self : Usage) -> Json {
+  {
+    "input": self.input,
+    "output": self.output,
+    "cacheRead": self.cache_read,
+    "cacheWrite": self.cache_write,
+    "cacheWrite1h": match self.cache_write_1h {
+      Some(n) => n.to_json()
+      None => null
+    },
+    "reasoning": match self.reasoning {
+      Some(n) => n.to_json()
+      None => null
+    },
+    "totalTokens": self.total_tokens,
+    "cost": self.cost,
+  }
+}
+
+///|
 pub(all) struct UsageCost {
   input : Float
   output : Float
@@ -164,13 +126,37 @@ pub(all) struct UsageCost {
 } derive(Debug)
 
 ///|
+pub impl ToJson for UsageCost with fn to_json(self : UsageCost) -> Json {
+  Json::object({
+    "input": self.input.to_json(),
+    "output": self.output.to_json(),
+    "cacheRead": self.cache_read.to_json(),
+    "cacheWrite": self.cache_write.to_json(),
+    "total": self.total.to_json(),
+  })
+}
+
+///|
 pub impl Show for StopReason with fn to_string(self : StopReason) -> String {
   match self {
     Pending => "pending"
     Stop => "stop"
     Length => "length"
-    ToolUse => "tool_use"
+    ToolUse => "toolUse"
     Aborted => "aborted"
     Error => "error"
+  }
+}
+
+///|
+/// Serialized values match pi's `StopReason` strings.
+pub impl ToJson for StopReason with fn to_json(self : StopReason) -> Json {
+  match self {
+    Pending => "pending".to_json()
+    Stop => "stop".to_json()
+    Length => "length".to_json()
+    ToolUse => "toolUse".to_json()
+    Aborted => "aborted".to_json()
+    Error => "error".to_json()
   }
 }

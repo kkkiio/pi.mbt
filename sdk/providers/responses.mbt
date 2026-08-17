@@ -11,7 +11,7 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
   model~ : String,
   custom_tool_input_properties? : Map[String, String] = Map([]),
   now? : () -> UInt64 = @env.now,
-) -> @agent_loop.AssistantMessage raise {
+) -> @agent_loop.AssistantMessage {
   let idle_timeout_ms : Int = 120_000
   let started_at = now()
   let data_lines : Array[StringView] = []
@@ -537,7 +537,9 @@ fn parse_sse_event(
             signature=item_json,
           )
           slots.remove(output_index)
-          sse_delta(@agent_loop.ThinkingEnd(content_index, final_text, in_flight()))
+          sse_delta(
+            @agent_loop.ThinkingEnd(content_index, final_text, in_flight()),
+          )
         }
         ("message", Some(Text(content_index))) => {
           let item : ResponseOutputMessage = @json.from_json(item_json)
@@ -663,7 +665,10 @@ fn parse_sse_event(
                 break
               }
             }
-            @agent_loop.AssistantMessageContent::HostedToolCall(name, signature~) => {
+            @agent_loop.AssistantMessageContent::HostedToolCall(
+              name,
+              signature~
+            ) => {
               guard signature is { "id": String(signature_id), .. } else {
                 continue
               }
