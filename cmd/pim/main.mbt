@@ -110,11 +110,11 @@ fn agent_event_to_json(event : @agent_loop.AgentEvent) -> Json {
     AgentStart => { "type": "agent_start" }
     TurnStart => { "type": "turn_start" }
     MessageStart(message) =>
-      { "type": "message_start", "message": agent_message_to_json(message) }
+      { "type": "message_start", "message": message.to_json() }
     MessageUpdate(message) =>
-      { "type": "message_update", "message": agent_message_to_json(message) }
+      { "type": "message_update", "message": message.to_json() }
     MessageEnd(message) =>
-      { "type": "message_end", "message": agent_message_to_json(message) }
+      { "type": "message_end", "message": message.to_json() }
     ToolExecutionStart(call) =>
       {
         "type": "tool_execution_start",
@@ -125,95 +125,16 @@ fn agent_event_to_json(event : @agent_loop.AgentEvent) -> Json {
       {
         "type": "tool_execution_end",
         "toolName": result.tool_name,
-        "content": [
-          for c in result.content => input_content_to_json(c)
-        ],
+        "content": [for c in result.content => c.to_json()],
         "isError": result.is_error,
       }
     TurnEnd(assistant_message, tool_results) =>
       {
         "type": "turn_end",
-        "message": assistant_message_to_json(assistant_message),
+        "message": assistant_message.to_json(),
         "toolCalls": [for r in tool_results => r.tool_name],
       }
     AgentEnd(_) => { "type": "agent_end" }
-  }
-}
-
-///|
-fn agent_message_to_json(message : @agent_loop.AgentMessage) -> Json {
-  match message {
-    User(contents) =>
-      {
-        "role": "user",
-        "content": [for c in contents => input_content_to_json(c)],
-      }
-    Assistant(contents) =>
-      {
-        "role": "assistant",
-        "content": [
-          for c in contents => assistant_content_to_json(c)
-        ],
-      }
-    ToolResult(result) =>
-      {
-        "role": "tool",
-        "toolName": result.tool_name,
-        "content": [for c in result.content => input_content_to_json(c)],
-        "isError": result.is_error,
-      }
-  }
-}
-
-///|
-fn assistant_message_to_json(message : @agent_loop.AssistantMessage) -> Json {
-  let error_message : Json = match message.error_message {
-    Some(message) => Json::string(message)
-    None => Json::null()
-  }
-  {
-    "content": [for c in message.content => assistant_content_to_json(c)],
-    "stop_reason": stop_reason_to_string(message.stop_reason),
-    "error_message": error_message,
-  }
-}
-
-///|
-fn assistant_content_to_json(content : @agent_loop.AssistantMessageContent) -> Json {
-  match content {
-    Text(text, signature~) =>
-      { "type": "text", "text": text, "signature": signature }
-    Thinking(text, signature~) =>
-      { "type": "thinking", "text": text, "signature": signature }
-    ToolCall(call, signature~) =>
-      {
-        "type": "tool_call",
-        "id": call.id,
-        "name": call.name,
-        "arguments": call.arguments,
-        "signature": signature,
-      }
-    HostedToolCall(WebSearch, signature~) =>
-      { "type": "web_search_call", "signature": signature }
-  }
-}
-
-///|
-fn input_content_to_json(content : @agent_loop.InputMessageContent) -> Json {
-  match content {
-    Text(text) => { "type": "text", "text": text }
-    Image(_) => { "type": "image" }
-  }
-}
-
-///|
-fn stop_reason_to_string(reason : @agent_loop.StopReason) -> String {
-  match reason {
-    Stop => "stop"
-    Length => "length"
-    ToolUse => "toolUse"
-    Aborted => "aborted"
-    Error => "error"
   }
 }
 
