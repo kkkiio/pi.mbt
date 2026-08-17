@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       include:
-        description: Task name glob to include (empty = all tasks)
+        description: Task names or globs to include, comma-separated (empty = all tasks)
         required: false
         default: ""
         type: string
@@ -88,7 +88,10 @@ jobs:
             --jobs-dir "$RUNNER_TEMP/terminal-bench-results"
           )
           if [ -n "${{ inputs.include }}" ]; then
-            args+=( -i "${{ inputs.include }}" )
+            IFS=',' read -ra patterns <<< "${{ inputs.include }}"
+            for pattern in "${patterns[@]}"; do
+              args+=( -i "$pattern" )
+            done
           fi
           if [ "${{ inputs.n_tasks }}" != "0" ]; then
             args+=( -l "${{ inputs.n_tasks }}" )
