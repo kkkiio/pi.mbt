@@ -16,6 +16,11 @@ async fn main {
           long="mode",
           about="output mode: text or json (default text)",
         ),
+        OptionArg(
+          "thinking",
+          long="thinking",
+          about="thinking effort level: low, high (default), or max",
+        ),
       ],
     ),
     env=@env.get_env_vars(),
@@ -33,7 +38,18 @@ async fn main {
   let deepseek = @providers.DeepSeekProvider()
   // provider 构造失败(如缺 DEEPSEEK_API_KEY)是诊断,按输出流契约走 stderr;
   // 剥离 MoonBit 的 Failure(<loc> FAILED: msg) 包装,保留干净消息。
-  let llm = deepseek.new_llm("deepseek-v4-flash") catch {
+  let thinking = match matches.values.get("thinking") {
+    Some([level, ..]) => {
+      guard level is ("low" | "high" | "max") else {
+        fatal(
+          "Error: invalid thinking level '\{level}' (expected low, high, or max)",
+        )
+      }
+      level
+    }
+    _ => "high"
+  }
+  let llm = deepseek.new_llm("deepseek-v4-flash", thinking~) catch {
     err => fatal("Error: \{clean_error_message("\{err}")}")
   }
   let cwd = @env.current_dir().unwrap()

@@ -43,26 +43,33 @@ pub fn DeepSeekProvider::DeepSeekProvider() -> DeepSeekProvider {
 }
 
 ///|
-pub impl LLMProvider for DeepSeekProvider with fn new_llm(self, model_id) {
+pub impl LLMProvider for DeepSeekProvider with fn new_llm(
+  self,
+  model_id,
+  thinking~ : String = "high",
+) {
   ignore(self)
   guard @env.get_env_var("DEEPSEEK_API_KEY") is Some(api_key) else {
     fail("miss DEEPSEEK_API_KEY")
   }
-  DeepSeekResponsesAPILLM(api_key, model_id~)
+  DeepSeekResponsesAPILLM(api_key, model_id~, thinking~)
 }
 
 ///|
 struct DeepSeekResponsesAPILLM {
   api_key : String
   model_id : String
+  /// DeepSeek thinking effort: low / high / max.
+  thinking : String
 }
 
 ///|
 pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(
   api_key : String,
   model_id? : String = "deepseek-v4-flash",
+  thinking? : String = "high",
 ) -> DeepSeekResponsesAPILLM {
-  { api_key, model_id }
+  { api_key, model_id, thinking }
 }
 
 ///|
@@ -181,7 +188,10 @@ fn DeepSeekResponsesAPILLM::encode_responses_body(
     "model": self.model_id,
     "instructions": context.system_prompt,
     "stream": true,
-    "reasoning": { "effort": "high" },
+    "reasoning": { "effort": self.thinking },
+    // No sampling parameters (temperature/top_p): both pi and openseek send
+    // none and rely on provider-tuned defaults; pim follows the same
+    // convention and exposes no sampling knobs.
     "tools": tools,
     "tool_choice": "auto",
     "input": input,

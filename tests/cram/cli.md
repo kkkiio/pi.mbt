@@ -19,6 +19,7 @@ Options:
   -p, --print <print>          prompt text
   --session-dir <session_dir>  directory to store session JSONL files [env: PIM_SESSION_DIR]
   --mode <mode>                output mode: text or json (default text)
+  --thinking <thinking>        thinking effort level: low, high (default), or max
 ```
 
 ## 缺少 -p
