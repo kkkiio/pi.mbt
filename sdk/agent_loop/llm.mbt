@@ -5,11 +5,7 @@
 /// response stream inline in the calling task (no background task), following
 /// the callback/sink model.
 pub(open) trait LLM {
-  async fn generate(
-    Self,
-    Context,
-    sink~ : async (GenerationEvent) -> Unit,
-  ) -> AssistantMessage
+  async fn generate(Self, Context, sink~ : async (GenerationEvent) -> Unit) -> AssistantMessage
 }
 
 ///|
@@ -22,8 +18,7 @@ pub(all) struct Context {
 ///|
 pub(all) enum AgentMessage {
   User(ArrayView[InputMessageContent])
-  Assistant(ArrayView[AssistantMessageContent])
-  // System(Array[InputMessageContent])
+  Assistant(AssistantMessage)
   ToolResult(ToolResultMessage)
 }
 
@@ -84,21 +79,28 @@ pub(all) struct ToolResultMessage {
 /// The terminal outcome is not an event — `generate` returns the final
 /// `AssistantMessage`, whose `stop_reason` and `error_message` describe how
 /// the turn ended.
+///
+/// `Start` carries the in-flight `AssistantMessage` created by the provider
+/// when the stream begins: `api`/`provider`/`model`/`timestamp` are already
+/// known, `stop_reason` is `Pending`, and `content` grows as deltas arrive.
 pub(all) enum GenerationEvent {
-  Start
-  TextStart(Int, PartialAssistantMessage)
-  TextDelta(Int, String, PartialAssistantMessage)
-  TextEnd(Int, String, PartialAssistantMessage)
-  ThinkingStart(Int, PartialAssistantMessage)
-  ThinkingDelta(Int, String, PartialAssistantMessage)
-  ThinkingEnd(Int, String, PartialAssistantMessage)
-  ToolCallStart(Int, PartialAssistantMessage)
-  ToolCallDelta(Int, String, PartialAssistantMessage)
-  ToolCallEnd(Int, ToolCall, PartialAssistantMessage)
+  Start(AssistantMessage)
+  TextStart(Int, AssistantMessage)
+  TextDelta(Int, String, AssistantMessage)
+  TextEnd(Int, String, AssistantMessage)
+  ThinkingStart(Int, AssistantMessage)
+  ThinkingDelta(Int, String, AssistantMessage)
+  ThinkingEnd(Int, String, AssistantMessage)
+  ToolCallStart(Int, AssistantMessage)
+  ToolCallDelta(Int, String, AssistantMessage)
+  ToolCallEnd(Int, ToolCall, AssistantMessage)
 } derive(Debug)
 
 ///|
 pub(all) enum StopReason {
+  /// Streaming is still in progress; replaced by a terminal reason when the
+  /// turn ends. Must never appear in persisted journal entries.
+  Pending
   Stop
   /// The model stopped because it reached the maximum number of tokens allowed.
   Length
@@ -109,17 +111,17 @@ pub(all) enum StopReason {
 } derive(Debug)
 
 ///|
-pub(all) struct PartialAssistantMessage {
-  content : ArrayView[AssistantMessageContent]
-} derive(Debug)
-
-///|
 pub(all) struct AssistantMessage {
   content : Array[AssistantMessageContent]
+  api : String
+  provider : String
+  model : String
   stop_reason : StopReason
   /// Set when `stop_reason` is `Aborted` or `Error`: the failure description.
   error_message : String?
   usage : Usage?
+  /// Unix timestamp in milliseconds, set when the message is created.
+  timestamp : UInt64
 } derive(Debug)
 
 ///|
@@ -164,6 +166,7 @@ pub(all) struct UsageCost {
 ///|
 pub impl Show for StopReason with fn to_string(self : StopReason) -> String {
   match self {
+    Pending => "pending"
     Stop => "stop"
     Length => "length"
     ToolUse => "tool_use"

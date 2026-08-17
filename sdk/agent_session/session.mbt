@@ -25,7 +25,7 @@ pub fn AgentSession::AgentSession(
     .get_entries()
     .filter_map(e => {
       match e.content {
-        Message(m) => Some(m)
+        Message(m, ..) => Some(m)
         _ => None
       }
     }),
@@ -81,17 +81,28 @@ pub async fn AgentSession::prompt(
     input,
     tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
     event_sink=event => {
-      let message = match event {
-        MessageEnd(m) => m
-        _ => return
+      // Persist complete messages at their terminal events. User messages
+      // arrive complete at MessageStart; assistant messages are complete at
+      // MessageEnd (streaming events in between carry in-flight snapshots
+      // whose stop_reason is Pending); tool results complete at
+      // ToolExecutionEnd.
+      let content : SessionEntryContent? = match event {
+        MessageStart(User(_) as m) => Some(Message(m, terminate=false))
+        MessageEnd((Assistant(m)) as msg) => {
+          guard !(m.stop_reason is Pending) else {
+            fail("journal cannot persist a message with pending stop_reason")
+          }
+          Some(Message(msg, terminate=false))
+        }
+        ToolExecutionEnd(result) =>
+          Some(Message(ToolResult(result), terminate=result.terminate))
+        _ => None
       }
-      self.journal.persist([
-        {
-          id: self.journal.generate_id(),
-          timestamp: @env.now(),
-          content: Message(message),
-        },
-      ])
+      if content is Some(content) {
+        ignore(
+          self.journal.append([{ id: self.journal.generate_id(), content }]),
+        )
+      }
       self.fanout.on_event(event)
     },
   )

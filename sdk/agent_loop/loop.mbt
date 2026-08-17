@@ -23,36 +23,51 @@ pub async fn run_agent_loop(
       event_sink(AgentEvent::MessageStart(AgentMessage::User(prompt.content)))
     }
     pending_prompts = []
+    let mut message_started = false
     let assistant_message = llm.generate(
       { system_prompt, messages, tools },
       sink=event => {
         match event {
-          Start => ()
-          TextStart(_, partial)
-          | ThinkingStart(_, partial)
-          | ToolCallStart(_, partial) =>
-            event_sink(
-              AgentEvent::MessageStart(AgentMessage::Assistant(partial.content)),
-            )
-          TextDelta(_, _, partial)
-          | ThinkingDelta(_, _, partial)
-          | ToolCallDelta(_, _, partial) =>
-            event_sink(
-              AgentEvent::MessageUpdate(AgentMessage::Assistant(partial.content)),
-            )
-          TextEnd(_, _, partial)
-          | ThinkingEnd(_, _, partial)
-          | ToolCallEnd(_, _, partial) =>
-            event_sink(
-              AgentEvent::MessageEnd(AgentMessage::Assistant(partial.content)),
-            )
+          Start(m) => {
+            message_started = true
+            let msg = AgentMessage::Assistant(m)
+            messages.push(msg)
+            event_sink(AgentEvent::MessageStart(msg))
+          }
+          TextStart(_, m)
+          | TextDelta(_, _, m)
+          | TextEnd(_, _, m)
+          | ThinkingStart(_, m)
+          | ThinkingDelta(_, _, m)
+          | ThinkingEnd(_, _, m)
+          | ToolCallStart(_, m)
+          | ToolCallDelta(_, _, m)
+          | ToolCallEnd(_, _, m) => {
+            let msg = AgentMessage::Assistant(m)
+            if message_started {
+              messages[messages.length() - 1] = msg
+            } else {
+              message_started = true
+              messages.push(msg)
+              event_sink(AgentEvent::MessageStart(msg))
+            }
+            event_sink(AgentEvent::MessageUpdate(msg))
+          }
         }
       },
     )
-    messages.push(AgentMessage::Assistant(assistant_message.content))
+    let final_msg = AgentMessage::Assistant(assistant_message)
+    if message_started {
+      messages[messages.length() - 1] = final_msg
+    } else {
+      messages.push(final_msg)
+      event_sink(AgentEvent::MessageStart(final_msg))
+    }
+    event_sink(AgentEvent::MessageEnd(final_msg))
 
     let tool_results = []
     match assistant_message.stop_reason {
+      Pending => fail("generate returned a message with pending stop_reason")
       Aborted | Error => ()
       _ =>
         for content in assistant_message.content {
@@ -92,6 +107,7 @@ pub async fn run_agent_loop(
 
     event_sink(AgentEvent::TurnEnd(assistant_message, tool_results))
     match assistant_message.stop_reason {
+      Pending => fail("generate returned a message with pending stop_reason")
       Aborted => break Aborted
       Error => break Error
       _ => ()

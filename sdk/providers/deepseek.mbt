@@ -100,6 +100,9 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
     let result = read_responses_sse_stream(
       client,
       sink~,
+      api="openai-responses",
+      provider="deepseek",
+      model=self.model_id,
       custom_tool_input_properties~,
     )
     result
