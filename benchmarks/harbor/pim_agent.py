@@ -28,6 +28,10 @@ class Pim(BaseInstalledAgent):
 
     @override
     async def install(self, environment: BaseEnvironment) -> None:
+        # pim's TLS stack loads the system CA store; slim base images may
+        # lack ca-certificates entirely.
+        await self.ensure_system_dependencies(environment, ("ca_certificates",))
+
         binary_value = self._get_env("PIM_BINARY")
         if not binary_value:
             raise ValueError("Set PIM_BINARY to the host-side pim binary path")
@@ -38,15 +42,15 @@ class Pim(BaseInstalledAgent):
             )
 
         await environment.upload_file(binary_path, self._REMOTE_BINARY)
-        chown = ""
+        chown_cmd = ""
         if environment.default_user is not None:
-            chown = f"chown {shlex.quote(str(environment.default_user))} "
+            chown_cmd = (
+                f"chown {shlex.quote(str(environment.default_user))} "
+                f"{shlex.quote(self._REMOTE_BINARY)} && "
+            )
         await self.exec_as_root(
             environment,
-            command=(
-                f"{chown}{shlex.quote(self._REMOTE_BINARY)} && "
-                f"chmod 755 {shlex.quote(self._REMOTE_BINARY)}"
-            ),
+            command=f"{chown_cmd}chmod 755 {shlex.quote(self._REMOTE_BINARY)}",
         )
 
     @override
