@@ -1,15 +1,23 @@
 ///|
 async fn main {
   let matches = @argparse.parse(
-    Command("pim", options=[
-      OptionArg("print", short='p', about="prompt text"),
-      OptionArg(
-        "session_dir",
-        long="session-dir",
-        env="PIM_SESSION_DIR",
-        about="directory to store session JSONL files",
-      ),
-    ]),
+    Command(
+      "pim",
+      options=[
+        OptionArg("print", short='p', about="prompt text"),
+        OptionArg(
+          "session_dir",
+          long="session-dir",
+          env="PIM_SESSION_DIR",
+          about="directory to store session JSONL files",
+        ),
+        OptionArg(
+          "mode",
+          long="mode",
+          about="output mode: text or json (default text)",
+        ),
+      ],
+    ),
     env=@env.get_env_vars(),
   ) catch {
     err => arg_error("\{err}")
@@ -17,6 +25,10 @@ async fn main {
   let prompts = match matches.values {
     { "print": prompts, .. } => prompts
     _ => fatal("Error: only '-p' support for now")
+  }
+  let mode = match matches.values {
+    { "mode": [m, ..], .. } => m
+    _ => "text"
   }
   let deepseek = @providers.DeepSeekProvider()
   // provider 构造失败(如缺 DEEPSEEK_API_KEY)是诊断,按输出流契约走 stderr;
@@ -54,32 +66,78 @@ async fn main {
   defer cleanup()
   let session = @coding_agent.new_coding_session(llm, cwd~, journal~)
   let mut last_message : @agent_loop.AgentMessage? = None
-  session.subscribe(event => {
-    match event {
-      MessageEnd(m) => last_message = Some(m)
-      _ => ()
-    }
-  })
+  if mode == "json" {
+    // JSONL 模式:每个 AgentEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。
+    session.subscribe(event => {
+      write_stdout(agent_event_to_json(event).stringify())
+    })
+  } else {
+    session.subscribe(event => {
+      match event {
+        MessageEnd(m) => last_message = Some(m)
+        _ => ()
+      }
+    })
+  }
   session.prompt(
     prompts.map(p => @agent_loop.UserMessage::{
       content: [@agent_loop.InputMessageContent::Text(p)],
     }),
   )
-  guard last_message is Some(Assistant({ content: [_, ..] as reply, .. })) else {
-    fatal("no reply from agent")
-  }
-  let output = StringBuilder()
-  for content in reply {
-    match content {
-      Text(text, ..) => output.write_string(text)
-      ToolCall(_, ..) => fatal("unexpected tool call in reply")
-      Thinking(_, ..) => ()
-      HostedToolCall(WebSearch, ..) =>
-        fatal("unexpected hosted tool call in reply")
+  if mode != "json" {
+    guard last_message
+      is Some(Assistant({ content: [_, ..] as reply, .. })) else {
+      fatal("no reply from agent")
     }
+    let output = StringBuilder()
+    for content in reply {
+      match content {
+        Text(text, ..) => output.write_string(text)
+        ToolCall(_, ..) => fatal("unexpected tool call in reply")
+        Thinking(_, ..) => ()
+        HostedToolCall(WebSearch, ..) =>
+          fatal("unexpected hosted tool call in reply")
+      }
+    }
+    write_stdout(output.to_string())
   }
-  write_stdout(output.to_string())
 }
+
+///|
+/// 把 AgentEvent 投影成 JSONL 事件(对齐 pi `--mode json` 的事件形状)。
+fn agent_event_to_json(event : @agent_loop.AgentEvent) -> Json {
+  match event {
+    AgentStart => { "type": "agent_start" }
+    TurnStart => { "type": "turn_start" }
+    MessageStart(message) =>
+      { "type": "message_start", "message": message.to_json() }
+    MessageUpdate(message) =>
+      { "type": "message_update", "message": message.to_json() }
+    MessageEnd(message) =>
+      { "type": "message_end", "message": message.to_json() }
+    ToolExecutionStart(call) =>
+      {
+        "type": "tool_execution_start",
+        "toolName": call.name,
+        "args": call.arguments,
+      }
+    ToolExecutionEnd(result) =>
+      {
+        "type": "tool_execution_end",
+        "toolName": result.tool_name,
+        "content": [for c in result.content => c.to_json()],
+        "isError": result.is_error,
+      }
+    TurnEnd(assistant_message, tool_results) =>
+      {
+        "type": "turn_end",
+        "message": assistant_message.to_json(),
+        "toolCalls": [for r in tool_results => r.tool_name],
+      }
+    AgentEnd(_) => { "type": "agent_end" }
+  }
+}
+
 
 ///|
 /// 把 argparse 错误按 pi 风格输出到 stderr 并退出：

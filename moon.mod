@@ -27,4 +27,5 @@ description = ""
 
 import {
   "moonbitlang/async@0.20.4",
+  "bobzhang/jsonl@0.2.0",
 }
