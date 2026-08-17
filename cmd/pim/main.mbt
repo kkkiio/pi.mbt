@@ -31,12 +31,18 @@ async fn main {
   }
   let (journal, cleanup) = match session_dir {
     Some(dir) => {
-      @fs.mkdir(dir, recursive=true)
-      let rand = @random.Rand::new()
-      let timestamp = @env.now().to_string()
-      let id = rand.uint64().to_string()
-      let path = "\{dir}/\{timestamp}_\{id}.jsonl"
-      let file = @fs.create(path, allow_existing=true)
+      let file = try {
+        @fs.mkdir(dir, recursive=true)
+        let rand = @random.Rand::new()
+        let timestamp = @env.now().to_string()
+        let id = rand.uint64().to_string()
+        let path = "\{dir}/\{timestamp}_\{id}.jsonl"
+        // Session journals contain prompts and tool output: owner-only,
+        // and fail rather than truncate on collision/symlink.
+        @fs.create(path, allow_existing=false, permission=0o600)
+      } catch {
+        err => fatal("Error: \{clean_error_message("\{err}")}")
+      }
       (
         @coding_agent.JsonlSessionJournal::JsonlSessionJournal(file)
         as &@agent_session.SessionJournal,
