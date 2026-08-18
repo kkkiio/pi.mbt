@@ -2,24 +2,21 @@ name: Terminal-Bench 2.1 (pim)
 
 # Validates pim's agent quality on Terminal-Bench 2.1 via harbor.
 # Requires the DEEPSEEK_API_KEY repository secret.
+#
+# One matrix job per task: GitHub Actions is the dispatcher, harbor sees a
+# single task per runner. Aggregate locally with benchmarks/aggregate.py.
 
 on:
   workflow_dispatch:
     inputs:
-      include:
-        description: Task names or globs to include, comma-separated (empty = all tasks)
-        required: false
-        default: ""
-        type: string
-      n_tasks:
-        description: Max number of tasks after filters (0 = all)
+      tasks_json:
+        description: JSON array of task names, e.g. ["fix-git","regex-log"]
         required: true
-        default: "3"
         type: string
-      n_concurrent:
-        description: Concurrent trials
+      max_parallel:
+        description: Max concurrent jobs (DeepSeek rate-limit headroom)
         required: true
-        default: "2"
+        default: "8"
         type: string
       agent_timeout_multiplier:
         description: Fraction of the official agent time budget
@@ -31,9 +28,14 @@ permissions:
   contents: read
 
 jobs:
-  benchmark:
+  task:
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.max_parallel) }}
+      matrix:
+        task: ${{ fromJSON(inputs.tasks_json) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,6 +44,15 @@ jobs:
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL
           docker system prune --all --force
           df -h /
+
+      - name: Cache pim build
+        uses: actions/cache@v4
+        with:
+          path: |
+            _build
+            .mooncakes
+          key: pim-build-${{ hashFiles('**/*.mbt', '**/moon.pkg', 'moon.mod') }}
+          restore-keys: pim-build-
 
       - name: Set up MoonBit
         run: |
@@ -57,17 +68,16 @@ jobs:
           cp _build/native/release/build/cmd/pim/pim.exe "$RUNNER_TEMP/pim"
           chmod +x "$RUNNER_TEMP/pim"
 
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
+          enable-cache: true
 
       - name: Install harbor
         run: |
-          python -m pip install uv
           uv tool install harbor==0.21.0
           harbor --version
 
-      - name: Run pim on Terminal-Bench 2.1
+      - name: Run pim on ${{ matrix.task }}
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
@@ -75,28 +85,18 @@ jobs:
             echo "Missing DEEPSEEK_API_KEY repository secret" >&2
             exit 1
           fi
-          args=(
-            -d terminal-bench/terminal-bench-2-1
-            -a benchmarks.harbor.pim_agent:Pim
-            -m deepseek/deepseek-v4-flash
-            --ae PIM_BINARY="$RUNNER_TEMP/pim"
-            --ae DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
-            --agent-include-logs "pim/**"
-            --agent-timeout-multiplier "${{ inputs.agent_timeout_multiplier }}"
-            -n "${{ inputs.n_concurrent }}"
-            --job-name pim
+          PYTHONPATH="$GITHUB_WORKSPACE" harbor run \
+            -d terminal-bench/terminal-bench-2-1 \
+            -a benchmarks.harbor.pim_agent:Pim \
+            -m deepseek/deepseek-v4-flash \
+            --ae PIM_BINARY="$RUNNER_TEMP/pim" \
+            --ae DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+            --agent-include-logs "pim/**" \
+            --agent-timeout-multiplier "${{ inputs.agent_timeout_multiplier }}" \
+            -n 1 \
+            -i "*${{ matrix.task }}" \
+            --job-name "pim-${{ matrix.task }}" \
             --jobs-dir "$RUNNER_TEMP/terminal-bench-results"
-          )
-          if [ -n "${{ inputs.include }}" ]; then
-            IFS=',' read -ra patterns <<< "${{ inputs.include }}"
-            for pattern in "${patterns[@]}"; do
-              args+=( -i "*$pattern" )
-            done
-          fi
-          if [ "${{ inputs.n_tasks }}" != "0" ]; then
-            args+=( -l "${{ inputs.n_tasks }}" )
-          fi
-          PYTHONPATH="$GITHUB_WORKSPACE" harbor run "${args[@]}"
 
       - name: Write artifact manifest
         if: always()
@@ -110,7 +110,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: terminal-bench-pim-${{ github.run_id }}-${{ github.run_attempt }}
+          name: tb-result-${{ matrix.task }}
           path: ${{ runner.temp }}/terminal-bench-results
           if-no-files-found: error
           retention-days: 21
