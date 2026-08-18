@@ -13,13 +13,21 @@ includes the pi-v4 JSONL journal for analysis.
 
 ### Cloud (GitHub Actions)
 
-`.github/workflows/terminal-bench.yml` builds pim on `ubuntu-latest` and runs
-`harbor run -d terminal-bench/terminal-bench-2-1`. Dispatch inputs:
+`.github/workflows/terminal-bench.yml` runs one matrix job per task: GitHub
+Actions dispatches, and each job's `harbor run` sees a single task on a clean
+`ubuntu-latest` runner. Dispatch inputs:
 
-- `include`: task name glob (empty = all tasks)
-- `n_tasks`: cap after filters (default 3 for smoke runs; 0 = all)
-- `n_concurrent`: concurrent trials
+- `tasks_json`: JSON array of task names, e.g. `["fix-git","regex-log"]`
+- `max_parallel`: max concurrent jobs (default 8, DeepSeek rate-limit headroom)
 - `agent_timeout_multiplier`: fraction of the official agent time budget
+
+Each job uploads `tb-result-<task>` (harbor jobs-dir tree, including the
+trial's `result.json` and the pim journal). Aggregate a run locally:
+
+```bash
+gh run download <run-id> -D /tmp/tb-results -p 'tb-result-*'
+uv run benchmarks/aggregate.py /tmp/tb-results
+```
 
 Requires the `DEEPSEEK_API_KEY` repository secret.
 
@@ -37,4 +45,5 @@ PYTHONPATH=. harbor run \
 ```
 
 Known limitation: the binary is glibc-linked (built on ubuntu runners), so
-musl-based task environments (alpine) cannot run it.
+musl-based task environments (alpine) cannot run it. Terminal-Bench 2.1 task
+images are all glibc-based, so this does not affect the benchmark suite.
