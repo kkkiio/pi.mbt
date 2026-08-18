@@ -74,8 +74,11 @@ class Pim(BaseInstalledAgent):
             command=(
                 # --thinking max aligns with DeepSeek's official V4-Flash
                 # agentic benchmark conditions (Terminal-Bench 2.1: 82.7).
+                # --print=<value> (not --print <value>): some task instructions
+                # start with "-", which argparse would otherwise read as a new
+                # flag and reject with "a value is required for '--print'".
                 "pim --session-dir /logs/agent/pim/sessions --thinking max "
-                f"--print {shlex.quote(instruction)} "
+                f"--print={shlex.quote(instruction)} "
                 f"2>&1 </dev/null | stdbuf -oL tee /logs/agent/{self._OUTPUT_FILENAME}"
             ),
             env={"DEEPSEEK_API_KEY": api_key},

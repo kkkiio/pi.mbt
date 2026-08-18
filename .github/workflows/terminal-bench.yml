@@ -51,22 +51,29 @@ jobs:
           path: |
             _build
             .mooncakes
-          key: pim-build-${{ hashFiles('**/*.mbt', '**/moon.pkg', 'moon.mod') }}
-          restore-keys: pim-build-
+          key: pim-build-bullseye-${{ hashFiles('**/*.mbt', '**/moon.pkg', 'moon.mod') }}
+          restore-keys: pim-build-bullseye-
 
-      - name: Set up MoonBit
+      - name: Build pim in a bullseye container (oldest task-image glibc)
+        # The task images we run inside include debian:bullseye (glibc 2.31),
+        # but the runner is ubuntu 24.04 (glibc 2.39): glibc compat is
+        # one-way, so build against the oldest glibc in the task suite.
         run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
-          echo "$HOME/.moon/bin" >> $GITHUB_PATH
-
-      - name: Build pim (native release)
-        run: |
-          moon update
-          moon check --deny-warn
-          moon build --target native --release
+          docker run --rm --platform linux/amd64 \
+            -v "$GITHUB_WORKSPACE:/src" -w /src debian:bullseye-slim sh -c '
+            set -e
+            apt-get update -qq
+            apt-get install -y -qq curl ca-certificates git xz-utils gcc >/dev/null
+            curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+            export PATH="$HOME/.moon/bin:$PATH"
+            moon update
+            moon check --deny-warn
+            moon build --target native --release
+          '
           file _build/native/release/build/cmd/pim/pim.exe
           cp _build/native/release/build/cmd/pim/pim.exe "$RUNNER_TEMP/pim"
           chmod +x "$RUNNER_TEMP/pim"
+          "$RUNNER_TEMP/pim" --help >/dev/null
 
       - uses: astral-sh/setup-uv@v5
         with:
