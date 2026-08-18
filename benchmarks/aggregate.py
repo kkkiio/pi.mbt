@@ -71,13 +71,25 @@ def main() -> int:
 
     width = max((len(task) for task, _, _ in rows), default=0)
     n_pass = 0
+    seen: dict[str, str] = {}
+    duplicates = 0
     for task, verdict, duration in sorted(rows):
+        if task in seen:
+            # A task can appear twice when a suffix glob collides (e.g.
+            # "*filter-js-from-html" also matches "break-filter-js-from-html").
+            # Keep the first verdict, but flag inconsistent reruns.
+            duplicates += 1
+            if seen[task] != verdict:
+                print(f"! {task}: conflicting reruns ({seen[task]} vs {verdict})")
+            continue
+        seen[task] = verdict
         print(f"{task:<{width}}  {verdict:<24} {duration}")
         if verdict == "PASS":
             n_pass += 1
-    total = len(rows)
+    total = len(seen)
     pct = (100.0 * n_pass / total) if total else 0.0
-    print(f"\n{n_pass}/{total}  ({pct:.1f}%)")
+    dup_note = f", {duplicates} duplicate(s) deduped" if duplicates else ""
+    print(f"\n{n_pass}/{total}  ({pct:.1f}%{dup_note})")
     return 0
 
 
