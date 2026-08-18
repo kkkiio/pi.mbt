@@ -75,6 +75,14 @@ async test "is_retryable_error_message matches pi's retryable patterns" {
   assert_true(is_retryable_error_message("stream ended before message_stop"))
   assert_true(is_retryable_error_message("please retry your request"))
   assert_true(is_retryable_error_message("timed out waiting for the stream"))
+  // MoonBit async runtime error names (surface via Debug/Show text).
+  assert_true(is_retryable_error_message("ReaderClosed"))
+  assert_true(is_retryable_error_message("PipeClosed"))
+  assert_true(is_retryable_error_message("ConnectionClosed"))
+  assert_true(is_retryable_error_message("TimeoutError"))
+  assert_true(
+    is_retryable_error_message("ResolveHostnameError: api.deepseek.com"),
+  )
 }
 
 ///|

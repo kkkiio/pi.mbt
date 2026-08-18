@@ -12,8 +12,13 @@ let non_retryable_limit_pattern : @string.Regex = @string.Regex::unsafe_from_str
 /// (packages/ai/src/utils/retry.ts): provider load, HTTP 429/5xx, transport,
 /// and premature-stream failures. `.?` preserves pi's "any separator" intent;
 /// case-insensitive via message lowercasing.
+///
+/// The last group is ours, not pi's: MoonBit async runtime error names
+/// (`moonbitlang/async` suberrors surface by their Debug/Show text once they
+/// cross layer boundaries as strings). pi's patterns are tuned to Node.js
+/// error strings, which never occur here.
 let retryable_provider_pattern : @string.Regex = @string.Regex::unsafe_from_string(
-  "overloaded|rate.?limit|too many requests|429|500|502|503|504|524|service.?unavailable|server.?error|internal.?error|provider.?returned.?error|exceeded request buffer limit while retrying upstream|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|getaddrinfo|enotfound|eai_again|upstream.?connect|reset before headers|socket hang up|socket connection was closed|timed? out|timeout|terminated|websocket.?closed|websocket.?error|ended without|stream ended before message_stop|stream ended before a terminal response event|http2 request did not get a response|retry delay|you can retry your request|try your request again|please retry your request|resourceexhausted",
+  "overloaded|rate.?limit|too many requests|429|500|502|503|504|524|service.?unavailable|server.?error|internal.?error|provider.?returned.?error|exceeded request buffer limit while retrying upstream|network.?error|connection.?error|connection.?refused|connection.?lost|other side closed|fetch failed|getaddrinfo|enotfound|eai_again|upstream.?connect|reset before headers|socket hang up|socket connection was closed|timed? out|timeout|terminated|websocket.?closed|websocket.?error|ended without|stream ended before message_stop|stream ended before a terminal response event|http2 request did not get a response|retry delay|you can retry your request|try your request again|please retry your request|resourceexhausted|readerclosed|pipeclosed|connectionclosed|resolvehostname|econnreset|epipe|etimedout",
 )
 
 ///|
