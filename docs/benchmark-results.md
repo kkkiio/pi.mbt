@@ -11,8 +11,9 @@ Harness: `benchmarks/harbor/pim_agent.py` + `.github/workflows/terminal-bench.ym
 params for comparability).
 
 Dispatched as GHA matrix jobs (one task per runner, `max-parallel: 8`) in 5
-waves; aggregated with `benchmarks/aggregate.py`. Tainted trials (see below)
-were re-run once fixed; only valid trials are counted.
+waves; aggregated with `benchmarks/aggregate.py`. A few trials tainted by
+infra issues (API balance, old-glibc images, adapter quoting) were re-run
+after fixes; only valid trials are counted.
 
 Failures (25):
 
@@ -44,69 +45,7 @@ Failures (25):
 | torch-tensor-parallelism | 13min | capability |
 | video-processing | 19min | capability |
 
-### Infra bugs found and fixed during this run
-
-- **DeepSeek API balance exhaustion** (402) killed `make-doom-for-mips` and
-  `make-mips-interpreter` mid-run. 402 is correctly non-retryable; both were
-  re-run after recharge (one PASS, one genuine FAIL). Signature:
-  `"stopReason":"error"` + `errorMessage` with `402` in the journal.
-- **MoonBit async error names were not retryable** (`retry_policy.mbt` ported
-  pi's Node-tuned regexes verbatim): `ReaderClosed` killed overfull-hbox
-  without auto-retry. Added `readerclosed|pipeclosed|connectionclosed|
-  resolvehostname|econnreset|epipe|etimedout`; re-run PASSed.
-- **glibc one-way compat**: pim was built on the ubuntu-24.04 runner (glibc
-  2.39) but qemu-startup/qemu-alpine-ssh images are debian:bullseye (glibc
-  2.31) → `GLIBC_2.32 not found`, 0min FAILs. The workflow now builds pim in
-  a bullseye container (`-lpthread -ldl` needed: glibc < 2.34 keeps
-  pthread/dl symbols out of libc); the binary now requires only GLIBC_2.29.
-  Re-runs: qemu-startup PASS, qemu-alpine-ssh genuine FAIL.
-- **`--print` with dash-leading instruction**: pytorch-model-recovery's
-  instruction starts with `-`, which argparse read as a new flag. Adapter now
-  uses `--print=<value>`. Re-run PASSed.
-
-## 2026-08-17 — first validation (12 unique tasks)
-
-Selection criteria for this round: lightweight (< 15 min agent budget),
-glibc-based images (pim binary is dynamically linked), non-interactive
-solutions.
-
-| Task | Result | Notes |
-| --- | --- | --- |
-| openssl-selfsigned-cert | ✅ 1.0 | |
-| regex-log | ✅ 1.0 | needed ca-certificates in env (adapter fix) |
-| fix-git | ✅ 1.0 | |
-| pypi-server | ✅ 1.0 | |
-| vulnerable-secret | ✅ 1.0 | |
-| configure-git-webserver | ✅ 1.0 | |
-| break-filter-js-from-html | ✅ 1.0 | |
-| count-dataset-tokens | ✅ 1.0 | |
-| query-optimize | ✅ 1.0 | timed out on first attempt, passed after retry fix |
-| filter-js-from-html | ❌ 0.0 | XSS filter incomplete (capability) |
-| sanitize-git-repo | ❌ 0.0 | verification failed (capability) |
-| extract-elf | ❌ 0.0 | agent process died silently after ~65 tool calls (suspected OOM/stack overflow); wrong output format in an earlier attempt |
-
-**Pass rate: 9/12 (75%)**
-
-### Infra bugs found and fixed along the way
-
-- Workflow `-i` filters must match registry names (`terminal-bench/<name>`) —
-  include patterns are wrapped as `*<pattern>` suffix globs (#9).
-- Adapter `chmod` command executed pim when `default_user` was unset (#10).
-- Task images without `ca-certificates` broke pim's TLS (`STORE routines:
-  unregistered scheme`); adapter now installs it (#10).
-- Transient provider failures (TCP reset mid-stream, SSE idle timeout)
-  crashed runs permanently; `retry_transient` with backoff + `loop.mbt`
-  stream-restart handling landed in #11.
-
-### Known issues
-
-- **extract-elf silent crash**: long sessions (~65 tool calls, large context)
-  end with the process dying without any stderr. Suspected OOM or stack
-  overflow in native code. Needs a repro with memory profiling.
-- `*<pattern>` suffix globs can over-match: `filter-js-from-html` also
-  matches `break-filter-js-from-html`.
-
-### How to reproduce
+## How to reproduce
 
 ```bash
 gh workflow run terminal-bench.yml \
