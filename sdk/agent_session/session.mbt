@@ -101,14 +101,14 @@ pub async fn AgentSession::prompt(
       pending_prompts,
       tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
       event_sink=event => {
-        // Persist complete messages at their terminal events. User messages
-        // arrive complete at MessageStart; assistant messages are complete at
-        // MessageEnd (streaming events in between carry in-flight snapshots
-        // whose stop_reason is Pending); tool results complete at
-        // ToolExecutionEnd. Error turns are persisted unconditionally — the
-        // journal is a complete write-ahead log.
+        // Persist complete messages at their terminal events. User and
+        // assistant messages are complete at MessageEnd (assistant streaming
+        // events in between carry in-flight snapshots whose stop_reason is
+        // Pending); tool results complete at ToolExecutionEnd. Error turns
+        // are persisted unconditionally — the journal is a complete
+        // write-ahead log.
         let content : SessionEntryContent? = match event {
-          MessageStart(User(_) as m) => Some(Message(m, terminate=false))
+          MessageEnd(User(_) as m) => Some(Message(m, terminate=false))
           MessageEnd(Assistant(m) as msg) => {
             guard !(m.stop_reason is Pending) else {
               fail("journal cannot persist a message with pending stop_reason")
