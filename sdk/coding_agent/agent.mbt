@@ -14,7 +14,13 @@ pub async fn new_coding_session(
     project_context_files=context_files,
     skills~,
   )
-  let session = @agent_session.AgentSession(llm, system_prompt~, journal~)
-  session.register_tool(new_bash_tool_definition(cwd~))
+  let tool_registry = @tools.ToolRegistry()
+  tool_registry.register_tool(new_bash_tool_definition(cwd~))
+  let session = @agent_session.AgentSession(
+    llm,
+    system_prompt~,
+    journal~,
+    tool_registry~,
+  )
   session
 }
