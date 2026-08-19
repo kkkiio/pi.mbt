@@ -19,8 +19,11 @@ pub async fn run_agent_loop(
   let reason : LoopStopReason = for ;; {
     event_sink(AgentEvent::TurnStart)
     for prompt in pending_prompts {
-      messages.push(AgentMessage::User(prompt.content))
-      event_sink(AgentEvent::MessageStart(AgentMessage::User(prompt.content)))
+      let msg = AgentMessage::User(prompt.content)
+      messages.push(msg)
+      // Complete messages get start+end back to back, like pi.
+      event_sink(AgentEvent::MessageStart(msg))
+      event_sink(AgentEvent::MessageEnd(msg))
     }
     pending_prompts = []
     let mut message_started = false

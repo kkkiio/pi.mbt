@@ -90,7 +90,7 @@ async fn main {
   } else {
     session.subscribe(event => {
       match event {
-        Loop(MessageEnd(m)) => last_message = Some(m)
+        Loop(MessageEnd(Assistant(_) as m)) => last_message = Some(m)
         _ => ()
       }
     })

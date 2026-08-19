@@ -153,3 +153,52 @@ async test "session hydration drops Error assistant messages from the journal" {
   }
   assert_eq(text, "final answer")
 }
+
+///|
+/// A scripted LLM that answers immediately with a fixed message.
+struct ScriptedLLM {}
+
+///|
+impl @agent_loop.LLM for ScriptedLLM with fn generate(
+  self : ScriptedLLM,
+  _ctx : @agent_loop.Context,
+  sink~ : async (@agent_loop.GenerationEvent) -> Unit,
+) -> @agent_loop.AssistantMessage {
+  ignore(self)
+  let msg = ok_message()
+  sink(@agent_loop.GenerationEvent::Start(msg))
+  msg
+}
+
+///|
+/// pi pins this contract in agent-session-retry-events.test.ts.
+async test "session prompt emits pi's event order" {
+  let events : Array[String] = []
+  let session = @agent_session.AgentSession(
+    ScriptedLLM::{  },
+    system_prompt="",
+  )
+  session.subscribe(event => {
+    guard event is Loop(e) else { return }
+    events.push(match e {
+      AgentStart => "agent_start"
+      TurnStart => "turn_start"
+      MessageStart(User(_)) => "message_start:user"
+      MessageEnd(User(_)) => "message_end:user"
+      MessageStart(Assistant(_)) => "message_start:assistant"
+      MessageEnd(Assistant(_)) => "message_end:assistant"
+      TurnEnd(_) => "turn_end"
+      AgentEnd(_) => "agent_end"
+      _ => "other"
+    })
+  })
+  session.prompt([
+    @agent_loop.UserMessage::{
+      content: [@agent_loop.InputMessageContent::Text("hi")],
+    },
+  ])
+  assert_eq(events, [
+    "agent_start", "turn_start", "message_start:user", "message_end:user", "message_start:assistant",
+    "message_end:assistant", "turn_end", "agent_end",
+  ])
+}
