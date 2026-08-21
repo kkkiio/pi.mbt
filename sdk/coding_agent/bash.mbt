@@ -267,23 +267,14 @@ async fn local_bash_exec(params : BashExecParams) -> Int {
         no_wait=true,
       )
       defer reader.close()
-      try {
-        for ;; {
-          match reader.read_some(max_len=4096) {
-            None => break
-            Some(chunk) =>
-              if params.on_data is Some(callback) {
-                callback(chunk)
-              }
-          }
-        }
-        process.wait()
-      } catch {
-        err => {
-          process.cancel()
-          raise err
+      errdefer process.cancel()
+      for ;; {
+        match reader.read_some(max_len=4096) {
+          None => break
+          Some(chunk) => if params.on_data is Some(callback) { callback(chunk) }
         }
       }
+      process.wait()
     }
   }
   if timeout_ms > 0 {

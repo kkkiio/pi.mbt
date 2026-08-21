@@ -2,27 +2,29 @@
 
 用 MoonBit 重新实现的 [pi](https://github.com/earendil-works/pi) coding agent 子集。
 
+## Install
+
+```bash
+moon install ./cmd/pim
+```
+
 ## Usage
 
-构建 native 可执行文件:
+当前只支持 `-p/--print` 单轮、非交互模式:
 
 ```bash
-moon build --target native
+DEEPSEEK_API_KEY=sk-xxx
+pim -p "What's the capital of France? Respond with only the city name."
+# Paris
 ```
 
-源码构建产物名为 `pim.exe`。当前只支持 `-p/--print` 非交互模式,把 agent 的最终
-回复写到 stdout:
+加上 `--mode json` 可以输出 JSONL 事件流:
 
 ```bash
-pim -p "Explain the codebase in one paragraph"
+pim -p "What's the capital of France? Respond with only the city name." --mode json
+# {"type":"agent_start"}
+# {"type":"turn_start"}
+# {"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"What's the capital of France? Respond with only the city name."}]}}
+# ...
+# {"type":"agent_end"}
 ```
-
-运行全部测试(`moon test` + CLI 契约测试):
-
-```bash
-just test
-```
-
-CLI 契约的离线测试转录见 `tests/cram/cli.md`,由 `moon cram test tests/cram`
-执行。真实 provider 的 smoke 测试见 `tests/live/deepseek.md`,需要
-`DEEPSEEK_API_KEY`,用 `just eval` 运行。

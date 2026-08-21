@@ -1,4 +1,110 @@
 ///|
+fn encode_responses_input(context : @agent_loop.Context) -> Array[Json] raise {
+  let input : Array[Json] = []
+  let custom_call_ids : Set[String] = Set([])
+  for message in context.messages {
+    match message {
+      User(contents) =>
+        input.push({
+          "role": "user",
+          "content": [
+            for content in contents => {
+              match content {
+                Text(text) => ({ "type": "input_text", "text": text } : Json)
+                Image(_) => (fail("image input not supported") : Json)
+              }
+            }
+          ],
+        })
+      Assistant(message) =>
+        for content in message.content {
+          match content {
+            Text(text, signature~) => {
+              guard signature is { "id": String(item_id), .. } else {
+                fail("Responses text signature is missing type or id")
+              }
+              let item : Map[String, Json] = {
+                "type": "message",
+                "id": item_id,
+                "role": "assistant",
+                "status": "completed",
+                "content": [
+                  { "type": "output_text", "text": text, "annotations": [] },
+                ],
+              }
+              if signature is { "phase": String(phase), .. } {
+                item["phase"] = phase.to_json()
+              }
+              input.push(item.to_json())
+            }
+            Thinking(_, signature~) => input.push(signature)
+            HostedToolCall(_, signature~) => input.push(signature)
+            ToolCall(call, signature~) => {
+              guard signature
+                is { "type": String(signature_type), "id": String(item_id), .. } else {
+                fail("Responses tool-call signature is missing type or id")
+              }
+              if signature_type == "function_call" {
+                input.push({
+                  "type": "function_call",
+                  "id": item_id,
+                  "call_id": call.id,
+                  "name": call.name,
+                  "arguments": call.arguments.stringify(),
+                })
+              } else if signature_type == "custom_tool_call" {
+                guard signature
+                  is { "input_property": String(input_property), .. } else {
+                  fail(
+                    "Responses custom tool-call signature is missing input_property",
+                  )
+                }
+                guard call.arguments is Json::Object(arguments) else {
+                  fail("Responses custom tool call requires object arguments")
+                }
+                guard arguments.get(input_property)
+                  is Some(String(custom_input)) else {
+                  fail("Responses custom tool call is missing string input")
+                }
+                custom_call_ids.add(call.id)
+                input.push({
+                  "type": "custom_tool_call",
+                  "id": item_id,
+                  "call_id": call.id,
+                  "name": call.name,
+                  "input": custom_input,
+                })
+              } else {
+                fail(
+                  "Unsupported Responses tool-call signature: \{signature_type}",
+                )
+              }
+            }
+          }
+        }
+      ToolResult(result) =>
+        input.push({
+          "type": if custom_call_ids.contains(result.tool_call_id) {
+            "custom_tool_call_output"
+          } else {
+            "function_call_output"
+          },
+          "call_id": result.tool_call_id,
+          "output": [
+            for content in result.content => {
+              match content {
+                Text(text) => ({ "type": "input_text", "text": text } : Json)
+                Image(_) => (fail("image input not supported") : Json)
+              }
+            }
+          ],
+        })
+    }
+  }
+  input
+}
+
+///|
 /// Reads a Responses SSE stream inline, delivering each streaming delta to
 /// `sink` and returning the terminal `AssistantMessage` as the function's
 /// result. There is no background task: the caller's task drives the whole
@@ -48,8 +154,7 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
       // Wording matters: the session-level retry policy matches "timed out"
       // (pi's phrasing), so a stall past the provider's retry window still
       // reads as a transient condition there.
-      None =>
-        Some("Responses stream timed out (idle for \{idle_timeout_ms}ms)")
+      None => Some("Responses stream timed out (idle for \{idle_timeout_ms}ms)")
     }
     let flushed = flush_sse_event(
       data_lines,
@@ -83,129 +188,6 @@ priv enum ResponsesOutputSlot {
   FunctionCall(Int, String)
   CustomToolCall(Int, String, String)
   HostedToolCall(Int)
-}
-
-///|
-fn encode_responses_input(context : @agent_loop.Context) -> Array[Json] raise {
-  let input : Array[Json] = []
-  let custom_call_ids : Map[String, Bool] = Map([])
-  for message in context.messages {
-    match message {
-      User(contents) =>
-        input.push({
-          "role": "user",
-          "content": [
-            for content in contents => {
-              match content {
-                Text(text) => ({ "type": "input_text", "text": text } : Json)
-                Image(_) => (fail("image input not supported") : Json)
-              }
-            }
-          ],
-        })
-      Assistant(message) =>
-        for content in message.content {
-          match content {
-            Text(text, signature~) => {
-              guard signature
-                is { "type": String(signature_type), "id": String(item_id), .. } else {
-                fail("Responses text signature is missing type or id")
-              }
-              guard signature_type == "message" else {
-                fail("Responses text signature must describe a message")
-              }
-              let item : Json = match signature {
-                { "phase": String(phase), .. } =>
-                  {
-                    "type": "message",
-                    "id": item_id,
-                    "role": "assistant",
-                    "status": "completed",
-                    "phase": phase,
-                    "content": [
-                      { "type": "output_text", "text": text, "annotations": [] },
-                    ],
-                  }
-                _ =>
-                  {
-                    "type": "message",
-                    "id": item_id,
-                    "role": "assistant",
-                    "status": "completed",
-                    "content": [
-                      { "type": "output_text", "text": text, "annotations": [] },
-                    ],
-                  }
-              }
-              input.push(item)
-            }
-            Thinking(_, signature~) => input.push(signature)
-            HostedToolCall(_, signature~) => input.push(signature)
-            ToolCall(call, signature~) => {
-              guard signature
-                is { "type": String(signature_type), "id": String(item_id), .. } else {
-                fail("Responses tool-call signature is missing type or id")
-              }
-              if signature_type == "function_call" {
-                input.push({
-                  "type": "function_call",
-                  "id": item_id,
-                  "call_id": call.id,
-                  "name": call.name,
-                  "arguments": call.arguments.stringify(),
-                })
-              } else if signature_type == "custom_tool_call" {
-                guard signature
-                  is { "input_property": String(input_property), .. } else {
-                  fail(
-                    "Responses custom tool-call signature is missing input_property",
-                  )
-                }
-                guard call.arguments is Json::Object(arguments) else {
-                  fail("Responses custom tool call requires object arguments")
-                }
-                guard arguments.get(input_property)
-                  is Some(String(custom_input)) else {
-                  fail("Responses custom tool call is missing string input")
-                }
-                custom_call_ids[call.id] = true
-                input.push({
-                  "type": "custom_tool_call",
-                  "id": item_id,
-                  "call_id": call.id,
-                  "name": call.name,
-                  "input": custom_input,
-                })
-              } else {
-                fail(
-                  "Unsupported Responses tool-call signature: \{signature_type}",
-                )
-              }
-            }
-          }
-        }
-      ToolResult(result) => {
-        let is_custom = custom_call_ids.get(result.tool_call_id) == Some(true)
-        input.push({
-          "type": if is_custom {
-            "custom_tool_call_output"
-          } else {
-            "function_call_output"
-          },
-          "call_id": result.tool_call_id,
-          "output": [
-            for content in result.content => {
-              match content {
-                Text(text) => ({ "type": "input_text", "text": text } : Json)
-                Image(_) => (fail("image input not supported") : Json)
-              }
-            }
-          ],
-        })
-      }
-    }
-  }
-  input
 }
 
 ///|
@@ -653,7 +635,7 @@ fn parse_sse_event(
     "response.completed" | "response.incomplete" | "response.failed" => {
       let payload : ResponseTerminalEvent = @json.from_json(json)
       let terminal = payload.response
-      for terminal_item in terminal.output.unwrap_or([]) {
+      for terminal_item in terminal.output {
         guard terminal_item
           is { "type": String(item_type), "id": String(terminal_id), .. } else {
           continue

@@ -95,12 +95,12 @@ priv struct ResponseOutputIndexEvent {
 /// OpenAPI terminal event payload shared by response.completed,
 /// response.incomplete, and response.failed.
 priv struct ResponseTerminalEvent {
-  response : ResponseTerminal
+  response : Response
 } derive(FromJson)
 
 ///|
 /// Terminal subset of the OpenAPI `Response` resource used by stream processing.
-priv struct ResponseTerminal {
+priv struct Response {
   /// Final response status.
   status : String?
   /// Reason why an incomplete response stopped.
@@ -111,18 +111,8 @@ priv struct ResponseTerminal {
   usage : ResponseUsage?
   /// Ordered output items. Their discriminant is inspected only when terminal
   /// data can add replay state that was absent from output_item.done.
-  output : Array[Json]?
+  output : Array[Json]
 }
-
-///|
-/// Wire representation used to normalize OpenAPI's explicit nullable fields.
-priv struct ResponseTerminalWire {
-  status : String?
-  incomplete_details : Json?
-  error : Json?
-  usage : Json?
-  output : Array[Json]?
-} derive(FromJson)
 
 ///|
 /// OpenAPI `Response.Error`: the diagnostic carried by failed responses.
@@ -167,20 +157,29 @@ priv struct ResponseUsageDetails {
 } derive(FromJson)
 
 ///|
-impl @json.FromJson for ResponseTerminal with fn from_json(json, path) {
-  let wire : ResponseTerminalWire = @json.from_json(json, path~)
-  let incomplete_details = match wire.incomplete_details {
-    None | Some(Json::Null) => None
-    Some(value) =>
+impl @json.FromJson for Response with fn from_json(json, path) {
+  let status = match json {
+    { "status": String(status), .. } => Some(status)
+    _ => None
+  }
+  let incomplete_details = match json {
+    { "incomplete_details": Object(_) as value, .. } =>
       Some(@json.from_json(value, path=path.add_key("incomplete_details")))
+    _ => None
   }
-  let error = match wire.error {
-    None | Some(Json::Null) => None
-    Some(value) => Some(@json.from_json(value, path=path.add_key("error")))
+  let error = match json {
+    { "error": Object(_) as value, .. } =>
+      Some(@json.from_json(value, path=path.add_key("error")))
+    _ => None
   }
-  let usage = match wire.usage {
-    None | Some(Json::Null) => None
-    Some(value) => Some(@json.from_json(value, path=path.add_key("usage")))
+  let usage = match json {
+    { "usage": Object(_) as value, .. } =>
+      Some(@json.from_json(value, path=path.add_key("usage")))
+    _ => None
   }
-  { status: wire.status, incomplete_details, error, usage, output: wire.output }
+  let output = match json {
+    { "output": Array(output), .. } => output
+    _ => []
+  }
+  { status, incomplete_details, error, usage, output }
 }

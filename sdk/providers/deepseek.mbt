@@ -46,7 +46,7 @@ pub fn DeepSeekProvider::DeepSeekProvider() -> DeepSeekProvider {
 pub impl LLMProvider for DeepSeekProvider with fn new_llm(
   self,
   model_id,
-  thinking~ : String = "high",
+  thinking? : String = "high",
 ) {
   ignore(self)
   guard @env.get_env_var("DEEPSEEK_API_KEY") is Some(api_key) else {
@@ -78,7 +78,51 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
   context : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
 ) -> @agent_loop.AssistantMessage {
-  let (body, custom_tool_input_properties) = self.encode_responses_body(context)
+  let input = encode_responses_input(context)
+  let custom_tool_input_properties = Map([])
+  let tools : Array[Json] = []
+  for definition in context.tools {
+    match definition {
+      @agent_loop.ToolDefinition::Hosted(WebSearch) =>
+        tools.push({ "type": "web_search" })
+      @agent_loop.ToolDefinition::Function(tool) =>
+        match tool.constrained_sampling {
+          JsonSchema(strict~) =>
+            tools.push({
+              "type": "function",
+              "name": tool.name,
+              "description": tool.description,
+              "parameters": tool.parameters,
+              "strict": strict,
+            })
+          Grammar(format~, definition=grammar_definition, input_property~) => {
+            custom_tool_input_properties[tool.name] = input_property
+            tools.push({
+              "type": "custom",
+              "name": tool.name,
+              "description": tool.description,
+              "format": {
+                "type": "grammar",
+                "syntax": match format {
+                  Lark => "lark"
+                  Regex => "regex"
+                },
+                "definition": grammar_definition,
+              },
+            })
+          }
+        }
+    }
+  }
+  let body : Json = {
+    "model": self.model_id,
+    "instructions": context.system_prompt,
+    "stream": true,
+    "reasoning": { "effort": self.thinking },
+    "tools": tools,
+    "tool_choice": "auto",
+    "input": input,
+  }
   // `bail` semantics: the retry window covers connection through the first
   // SSE event. Once any event has streamed, the completion is live and billed;
   // a retry would duplicate content downstream, so failures past that point
@@ -138,63 +182,4 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
     RetryableApiError(message) => fail(message)
     error => raise error
   }
-}
-
-///|
-/// Encodes the request body for one Responses API call plus the tool input
-/// property map needed to decode custom tool calls. Building is pure: the same
-/// body is replayed verbatim on every retry attempt.
-fn DeepSeekResponsesAPILLM::encode_responses_body(
-  self : DeepSeekResponsesAPILLM,
-  context : @agent_loop.Context,
-) -> (String, Map[String, String]) raise {
-  let input = encode_responses_input(context)
-  let custom_tool_input_properties : Map[String, String] = Map([])
-  let tools : Array[Json] = []
-  for definition in context.tools {
-    match definition {
-      @agent_loop.ToolDefinition::Hosted(WebSearch) =>
-        tools.push({ "type": "web_search" })
-      @agent_loop.ToolDefinition::Function(tool) =>
-        match tool.constrained_sampling {
-          JsonSchema(strict~) =>
-            tools.push({
-              "type": "function",
-              "name": tool.name,
-              "description": tool.description,
-              "parameters": tool.parameters,
-              "strict": strict,
-            })
-          Grammar(format~, definition=grammar_definition, input_property~) => {
-            custom_tool_input_properties[tool.name] = input_property
-            tools.push({
-              "type": "custom",
-              "name": tool.name,
-              "description": tool.description,
-              "format": {
-                "type": "grammar",
-                "syntax": match format {
-                  Lark => "lark"
-                  Regex => "regex"
-                },
-                "definition": grammar_definition,
-              },
-            })
-          }
-        }
-    }
-  }
-  let body : Json = {
-    "model": self.model_id,
-    "instructions": context.system_prompt,
-    "stream": true,
-    "reasoning": { "effort": self.thinking },
-    // No sampling parameters (temperature/top_p): both pi and openseek send
-    // none and rely on provider-tuned defaults; pim follows the same
-    // convention and exposes no sampling knobs.
-    "tools": tools,
-    "tool_choice": "auto",
-    "input": input,
-  }
-  (body.stringify(), custom_tool_input_properties)
 }
