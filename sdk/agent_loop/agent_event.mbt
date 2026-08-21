@@ -32,15 +32,16 @@ pub(all) enum AgentMessage {
 pub impl ToJson for AgentMessage with fn to_json(self : AgentMessage) -> Json {
   match self {
     User(contents) => { "role": "user", "content": contents }
-    Assistant(message) => message.to_json()
-    ToolResult(result) => {
-      "role": "toolResult",
-      "toolCallId": result.tool_call_id,
-      "toolName": result.tool_name,
-      "content": result.content,
-      "isError": result.is_error,
-      "timestamp": Json::number(result.timestamp.to_double()),
-    }
+    Assistant(message) => ToJson::to_json(message)
+    ToolResult(result) =>
+      {
+        "role": "toolResult",
+        "toolCallId": result.tool_call_id,
+        "toolName": result.tool_name,
+        "content": result.content,
+        "isError": result.is_error,
+        "timestamp": Json::number(result.timestamp.to_double()),
+      }
   }
 }
 
@@ -99,6 +100,9 @@ pub impl ToJson for AssistantMessage with fn to_json(self : AssistantMessage) ->
     "timestamp": Json::number(self.timestamp.to_double()),
   }
 }
+
+///|
+pub extend AssistantMessage with ToJson::{to_json}
 
 ///|
 pub(all) enum AssistantMessageContent {

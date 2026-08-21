@@ -1,28 +1,25 @@
 ///|
 async fn main {
   let matches = @argparse.parse(
-    Command(
-      "pim",
-      options=[
-        OptionArg("print", short='p', about="prompt text"),
-        OptionArg(
-          "session_dir",
-          long="session-dir",
-          env="PIM_SESSION_DIR",
-          about="directory to store session JSONL files",
-        ),
-        OptionArg(
-          "mode",
-          long="mode",
-          about="output mode: text or json (default text)",
-        ),
-        OptionArg(
-          "thinking",
-          long="thinking",
-          about="thinking effort level: low, high (default), or max",
-        ),
-      ],
-    ),
+    Command("pim", options=[
+      OptionArg("print", short='p', about="prompt text"),
+      OptionArg(
+        "session_dir",
+        long="session-dir",
+        env="PIM_SESSION_DIR",
+        about="directory to store session JSONL files",
+      ),
+      OptionArg(
+        "mode",
+        long="mode",
+        about="output mode: text or json (default text)",
+      ),
+      OptionArg(
+        "thinking",
+        long="thinking",
+        about="thinking effort level: low, high (default), or max",
+      ),
+    ]),
     env=@env.get_env_vars(),
   ) catch {
     err => arg_error("\{err}")
@@ -101,8 +98,7 @@ async fn main {
     }),
   )
   if mode != "json" {
-    guard last_message
-      is Some(Assistant({ content: [_, ..] as reply, .. })) else {
+    guard last_message is Some(Assistant({ content: [_, ..] as reply, .. })) else {
       fatal("no reply from agent")
     }
     let output = StringBuilder()

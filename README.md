@@ -16,13 +16,3 @@ moon build --target native
 ```bash
 pim -p "Explain the codebase in one paragraph"
 ```
-
-运行全部测试(`moon test` + CLI 契约测试):
-
-```bash
-just test
-```
-
-CLI 契约的离线测试转录见 `tests/cram/cli.md`,由 `moon cram test tests/cram`
-执行。真实 provider 的 smoke 测试见 `tests/live/deepseek.md`,需要
-`DEEPSEEK_API_KEY`,用 `just eval` 运行。

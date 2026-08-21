@@ -179,23 +179,22 @@ impl @agent_loop.LLM for ScriptedLLM with fn generate(
 /// pi pins this contract in agent-session-retry-events.test.ts.
 async test "session prompt emits pi's event order" {
   let events : Array[String] = []
-  let session = @agent_session.AgentSession(
-    ScriptedLLM::{  },
-    system_prompt="",
-  )
+  let session = @agent_session.AgentSession(ScriptedLLM::{  }, system_prompt="")
   session.subscribe(event => {
     guard event is Loop(e) else { return }
-    events.push(match e {
-      AgentStart => "agent_start"
-      TurnStart => "turn_start"
-      MessageStart(User(_)) => "message_start:user"
-      MessageEnd(User(_)) => "message_end:user"
-      MessageStart(Assistant(_)) => "message_start:assistant"
-      MessageEnd(Assistant(_)) => "message_end:assistant"
-      TurnEnd(_) => "turn_end"
-      AgentEnd(_) => "agent_end"
-      _ => "other"
-    })
+    events.push(
+      match e {
+        AgentStart => "agent_start"
+        TurnStart => "turn_start"
+        MessageStart(User(_)) => "message_start:user"
+        MessageEnd(User(_)) => "message_end:user"
+        MessageStart(Assistant(_)) => "message_start:assistant"
+        MessageEnd(Assistant(_)) => "message_end:assistant"
+        TurnEnd(_) => "turn_end"
+        AgentEnd(_) => "agent_end"
+        _ => "other"
+      },
+    )
   })
   session.prompt([
     @agent_loop.UserMessage::{
