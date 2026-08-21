@@ -1,4 +1,13 @@
 ///|
+/// `pim` 的输出模式,对齐 pi 的 `--mode`。
+enum OutputMode {
+  /// 只把 agent 的最终回复文本写到 stdout。
+  Text
+  /// 把每个会话事件投影成一行 JSON(JSONL)写到 stdout。
+  Json
+} derive(Eq)
+
+///|
 async fn main {
   let matches = @argparse.parse(
     Command("pim", options=[
@@ -29,8 +38,13 @@ async fn main {
     _ => fatal("Error: only '-p' support for now")
   }
   let mode = match matches.values {
-    { "mode": [m, ..], .. } => m
-    _ => "text"
+    { "mode": [m, ..], .. } =>
+      match m {
+        "text" => Text
+        "json" => Json
+        _ => fatal("Error: invalid mode '\{m}' (expected text or json)")
+      }
+    _ => Text
   }
   let deepseek = @providers.DeepSeekProvider()
   // provider 构造失败(如缺 DEEPSEEK_API_KEY)是诊断,按输出流契约走 stderr;
@@ -79,7 +93,7 @@ async fn main {
   defer cleanup()
   let session = @coding_agent.new_coding_session(llm, cwd~, journal~)
   let mut last_message : @agent_loop.AgentMessage? = None
-  if mode == "json" {
+  if mode is Json {
     // JSONL 模式:每个 AgentSessionEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。
     session.subscribe(event => {
       write_stdout(session_event_to_json(event).stringify())
@@ -97,7 +111,7 @@ async fn main {
       content: [@agent_loop.InputMessageContent::Text(p)],
     }),
   )
-  if mode != "json" {
+  if mode is Text {
     guard last_message is Some(Assistant({ content: [_, ..] as reply, .. })) else {
       fatal("no reply from agent")
     }

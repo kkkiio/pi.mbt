@@ -50,6 +50,17 @@ Error: unexpected argument '--bogus' found
 [1]
 ```
 
+## 非法 --mode 取值
+
+`--mode` 只接受 `text` 或 `json`;非法取值在接触 provider 之前被拒绝,
+诊断写入 stderr,退出码为 1:
+
+```mooncram {output_stream: stderr}
+$ pim.exe --mode yaml -p hi
+Error: invalid mode 'yaml' (expected text or json)
+[1]
+```
+
 ## 缺少 API key 时 -p 失败
 
 没有 `DEEPSEEK_API_KEY` 时,`-p` 在 provider 构造阶段失败,退出码为 1;失败报告
@@ -60,3 +71,6 @@ $ (unset DEEPSEEK_API_KEY; pim.exe -p hi)
 Error: miss DEEPSEEK_API_KEY
 [1]
 ```
+
+`--mode json` 的事件流契约(`tool_execution_start` /
+`tool_execution_end` 等)由 `tests/live/deepseek.md` 用真实 provider 覆盖。

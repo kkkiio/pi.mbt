@@ -2,17 +2,29 @@
 
 用 MoonBit 重新实现的 [pi](https://github.com/earendil-works/pi) coding agent 子集。
 
-## Usage
-
-构建 native 可执行文件:
+## Install
 
 ```bash
-moon build --target native
+moon install ./cmd/pim
 ```
 
-源码构建产物名为 `pim.exe`。当前只支持 `-p/--print` 非交互模式,把 agent 的最终
-回复写到 stdout:
+## Usage
+
+当前只支持 `-p/--print` 单轮、非交互模式:
 
 ```bash
-pim -p "Explain the codebase in one paragraph"
+DEEPSEEK_API_KEY=sk-xxx
+pim -p "What's the capital of France? Respond with only the city name."
+# Paris
+```
+
+加上 `--mode json` 可以输出 JSONL 事件流:
+
+```bash
+pim -p "What's the capital of France? Respond with only the city name." --mode json
+# {"type":"agent_start"}
+# {"type":"turn_start"}
+# {"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"What's the capital of France? Respond with only the city name."}]}}
+# ...
+# {"type":"agent_end"}
 ```
