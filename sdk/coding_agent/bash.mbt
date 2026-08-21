@@ -59,7 +59,7 @@ async fn execute_bash_tool(
   group : @async.TaskGroup[@agent_loop.ToolResult],
   cwd : String,
   input : Json,
-  on_update? : @agent_loop.ToolExecUpdateSink,
+  on_update? : @agent_loop.ToolExecUpdateCallback,
   exec~ : async (BashExecParams) -> Int,
 ) -> @agent_loop.ToolResult {
   let params : BashToolInput = @json.from_json(input)
