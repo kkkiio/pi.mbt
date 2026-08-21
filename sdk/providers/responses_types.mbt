@@ -177,10 +177,9 @@ impl @json.FromJson for Response with fn from_json(json, path) {
       Some(@json.from_json(value, path=path.add_key("usage")))
     _ => None
   }
-  guard json is { "output": Array(output), .. } else {
-    raise @json.JsonDecodeError(
-      (path.add_key("output"), "Response::from_json: expected output array"),
-    )
+  let output = match json {
+    { "output": Array(output), .. } => output
+    _ => []
   }
   { status, incomplete_details, error, usage, output }
 }
