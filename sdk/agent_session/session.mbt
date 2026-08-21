@@ -10,7 +10,7 @@ const AUTO_RETRY_BASE_DELAY_MS : Int = 500
 pub struct AgentSession {
   journal : &SessionJournal
   llm : &@agent_loop.LLM
-  tool_registry : ToolRegistry
+  tool_registry : @tools.ToolRegistry
   fanout : FanOutListener
   message_buffer : Array[@agent_loop.AgentMessage]
   system_prompt : String
@@ -22,9 +22,10 @@ pub fn AgentSession::AgentSession(
   llm : &@agent_loop.LLM,
   system_prompt~ : String,
   journal? : &SessionJournal = InMemorySessionJournal(),
+  tool_registry? : @tools.ToolRegistry = @tools.ToolRegistry(),
 ) -> AgentSession {
   AgentSession::{
-    tool_registry: ToolRegistry(),
+    tool_registry,
     journal,
     fanout: FanOutListener::FanOutListener(),
     llm,
@@ -43,16 +44,6 @@ pub fn AgentSession::AgentSession(
     }),
     active_run_exists: false,
   }
-}
-
-///|
-/// Register a tool definition with the session.
-pub fn AgentSession::register_tool(
-  self : AgentSession,
-  tool_def : @tools.ToolDefinition,
-  activate? : Bool = true,
-) -> Unit {
-  self.tool_registry.register_tool(tool_def, activate~)
 }
 
 ///|
@@ -120,9 +111,8 @@ pub async fn AgentSession::prompt(
           _ => None
         }
         if content is Some(content) {
-          ignore(
-            self.journal.append([{ id: self.journal.generate_id(), content }]),
-          )
+          self.journal.append([{ id: self.journal.generate_id(), content }])
+          |> ignore
         }
         self.fanout.on_event(AgentSessionEvent::Loop(event))
       },

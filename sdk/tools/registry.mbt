@@ -1,7 +1,4 @@
 ///|
-using @tools {type ToolDefinition}
-
-///|
 struct ToolRegistry {
   all_tools : Map[String, ToolDefinition]
   activate_tools : Array[String]
