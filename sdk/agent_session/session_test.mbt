@@ -171,7 +171,7 @@ impl @agent_loop.LLM for ScriptedLLM with fn generate(
 ) -> @agent_loop.AssistantMessage {
   ignore(self)
   let msg = ok_message()
-  sink(@agent_loop.GenerationEvent::Start(msg))
+  sink(@agent_loop.GenerationEvent::Start(partial=msg))
   msg
 }
 

@@ -55,16 +55,32 @@ pub(all) enum GrammarFormat {
 /// when the stream begins: `api`/`provider`/`model`/`timestamp` are already
 /// known, `stop_reason` is `Pending`, and `content` grows as deltas arrive.
 pub(all) enum GenerationEvent {
-  Start(AssistantMessage)
-  TextStart(Int, AssistantMessage)
-  TextDelta(Int, String, AssistantMessage)
-  TextEnd(Int, String, AssistantMessage)
-  ThinkingStart(Int, AssistantMessage)
-  ThinkingDelta(Int, String, AssistantMessage)
-  ThinkingEnd(Int, String, AssistantMessage)
-  ToolCallStart(Int, AssistantMessage)
-  ToolCallDelta(Int, String, AssistantMessage)
-  ToolCallEnd(Int, ToolCall, AssistantMessage)
+  Start(partial~ : AssistantMessage)
+  TextStart(content_index~ : Int, partial~ : AssistantMessage)
+  TextDelta(content_index~ : Int, delta~ : String, partial~ : AssistantMessage)
+  TextEnd(content_index~ : Int, content~ : String, partial~ : AssistantMessage)
+  ThinkingStart(content_index~ : Int, partial~ : AssistantMessage)
+  ThinkingDelta(
+    content_index~ : Int,
+    delta~ : String,
+    partial~ : AssistantMessage
+  )
+  ThinkingEnd(
+    content_index~ : Int,
+    content~ : String,
+    partial~ : AssistantMessage
+  )
+  ToolCallStart(content_index~ : Int, partial~ : AssistantMessage)
+  ToolCallDelta(
+    content_index~ : Int,
+    delta~ : String,
+    partial~ : AssistantMessage
+  )
+  ToolCallEnd(
+    content_index~ : Int,
+    tool_call~ : ToolCall,
+    partial~ : AssistantMessage
+  )
 } derive(Debug)
 
 ///|

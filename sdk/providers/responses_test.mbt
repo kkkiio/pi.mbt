@@ -42,7 +42,7 @@ async test "openai streaming example" {
     content=(
       #|[
       #|  Start(
-      #|    {
+      #|    partial={
       #|      content: [
       #|        Text(
       #|          "Hi there! How can I assist you today?",
@@ -64,8 +64,8 @@ async test "openai streaming example" {
       #|    },
       #|  ),
       #|  TextStart(
-      #|    0,
-      #|    {
+      #|    content_index=0,
+      #|    partial={
       #|      content: [
       #|        Text(
       #|          "Hi there! How can I assist you today?",
@@ -87,9 +87,9 @@ async test "openai streaming example" {
       #|    },
       #|  ),
       #|  TextDelta(
-      #|    0,
-      #|    "Hi",
-      #|    {
+      #|    content_index=0,
+      #|    delta="Hi",
+      #|    partial={
       #|      content: [
       #|        Text(
       #|          "Hi there! How can I assist you today?",
@@ -111,9 +111,9 @@ async test "openai streaming example" {
       #|    },
       #|  ),
       #|  TextEnd(
-      #|    0,
-      #|    "Hi there! How can I assist you today?",
-      #|    {
+      #|    content_index=0,
+      #|    content="Hi there! How can I assist you today?",
+      #|    partial={
       #|      content: [
       #|        Text(
       #|          "Hi there! How can I assist you today?",

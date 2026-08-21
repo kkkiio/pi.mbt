@@ -288,7 +288,7 @@ fn parse_sse_event(
   }
   return match event {
     "response.created" =>
-      sse_delta(@agent_loop.GenerationEvent::Start(in_flight()))
+      sse_delta(@agent_loop.GenerationEvent::Start(partial=in_flight()))
     "response.in_progress"
     | "response.content_part.added"
     | "response.content_part.done"
@@ -324,7 +324,7 @@ fn parse_sse_event(
             ),
           )
           slots[output_index] = Thinking(content_index)
-          sse_delta(@agent_loop.ThinkingStart(content_index, in_flight()))
+          sse_delta(@agent_loop.ThinkingStart(content_index~, partial=in_flight()))
         }
         "message" => {
           let item : ResponseOutputMessage = @json.from_json(item_json)
@@ -347,7 +347,7 @@ fn parse_sse_event(
             ),
           )
           slots[output_index] = Text(content_index)
-          sse_delta(@agent_loop.TextStart(content_index, in_flight()))
+          sse_delta(@agent_loop.TextStart(content_index~, partial=in_flight()))
         }
         "function_call" => {
           let item : ResponseFunctionToolCall = @json.from_json(item_json)
@@ -362,7 +362,9 @@ fn parse_sse_event(
             ),
           )
           slots[output_index] = FunctionCall(content_index, item.arguments)
-          sse_delta(@agent_loop.ToolCallStart(content_index, in_flight()))
+          sse_delta(
+            @agent_loop.ToolCallStart(content_index~, partial=in_flight()),
+          )
         }
         "custom_tool_call" => {
           let item : ResponseCustomToolCall = @json.from_json(item_json)
@@ -390,7 +392,9 @@ fn parse_sse_event(
             item.input,
             input_property,
           )
-          sse_delta(@agent_loop.ToolCallStart(content_index, in_flight()))
+          sse_delta(
+            @agent_loop.ToolCallStart(content_index~, partial=in_flight()),
+          )
         }
         "web_search_call" => {
           acc.push(
@@ -420,7 +424,7 @@ fn parse_sse_event(
         current + delta,
         signature~,
       )
-      sse_delta(@agent_loop.ThinkingDelta(content_index, delta, in_flight()))
+      sse_delta(@agent_loop.ThinkingDelta(content_index~, delta~, partial=in_flight()))
     }
     "response.reasoning_summary_part.done" => {
       let payload : ResponseOutputIndexEvent = @json.from_json(json)
@@ -436,7 +440,7 @@ fn parse_sse_event(
         current + "\n\n",
         signature~,
       )
-      sse_delta(@agent_loop.ThinkingDelta(content_index, "\n\n", in_flight()))
+      sse_delta(@agent_loop.ThinkingDelta(content_index~, delta="\n\n", partial=in_flight()))
     }
     "response.output_text.delta" | "response.refusal.delta" => {
       let payload : ResponseDeltaEvent = @json.from_json(json)
@@ -453,7 +457,7 @@ fn parse_sse_event(
         current + delta,
         signature~,
       )
-      sse_delta(@agent_loop.TextDelta(content_index, delta, in_flight()))
+      sse_delta(@agent_loop.TextDelta(content_index~, delta~, partial=in_flight()))
     }
     "response.function_call_arguments.delta" => {
       let payload : ResponseDeltaEvent = @json.from_json(json)
@@ -464,7 +468,9 @@ fn parse_sse_event(
         return None
       }
       slots[output_index] = FunctionCall(content_index, current + delta)
-      sse_delta(@agent_loop.ToolCallDelta(content_index, delta, in_flight()))
+      sse_delta(
+        @agent_loop.ToolCallDelta(content_index~, delta~, partial=in_flight()),
+      )
     }
     "response.custom_tool_call_input.delta" => {
       let payload : ResponseDeltaEvent = @json.from_json(json)
@@ -490,7 +496,9 @@ fn parse_sse_event(
         },
         signature~,
       )
-      sse_delta(@agent_loop.ToolCallDelta(content_index, delta, in_flight()))
+      sse_delta(
+        @agent_loop.ToolCallDelta(content_index~, delta~, partial=in_flight()),
+      )
     }
     "response.output_item.done" => {
       guard json
@@ -530,7 +538,7 @@ fn parse_sse_event(
           )
           slots.remove(output_index)
           sse_delta(
-            @agent_loop.ThinkingEnd(content_index, final_text, in_flight()),
+            @agent_loop.ThinkingEnd(content_index~, content=final_text, partial=in_flight()),
           )
         }
         ("message", Some(Text(content_index))) => {
@@ -560,7 +568,7 @@ fn parse_sse_event(
             signature~,
           )
           slots.remove(output_index)
-          sse_delta(@agent_loop.TextEnd(content_index, final_text, in_flight()))
+          sse_delta(@agent_loop.TextEnd(content_index~, content=final_text, partial=in_flight()))
         }
         ("function_call", Some(FunctionCall(content_index, _))) => {
           let item : ResponseFunctionToolCall = @json.from_json(item_json)
@@ -585,7 +593,11 @@ fn parse_sse_event(
           )
           slots.remove(output_index)
           sse_delta(
-            @agent_loop.ToolCallEnd(content_index, final_tool_call, in_flight()),
+            @agent_loop.ToolCallEnd(
+              content_index~,
+              tool_call=final_tool_call,
+              partial=in_flight(),
+            ),
           )
         }
         (
@@ -614,7 +626,11 @@ fn parse_sse_event(
           )
           slots.remove(output_index)
           sse_delta(
-            @agent_loop.ToolCallEnd(content_index, final_tool_call, in_flight()),
+            @agent_loop.ToolCallEnd(
+              content_index~,
+              tool_call=final_tool_call,
+              partial=in_flight(),
+            ),
           )
         }
         ("web_search_call", Some(HostedToolCall(content_index))) => {
