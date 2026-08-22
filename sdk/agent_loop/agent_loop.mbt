@@ -19,7 +19,7 @@ pub async fn run_agent_loop(
   let reason : LoopStopReason = for ;; {
     event_sink(AgentEvent::TurnStart)
     for prompt in pending_prompts {
-      let msg = AgentMessage::User(prompt.content)
+      let msg = AgentMessage::User(prompt)
       messages.push(msg)
       // Complete messages get start+end back to back, like pi.
       event_sink(AgentEvent::MessageStart(msg))
@@ -29,31 +29,27 @@ pub async fn run_agent_loop(
     let mut message_started = false
     let assistant_message = llm.generate({ system_prompt, messages, tools }, sink=event => {
       match event {
-        Start(partial=m) => {
+        Start(partial~) => {
           message_started = true
-          let msg = AgentMessage::Assistant(m)
+          let msg = AgentMessage::Assistant(partial)
           messages.push(msg)
           event_sink(AgentEvent::MessageStart(msg))
         }
-        TextStart(partial=m, ..)
-        | TextDelta(partial=m, ..)
-        | TextEnd(partial=m, ..)
-        | ThinkingStart(partial=m, ..)
-        | ThinkingDelta(partial=m, ..)
-        | ThinkingEnd(partial=m, ..)
-        | ToolCallStart(partial=m, ..)
-        | ToolCallDelta(partial=m, ..)
-        | ToolCallEnd(partial=m, ..) => {
-          let msg = AgentMessage::Assistant(m)
+        TextStart(partial~, ..)
+        | TextDelta(partial~, ..)
+        | TextEnd(partial~, ..)
+        | ThinkingStart(partial~, ..)
+        | ThinkingDelta(partial~, ..)
+        | ThinkingEnd(partial~, ..)
+        | ToolCallStart(partial~, ..)
+        | ToolCallDelta(partial~, ..)
+        | ToolCallEnd(partial~, ..) =>
+          // 在 Start 之前到达的中间事件违反流契约,直接丢弃;终态消息由 generate 的返回值兜底。
           if message_started {
+            let msg = AgentMessage::Assistant(partial)
             messages[messages.length() - 1] = msg
-          } else {
-            message_started = true
-            messages.push(msg)
-            event_sink(AgentEvent::MessageStart(msg))
+            event_sink(AgentEvent::MessageUpdate(msg))
           }
-          event_sink(AgentEvent::MessageUpdate(msg))
-        }
       }
     }) catch {
       err => {
@@ -108,6 +104,10 @@ pub async fn run_agent_loop(
     event_sink(AgentEvent::MessageEnd(final_msg))
 
     let tool_results = []
+    // pi: a batch stops the loop only when every finalized result sets
+    // `terminate` (AgentToolResult.terminate). The hint is transient loop
+    // control and is not persisted on ToolResultMessage.
+    let mut batch_terminate = true
     match assistant_message.stop_reason {
       Pending => fail("generate returned a message with pending stop_reason")
       Aborted | Error => ()
@@ -119,13 +119,13 @@ pub async fn run_agent_loop(
           event_sink(AgentEvent::ToolExecutionStart(tool_call))
           let call_timestamp = @env.now()
           let tool_result = if assistant_message.stop_reason is Length {
+            batch_terminate = false
             ToolResultMessage::{
               tool_call_id: tool_call.id,
               tool_name: tool_call.name,
               content: [],
               is_error: true,
               timestamp: call_timestamp,
-              terminate: false,
             }
           } else {
             let update_sink = (_, _) => () // TODO: support progress update
@@ -139,13 +139,13 @@ pub async fn run_agent_loop(
                   usage: None,
                 }
             }
+            batch_terminate = batch_terminate && result.terminate
             ToolResultMessage::{
               tool_call_id: tool_call.id,
               tool_name: tool_call.name,
               content: result.content,
               is_error: result.is_error,
               timestamp: call_timestamp,
-              terminate: result.terminate,
             }
           }
           event_sink(AgentEvent::ToolExecutionEnd(tool_result))
@@ -161,7 +161,7 @@ pub async fn run_agent_loop(
       Error => break Error
       _ => ()
     }
-    if tool_results.any(r => !r.terminate) {
+    if !batch_terminate {
       continue
     }
     pending_prompts = steer_channel()
@@ -180,11 +180,6 @@ pub enum LoopStopReason {
   /// The model was aborted by the user or system.
   Aborted
   Error
-}
-
-///|
-pub(all) struct UserMessage {
-  content : Array[InputMessageContent]
 }
 
 ///|

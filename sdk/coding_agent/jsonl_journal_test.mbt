@@ -50,9 +50,10 @@ async test "persists various entries in memory and as JSONL" {
     now=() => 1786903823973,
   )
 
-  let user_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::User([
-    @agent_loop.InputMessageContent::Text("hello"),
-  ])
+  let user_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::User({
+    content: [@agent_loop.InputMessageContent::Text("hello")],
+    timestamp: 1786903823973,
+  })
   let assistant_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::Assistant({
       content: [
         @agent_loop.AssistantMessageContent::Text("hi", signature={
@@ -75,7 +76,6 @@ async test "persists various entries in memory and as JSONL" {
       content: [@agent_loop.InputMessageContent::Text("ok")],
       is_error: false,
       timestamp: 1786903823973,
-      terminate: false,
     },
   )
   let stored = journal.append([
@@ -88,24 +88,15 @@ async test "persists various entries in memory and as JSONL" {
     },
     {
       id: "e2",
-      content: @agent_session.SessionEntryContent::Message(
-        user_message,
-        terminate=false,
-      ),
+      content: @agent_session.SessionEntryContent::Message(user_message),
     },
     {
       id: "e3",
-      content: @agent_session.SessionEntryContent::Message(
-        assistant_message,
-        terminate=false,
-      ),
+      content: @agent_session.SessionEntryContent::Message(assistant_message),
     },
     {
       id: "e4",
-      content: @agent_session.SessionEntryContent::Message(
-        tool_result,
-        terminate=false,
-      ),
+      content: @agent_session.SessionEntryContent::Message(tool_result),
     },
   ])
 
@@ -129,6 +120,7 @@ async test "persists various entries in memory and as JSONL" {
       "message": {
         "role": "user",
         "content": [{ "type": "text", "text": "hello" }],
+        "timestamp": 1786903823973,
       },
     },
     {
@@ -201,6 +193,7 @@ async test "persists various entries in memory and as JSONL" {
       "message": {
         "role": "user",
         "content": [{ "type": "text", "text": "hello" }],
+        "timestamp": 1786903823973,
       },
     },
     {
@@ -252,7 +245,7 @@ async test "persists various entries in memory and as JSONL" {
     content=(
       #|{"kind":"header","version":4,"id":"13219109","createdAt":1786903823973,"cwd":"/workspaces/pi.mbt"}
       #|{"kind":"entry","lane":"main","id":"e1","seq":2,"parentId":"e0","timestamp":1786903823973,"type":"model_change","provider":"deepseek","modelId":"v4"}
-      #|{"kind":"entry","lane":"main","id":"e2","seq":3,"parentId":"e1","timestamp":1786903823973,"type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}
+      #|{"kind":"entry","lane":"main","id":"e2","seq":3,"parentId":"e1","timestamp":1786903823973,"type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}],"timestamp":1786903823973}}
       #|{"kind":"entry","lane":"main","id":"e3","seq":4,"parentId":"e2","timestamp":1786903823973,"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"hi","textSignature":"{\"type\":\"message\",\"id\":\"msg_1\"}"}],"api":"openai-responses","provider":"deepseek","model":"deepseek-v4-flash","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":1786903823973}}
       #|{"kind":"entry","lane":"main","id":"e4","seq":5,"parentId":"e3","timestamp":1786903823973,"type":"message","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"ok"}],"isError":false,"timestamp":1786903823973}}
       #|

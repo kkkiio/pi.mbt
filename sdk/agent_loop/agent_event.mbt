@@ -21,7 +21,7 @@ pub enum AgentEvent {
 /// A message in the agent conversation. Appears in the loop's `messages`
 /// buffer, in `AgentEvent` payloads, and in persisted journal entries.
 pub(all) enum AgentMessage {
-  User(ArrayView[InputMessageContent])
+  User(UserMessage)
   Assistant(AssistantMessage)
   ToolResult(ToolResultMessage)
 }
@@ -31,7 +31,7 @@ pub(all) enum AgentMessage {
 /// and persisted journal entries stay isomorphic with pi.
 pub impl ToJson for AgentMessage with fn to_json(self : AgentMessage) -> Json {
   match self {
-    User(contents) => { "role": "user", "content": contents }
+    User(message) => ToJson::to_json(message)
     Assistant(message) => ToJson::to_json(message)
     ToolResult(result) =>
       {
@@ -49,6 +49,24 @@ pub impl ToJson for AgentMessage with fn to_json(self : AgentMessage) -> Json {
 pub(all) enum InputMessageContent {
   Text(String)
   Image(Bytes)
+}
+
+///|
+/// A user message in the conversation. Mirrors pi's `UserMessage`: `content`
+/// plus a Unix-epoch-milliseconds `timestamp`.
+pub(all) struct UserMessage {
+  content : Array[InputMessageContent]
+  timestamp : UInt64
+}
+
+///|
+/// JSON shape mirrors pi's `UserMessage` (`role` / `content` / `timestamp`).
+pub impl ToJson for UserMessage with fn to_json(self : UserMessage) -> Json {
+  {
+    "role": "user",
+    "content": self.content,
+    "timestamp": Json::number(self.timestamp.to_double()),
+  }
 }
 
 ///|
@@ -149,6 +167,9 @@ pub impl ToJson for AssistantMessageContent with fn to_json(
 }
 
 ///|
+pub extend HostedTool with ToJson::{to_json}
+
+///|
 pub(all) struct ToolCall {
   id : String
   name : String
@@ -174,6 +195,4 @@ pub(all) struct ToolResultMessage {
   content : Array[InputMessageContent]
   is_error : Bool
   timestamp : UInt64
-  /// Whether the tool wants to exit the agent loop, like yielding control back to the user or system. For example, a ui tool may want to exit the loop and wait for user input before continuing.
-  terminate : Bool
 }

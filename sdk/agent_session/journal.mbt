@@ -36,7 +36,7 @@ pub(all) struct NewSessionEntry {
 
 ///|
 pub(all) enum SessionEntryContent {
-  Message(AgentMessage, terminate~ : Bool)
+  Message(AgentMessage)
   ModelChange(provider~ : String, model_id~ : String)
   Compaction(
     summary~ : String,
@@ -62,12 +62,9 @@ pub impl ToJson for SessionEntry with fn to_json(self) -> Json {
   // JSON double.
   obj["timestamp"] = Json::number(self.timestamp.to_double())
   match self.content {
-    Message(message, terminate~) => {
+    Message(message) => {
       obj["type"] = "message".to_json()
       obj["message"] = message.to_json()
-      if terminate {
-        obj["terminate"] = Json::boolean(true)
-      }
     }
     ModelChange(provider~, model_id~) => {
       obj["type"] = "model_change".to_json()
@@ -122,10 +119,7 @@ pub impl FromJson for SessionEntry with fn from_json(json, path) {
       guard fields.get("message") is Some(message_json) else {
         decode_error(content_path, "message entry is missing message")
       }
-      Message(
-        parse_agent_message(message_json, path.add_key("message")),
-        terminate=fields.get("terminate") is Some(True),
-      )
+      Message(parse_agent_message(message_json, path.add_key("message")))
     }
     "model_change" => {
       guard fields.get("provider") is Some(String(provider)) else {
@@ -218,7 +212,11 @@ fn parse_agent_message(
           parse_input_content(item, path.add_key("content").add_index(i)),
         )
       }
-      User(contents)
+      let timestamp = parse_timestamp(
+        fields.get("timestamp"),
+        path.add_key("timestamp"),
+      )
+      User({ content: contents, timestamp })
     }
     "assistant" => {
       guard fields.get("content") is Some(Array(items)) else {
@@ -301,7 +299,6 @@ fn parse_agent_message(
         content,
         is_error: fields.get("isError") is Some(True),
         timestamp,
-        terminate: fields.get("terminate") is Some(True),
       })
     }
     _ => decode_error(path, "AgentMessage: unknown role \{role}")

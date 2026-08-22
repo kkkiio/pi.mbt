@@ -19,6 +19,6 @@ test:
 cram:
     moon cram test tests/cram
 
-# Real-provider CLI contract tests; requires DEEPSEEK_API_KEY.
+# Real-provider CLI contract tests; loads .env.test when present.
 eval:
-    moon cram test tests/live
+    if [ -f .env.test ]; then set -a; source .env.test; set +a; fi; moon cram test tests/live

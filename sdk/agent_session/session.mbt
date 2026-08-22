@@ -37,8 +37,8 @@ pub fn AgentSession::AgentSession(
         // Superseded or partial failure turns are kept in the journal (the
         // write-ahead log) but excluded from hydrated model context, so a
         // resumed session never replays an error turn into the prompt.
-        Message(Assistant(m), ..) if m.stop_reason is Error => None
-        Message(m, ..) => Some(m)
+        Message(Assistant(m)) if m.stop_reason is Error => None
+        Message(m) => Some(m)
         _ => None
       }
     }),
@@ -99,15 +99,14 @@ pub async fn AgentSession::prompt(
         // are persisted unconditionally — the journal is a complete
         // write-ahead log.
         let content : SessionEntryContent? = match event {
-          MessageEnd(User(_) as m) => Some(Message(m, terminate=false))
+          MessageEnd(User(_) as m) => Some(Message(m))
           MessageEnd(Assistant(m) as msg) => {
             guard !(m.stop_reason is Pending) else {
               fail("journal cannot persist a message with pending stop_reason")
             }
-            Some(Message(msg, terminate=false))
+            Some(Message(msg))
           }
-          ToolExecutionEnd(result) =>
-            Some(Message(ToolResult(result), terminate=result.terminate))
+          ToolExecutionEnd(result) => Some(Message(ToolResult(result)))
           _ => None
         }
         if content is Some(content) {

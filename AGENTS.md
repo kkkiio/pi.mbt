@@ -57,8 +57,11 @@ CLI 契约由 `tests/cram/` 下的 `mooncram` 转录持续验证。变更 CLI �
 
 真实 provider 测试放在 `tests/live/`,与离线套件分离:`just test` 和 CI 不跑它们。
 
-- 运行方式:`DEEPSEEK_API_KEY=sk-... moon cram test tests/live`(或 `just eval`)。
-- 没有 key 时用例会失败,这是预期行为——live 测试是 opt-in,不假装离线可过。
+- 运行方式:`just eval`(若本地存在 `.env.test` 会自动加载);或显式
+  `DEEPSEEK_API_KEY=sk-... moon cram test tests/live`。本地 key 放在
+  git-ignored 的 `.env*` 文件里,跑 live 测试前先检查是否存在。
+- 没有 key(且没有 `.env.test`)时用例会失败,这是预期行为——live 测试是
+  opt-in,不假装离线可过。
 - 转录只断言稳定契约(如最终回复恰好为 `Paris`),不复现模型输出细节。
 
 ### Output Stream Contract

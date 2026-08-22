@@ -24,7 +24,7 @@ pim -p "What's the capital of France? Respond with only the city name."
 pim -p "What's the capital of France? Respond with only the city name." --mode json
 # {"type":"agent_start"}
 # {"type":"turn_start"}
-# {"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"What's the capital of France? Respond with only the city name."}]}}
+# {"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"What's the capital of France? Respond with only the city name."}],"timestamp":1786903823973}}
 # ...
 # {"type":"agent_end"}
 ```

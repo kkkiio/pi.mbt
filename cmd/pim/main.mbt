@@ -109,6 +109,7 @@ async fn main {
   session.prompt(
     prompts.map(p => @agent_loop.UserMessage::{
       content: [@agent_loop.InputMessageContent::Text(p)],
+      timestamp: @env.now(),
     }),
   )
   if mode is Text {
