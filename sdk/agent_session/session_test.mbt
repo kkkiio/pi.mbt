@@ -128,17 +128,15 @@ async test "session hydration drops Error assistant messages from the journal" {
             content: [@agent_loop.InputMessageContent::Text("hi")],
             timestamp: 1786903823973,
           }),
-          terminate=false,
         ),
       },
       {
         id: "e1",
         content: Message(
           Assistant(error_message("DeepSeek API error 503: overloaded")),
-          terminate=false,
         ),
       },
-      { id: "ok1", content: Message(Assistant(ok_message()), terminate=false) },
+      { id: "ok1", content: Message(Assistant(ok_message())) },
     ]),
   )
   // The constructor hydrates `message_buffer` from the journal: superseded
@@ -192,6 +190,66 @@ async test "session prompt emits pi's event order" {
         MessageStart(User(_)) => "message_start:user"
         MessageEnd(User(_)) => "message_end:user"
         MessageStart(Assistant(_)) => "message_start:assistant"
+        MessageEnd(Assistant(_)) => "message_end:assistant"
+        TurnEnd(_) => "turn_end"
+        AgentEnd(_) => "agent_end"
+        _ => "other"
+      },
+    )
+  })
+  session.prompt([
+    @agent_loop.UserMessage::{
+      content: [@agent_loop.InputMessageContent::Text("hi")],
+      timestamp: 1786903823973,
+    },
+  ])
+  assert_eq(events, [
+    "agent_start", "turn_start", "message_start:user", "message_end:user", "message_start:assistant",
+    "message_end:assistant", "turn_end", "agent_end",
+  ])
+}
+
+///|
+/// A misbehaving LLM that violates the `GenerationEvent` protocol: streams a
+/// delta without emitting `Start` first.
+struct NoStartLLM {}
+
+///|
+impl @agent_loop.LLM for NoStartLLM with fn generate(
+  self : NoStartLLM,
+  _ctx : @agent_loop.Context,
+  sink~ : async (@agent_loop.GenerationEvent) -> Unit,
+) -> @agent_loop.AssistantMessage {
+  ignore(self)
+  let msg = ok_message()
+  sink(
+    @agent_loop.GenerationEvent::TextDelta(
+      content_index=0,
+      delta="final answer",
+      partial=msg,
+    ),
+  )
+  msg
+}
+
+///|
+/// pi drops mid-stream events that arrive before `start` (agent-loop.ts's
+/// `if (partialMessage)` guard); the terminal message still lands via
+/// `generate`'s return value, so the event order is identical to a conforming
+/// provider.
+async test "mid-stream events before Start are dropped" {
+  let events : Array[String] = []
+  let session = @agent_session.AgentSession(NoStartLLM::{  }, system_prompt="")
+  session.subscribe(event => {
+    guard event is Loop(e) else { return }
+    events.push(
+      match e {
+        AgentStart => "agent_start"
+        TurnStart => "turn_start"
+        MessageStart(User(_)) => "message_start:user"
+        MessageEnd(User(_)) => "message_end:user"
+        MessageStart(Assistant(_)) => "message_start:assistant"
+        MessageUpdate(_) => "message_update"
         MessageEnd(Assistant(_)) => "message_end:assistant"
         TurnEnd(_) => "turn_end"
         AgentEnd(_) => "agent_end"

@@ -195,6 +195,4 @@ pub(all) struct ToolResultMessage {
   content : Array[InputMessageContent]
   is_error : Bool
   timestamp : UInt64
-  /// Whether the tool wants to exit the agent loop, like yielding control back to the user or system. For example, a ui tool may want to exit the loop and wait for user input before continuing.
-  terminate : Bool
 }

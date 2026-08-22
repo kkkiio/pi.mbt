@@ -54,6 +54,8 @@ pub(all) enum GrammarFormat {
 /// `Start` carries the in-flight `AssistantMessage` created by the provider
 /// when the stream begins: `api`/`provider`/`model`/`timestamp` are already
 /// known, `stop_reason` is `Pending`, and `content` grows as deltas arrive.
+/// Providers must emit `Start` before any other event; consumers drop
+/// mid-stream events that arrive earlier (pi's `if (partialMessage)` guard).
 pub(all) enum GenerationEvent {
   Start(partial~ : AssistantMessage)
   TextStart(content_index~ : Int, partial~ : AssistantMessage)

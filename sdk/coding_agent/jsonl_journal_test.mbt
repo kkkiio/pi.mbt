@@ -76,7 +76,6 @@ async test "persists various entries in memory and as JSONL" {
       content: [@agent_loop.InputMessageContent::Text("ok")],
       is_error: false,
       timestamp: 1786903823973,
-      terminate: false,
     },
   )
   let stored = journal.append([
@@ -89,24 +88,15 @@ async test "persists various entries in memory and as JSONL" {
     },
     {
       id: "e2",
-      content: @agent_session.SessionEntryContent::Message(
-        user_message,
-        terminate=false,
-      ),
+      content: @agent_session.SessionEntryContent::Message(user_message),
     },
     {
       id: "e3",
-      content: @agent_session.SessionEntryContent::Message(
-        assistant_message,
-        terminate=false,
-      ),
+      content: @agent_session.SessionEntryContent::Message(assistant_message),
     },
     {
       id: "e4",
-      content: @agent_session.SessionEntryContent::Message(
-        tool_result,
-        terminate=false,
-      ),
+      content: @agent_session.SessionEntryContent::Message(tool_result),
     },
   ])
 
