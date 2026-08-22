@@ -31,7 +31,9 @@ reaching the API, so this transcript only passes when a real key is exported.
 *acts*: the task forces the `bash` tool, and the `tool_execution_start` /
 `tool_execution_end` records join the stream. We match the events together
 with the tool name, and use a regex on the command and the returned content
-to confirm the command ran and its output flowed back.
+to confirm the command ran and its output flowed back. We also assert the
+user `message_start` carries a numeric `timestamp`, pinning the wire shape
+of pi-aligned user messages.
 
 ```mooncram
 $ pim.exe --mode json -p "Use the bash tool to run exactly: echo pim-cram. Then respond with only the command output." 2>/dev/null \
@@ -43,7 +45,11 @@ $ pim.exe --mode json -p "Use the bash tool to run exactly: echo pim-cram. Then 
 > async fn main {
 >   let mut used_bash = false
 >   let mut bash_output_seen = false
+>   let mut user_timestamp_seen = false
 >   for value in @jsonl.read_stdin() {
+>     if value is { "type": String("message_start"), "message": { "role": String("user"), "timestamp": Number(_), .. }, .. } {
+>       user_timestamp_seen = true
+>     }
 >     if value is { "type": String("tool_execution_start"), "toolName": String("bash"), "args": Object(args), .. } {
 >       if args.get("command") is Some(String(cmd)) && cmd =~ re"echo pim-cram" {
 >         used_bash = true
@@ -59,8 +65,10 @@ $ pim.exe --mode json -p "Use the bash tool to run exactly: echo pim-cram. Then 
 >   }
 >   println("used_bash=\{used_bash}")
 >   println("bash_output_seen=\{bash_output_seen}")
+>   println("user_timestamp_seen=\{user_timestamp_seen}")
 > }' 2>/dev/null \
 >   | grep '='
 used_bash=true
 bash_output_seen=true
+user_timestamp_seen=true
 ```
