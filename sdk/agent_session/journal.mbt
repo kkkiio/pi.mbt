@@ -218,7 +218,11 @@ fn parse_agent_message(
           parse_input_content(item, path.add_key("content").add_index(i)),
         )
       }
-      User(contents)
+      let timestamp = parse_timestamp(
+        fields.get("timestamp"),
+        path.add_key("timestamp"),
+      )
+      User({ content: contents, timestamp })
     }
     "assistant" => {
       guard fields.get("content") is Some(Array(items)) else {

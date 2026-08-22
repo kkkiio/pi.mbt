@@ -124,7 +124,10 @@ async test "session hydration drops Error assistant messages from the journal" {
       {
         id: "u1",
         content: Message(
-          User([@agent_loop.InputMessageContent::Text("hi")]),
+          User({
+            content: [@agent_loop.InputMessageContent::Text("hi")],
+            timestamp: 1786903823973,
+          }),
           terminate=false,
         ),
       },
@@ -199,6 +202,7 @@ async test "session prompt emits pi's event order" {
   session.prompt([
     @agent_loop.UserMessage::{
       content: [@agent_loop.InputMessageContent::Text("hi")],
+      timestamp: 1786903823973,
     },
   ])
   assert_eq(events, [

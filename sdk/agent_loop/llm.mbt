@@ -133,6 +133,9 @@ pub impl ToJson for Usage with fn to_json(self : Usage) -> Json {
 }
 
 ///|
+pub extend Usage with ToJson::{to_json}
+
+///|
 pub(all) struct UsageCost {
   input : Float
   output : Float

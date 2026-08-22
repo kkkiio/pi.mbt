@@ -19,7 +19,7 @@ pub async fn run_agent_loop(
   let reason : LoopStopReason = for ;; {
     event_sink(AgentEvent::TurnStart)
     for prompt in pending_prompts {
-      let msg = AgentMessage::User(prompt.content)
+      let msg = AgentMessage::User(prompt)
       messages.push(msg)
       // Complete messages get start+end back to back, like pi.
       event_sink(AgentEvent::MessageStart(msg))
@@ -180,11 +180,6 @@ pub enum LoopStopReason {
   /// The model was aborted by the user or system.
   Aborted
   Error
-}
-
-///|
-pub(all) struct UserMessage {
-  content : Array[InputMessageContent]
 }
 
 ///|

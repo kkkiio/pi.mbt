@@ -4,7 +4,7 @@ fn encode_responses_input(context : @agent_loop.Context) -> Array[Json] raise {
   let custom_call_ids : Set[String] = Set([])
   for message in context.messages {
     match message {
-      User(contents) =>
+      User({ content: contents, .. }) =>
         input.push({
           "role": "user",
           "content": [
