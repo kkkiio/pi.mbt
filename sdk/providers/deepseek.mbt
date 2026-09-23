@@ -39,7 +39,7 @@ struct DeepSeekProvider {}
 
 ///|
 pub fn DeepSeekProvider::DeepSeekProvider() -> DeepSeekProvider {
-  DeepSeekProvider::{  }
+  DeepSeekProvider::{ }
 }
 
 ///|
@@ -56,6 +56,9 @@ pub impl LLMProvider for DeepSeekProvider with fn new_llm(
 }
 
 ///|
+pub extend DeepSeekProvider with LLMProvider::{new_llm}
+
+///|
 struct DeepSeekResponsesAPILLM {
   api_key : String
   model_id : String
@@ -69,8 +72,11 @@ pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(
   model_id? : String = "deepseek-v4-flash",
   thinking? : String = "high",
 ) -> DeepSeekResponsesAPILLM {
-  { api_key, model_id, thinking }
+  { api_key, model_id, thinking, }
 }
+
+///|
+pub extend DeepSeekResponsesAPILLM with @agent_loop.LLM::{generate}
 
 ///|
 pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
@@ -140,15 +146,13 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
       maximum=MAX_BACKOFF_MS,
     ),
     max_retry=RETRY_ATTEMPTS - 1,
-    fatal_error=error => {
-      // Transport-shaped errors and `RetryableApiError` are retried within
-      // the budget; anything else is a final verdict that must not be
-      // replayed: cancellation, plain failures (4xx, malformed payloads,
-      // truncated streams), or an attempt that already produced output.
-      produced ||
-      @async.is_cancellation_error(error) ||
-      error is Failure::Failure(_)
-    },
+    // Transport-shaped errors and `RetryableApiError` are retried within
+    // the budget; anything else is a final verdict that must not be
+    // replayed: plain failures (4xx, malformed payloads, truncated
+    // streams) or an attempt that already produced output. Cancellation is
+    // a control-flow signal rather than an error, so `retry` propagates it
+    // on its own and it never reaches this predicate.
+    fatal_error=error => produced || error is Failure::Failure(_),
     () => {
       // Each attempt is a fresh request and a fresh SSE stream.
       let client = @http.post_stream("\{BASE_URL}/v1/responses", headers={

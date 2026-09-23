@@ -69,7 +69,7 @@ pub fn build_system_prompt(
 /// Escape special XML characters in text
 /// Replaces: < > & " '
 pub fn escape(text : String) -> String {
-  let buf = StringBuilder::new()
+  let buf = StringBuilder()
   for c in text {
     match c {
       '<' => buf.write_string("&lt;")

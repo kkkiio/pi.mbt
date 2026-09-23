@@ -50,7 +50,7 @@ pub async fn[W : @io.Writer] JsonlSessionJournal::JsonlSessionJournal(
   }
   writer.write(header.stringify())
   writer.write("\n")
-  { writer, entries, ids, rand, lane, seq, leaf_id, now }
+  { writer, entries, ids, rand, lane, seq, leaf_id, now, }
 }
 
 ///|
@@ -62,6 +62,13 @@ fn make_id(rand : @random.Rand, ids : Set[String]) -> String {
     }
   }
   rand.uint64().to_string()[:8].to_owned()
+}
+
+///|
+pub extend JsonlSessionJournal with @agent_session.SessionJournal::{
+  get_entries,
+  append,
+  generate_id,
 }
 
 ///|

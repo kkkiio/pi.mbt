@@ -6,7 +6,7 @@ struct ToolRegistry {
 
 ///|
 pub fn ToolRegistry::ToolRegistry() -> ToolRegistry {
-  ToolRegistry::{ all_tools: {}, activate_tools: [] }
+  ToolRegistry::{ all_tools: {}, activate_tools: [], }
 }
 
 ///|

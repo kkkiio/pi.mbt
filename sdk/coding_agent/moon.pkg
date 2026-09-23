@@ -6,7 +6,6 @@ import {
   "moonbitlang/async/io",
   "moonbitlang/async/fs",
   "moonbitlang/async/process",
-  "moonbitlang/core/buffer",
   "moonbitlang/core/cmp",
   "moonbitlang/core/debug",
   "moonbitlang/core/encoding/utf8",
@@ -14,5 +13,10 @@ import {
   "moonbitlang/core/json",
   "moonbitlang/core/random",
 }
+
+// Only the black-box tests need `@buffer` (the JSONL test writer).
+import {
+  "moonbitlang/core/buffer",
+} for "test"
 
 supported_targets = "+native"

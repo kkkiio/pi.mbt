@@ -110,7 +110,7 @@ pub async fn AgentSession::prompt(
           _ => None
         }
         if content is Some(content) {
-          self.journal.append([{ id: self.journal.generate_id(), content }])
+          self.journal.append([{ id: self.journal.generate_id(), content, }])
           |> ignore
         }
         self.fanout.on_event(AgentSessionEvent::Loop(event))

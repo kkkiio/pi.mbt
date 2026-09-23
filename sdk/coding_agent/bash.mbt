@@ -55,6 +55,9 @@ struct BashToolInput {
 } derive(FromJson)
 
 ///|
+pub extend BashToolInput with @json.FromJson::{from_json}
+
+///|
 async fn execute_bash_tool(
   group : @async.TaskGroup[@agent_loop.ToolResult],
   cwd : String,
@@ -176,7 +179,7 @@ async fn execute_bash_tool(
         full_output_path: snapshot.full_output_path,
       }
     } else {
-      BashToolDetails::{ truncation: None, full_output_path: None }
+      BashToolDetails::{ truncation: None, full_output_path: None, }
     }
     return (text.to_string(), @json.to_json(details))
   }
@@ -238,6 +241,9 @@ struct BashToolDetails {
   truncation : TruncationResult?
   full_output_path : String?
 } derive(ToJson)
+
+///|
+pub extend BashToolDetails with ToJson::{to_json}
 
 ///|
 const DEFAULT_MAX_LINES : Int = 2000

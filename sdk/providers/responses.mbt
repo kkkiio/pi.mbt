@@ -324,7 +324,9 @@ fn parse_sse_event(
             ),
           )
           slots[output_index] = Thinking(content_index)
-          sse_delta(@agent_loop.ThinkingStart(content_index~, partial=in_flight()))
+          sse_delta(
+            @agent_loop.ThinkingStart(content_index~, partial=in_flight()),
+          )
         }
         "message" => {
           let item : ResponseOutputMessage = @json.from_json(item_json)
@@ -424,7 +426,9 @@ fn parse_sse_event(
         current + delta,
         signature~,
       )
-      sse_delta(@agent_loop.ThinkingDelta(content_index~, delta~, partial=in_flight()))
+      sse_delta(
+        @agent_loop.ThinkingDelta(content_index~, delta~, partial=in_flight()),
+      )
     }
     "response.reasoning_summary_part.done" => {
       let payload : ResponseOutputIndexEvent = @json.from_json(json)
@@ -440,7 +444,13 @@ fn parse_sse_event(
         current + "\n\n",
         signature~,
       )
-      sse_delta(@agent_loop.ThinkingDelta(content_index~, delta="\n\n", partial=in_flight()))
+      sse_delta(
+        @agent_loop.ThinkingDelta(
+          content_index~,
+          delta="\n\n",
+          partial=in_flight(),
+        ),
+      )
     }
     "response.output_text.delta" | "response.refusal.delta" => {
       let payload : ResponseDeltaEvent = @json.from_json(json)
@@ -457,7 +467,9 @@ fn parse_sse_event(
         current + delta,
         signature~,
       )
-      sse_delta(@agent_loop.TextDelta(content_index~, delta~, partial=in_flight()))
+      sse_delta(
+        @agent_loop.TextDelta(content_index~, delta~, partial=in_flight()),
+      )
     }
     "response.function_call_arguments.delta" => {
       let payload : ResponseDeltaEvent = @json.from_json(json)
@@ -538,7 +550,11 @@ fn parse_sse_event(
           )
           slots.remove(output_index)
           sse_delta(
-            @agent_loop.ThinkingEnd(content_index~, content=final_text, partial=in_flight()),
+            @agent_loop.ThinkingEnd(
+              content_index~,
+              content=final_text,
+              partial=in_flight(),
+            ),
           )
         }
         ("message", Some(Text(content_index))) => {
@@ -568,7 +584,13 @@ fn parse_sse_event(
             signature~,
           )
           slots.remove(output_index)
-          sse_delta(@agent_loop.TextEnd(content_index~, content=final_text, partial=in_flight()))
+          sse_delta(
+            @agent_loop.TextEnd(
+              content_index~,
+              content=final_text,
+              partial=in_flight(),
+            ),
+          )
         }
         ("function_call", Some(FunctionCall(content_index, _))) => {
           let item : ResponseFunctionToolCall = @json.from_json(item_json)

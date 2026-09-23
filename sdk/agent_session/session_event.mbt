@@ -26,7 +26,7 @@ pub struct FanOutListener {
 
 ///|
 pub fn FanOutListener::FanOutListener() -> FanOutListener {
-  FanOutListener::{ listeners: [] }
+  FanOutListener::{ listeners: [], }
 }
 
 ///|

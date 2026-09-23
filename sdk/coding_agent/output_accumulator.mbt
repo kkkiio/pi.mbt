@@ -14,11 +14,29 @@ pub(all) struct TruncationResult {
 } derive(Eq, @debug.Debug, ToJson)
 
 ///|
+pub extend TruncationResult with Eq::{not_equal, equal}
+
+///|
+pub extend TruncationResult with @debug.Debug::{to_repr}
+
+///|
+pub extend TruncationResult with ToJson::{to_json}
+
+///|
 pub(all) struct OutputSnapshot {
   content : String
   truncation : TruncationResult
   full_output_path : String?
 } derive(Eq, @debug.Debug, ToJson)
+
+///|
+pub extend OutputSnapshot with Eq::{not_equal, equal}
+
+///|
+pub extend OutputSnapshot with @debug.Debug::{to_repr}
+
+///|
+pub extend OutputSnapshot with ToJson::{to_json}
 
 ///|
 /// Incrementally tracks streaming output with bounded memory.
@@ -353,7 +371,7 @@ pub async fn OutputAccumulator::snapshot(
   if persist_if_truncated && truncated {
     self.ensure_temp_file()
   }
-  { content, truncation, full_output_path: self.temp_file_path }
+  { content, truncation, full_output_path: self.temp_file_path, }
 }
 
 ///|

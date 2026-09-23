@@ -7,7 +7,7 @@ struct BufferWriter {
 
 ///|
 pub fn BufferWriter::BufferWriter() -> BufferWriter {
-  { buf: @buffer.Buffer::Buffer() }
+  { buf: @buffer.Buffer::Buffer(), }
 }
 
 ///|

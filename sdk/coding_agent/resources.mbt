@@ -5,6 +5,9 @@ pub struct ProjectContextFile {
 } derive(Debug)
 
 ///|
+pub extend ProjectContextFile with @debug.Debug::{to_repr}
+
+///|
 pub struct Skill {
   name : String
   description : String
@@ -12,8 +15,11 @@ pub struct Skill {
 } derive(Debug)
 
 ///|
+pub extend Skill with @debug.Debug::{to_repr}
+
+///|
 fn Skill::Skill(name~ : String, description~ : String, path~ : String) -> Skill {
-  { name, description, path }
+  { name, description, path, }
 }
 
 ///|
@@ -65,7 +71,7 @@ async fn try_load_context_file(dir : String) -> ProjectContextFile? {
       continue
     }
     let content = @fs.read_file(path).text() catch { _ => continue }
-    return Some({ path, content })
+    return Some({ path, content, })
   }
   None
 }

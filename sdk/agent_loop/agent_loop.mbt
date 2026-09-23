@@ -27,7 +27,7 @@ pub async fn run_agent_loop(
     }
     pending_prompts = []
     let mut message_started = false
-    let assistant_message = llm.generate({ system_prompt, messages, tools }, sink=event => {
+    let assistant_message = llm.generate({ system_prompt, messages, tools, }, sink=event => {
       match event {
         Start(partial~) => {
           message_started = true

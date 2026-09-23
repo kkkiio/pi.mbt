@@ -46,6 +46,9 @@ pub impl ToJson for AgentMessage with fn to_json(self : AgentMessage) -> Json {
 }
 
 ///|
+pub extend AgentMessage with ToJson::{to_json}
+
+///|
 pub(all) enum InputMessageContent {
   Text(String)
   Image(Bytes)
@@ -70,6 +73,9 @@ pub impl ToJson for UserMessage with fn to_json(self : UserMessage) -> Json {
 }
 
 ///|
+pub extend UserMessage with ToJson::{to_json}
+
+///|
 pub impl ToJson for InputMessageContent with fn to_json(
   self : InputMessageContent,
 ) -> Json {
@@ -85,6 +91,9 @@ pub impl ToJson for InputMessageContent with fn to_json(
 }
 
 ///|
+pub extend InputMessageContent with ToJson::{to_json}
+
+///|
 pub(all) struct AssistantMessage {
   content : Array[AssistantMessageContent]
   api : String
@@ -97,6 +106,9 @@ pub(all) struct AssistantMessage {
   /// Unix timestamp in milliseconds, set when the message is created.
   timestamp : UInt64
 } derive(Debug)
+
+///|
+pub extend AssistantMessage with Debug::{to_repr}
 
 ///|
 pub impl ToJson for AssistantMessage with fn to_json(self : AssistantMessage) -> Json {
@@ -129,6 +141,9 @@ pub(all) enum AssistantMessageContent {
   ToolCall(ToolCall, signature~ : Json)
   HostedToolCall(HostedTool, signature~ : Json)
 } derive(Debug)
+
+///|
+pub extend AssistantMessageContent with Debug::{to_repr}
 
 ///|
 /// Signatures serialize as stringified JSON, matching pi's `textSignature` /
@@ -167,6 +182,9 @@ pub impl ToJson for AssistantMessageContent with fn to_json(
 }
 
 ///|
+pub extend AssistantMessageContent with ToJson::{to_json}
+
+///|
 pub extend HostedTool with ToJson::{to_json}
 
 ///|
@@ -177,9 +195,15 @@ pub(all) struct ToolCall {
 } derive(Debug)
 
 ///|
+pub extend ToolCall with Debug::{to_repr}
+
+///|
 pub(all) enum HostedTool {
   WebSearch
 } derive(Debug)
+
+///|
+pub extend HostedTool with Debug::{to_repr}
 
 ///|
 pub impl ToJson for HostedTool with fn to_json(self : HostedTool) -> Json {
