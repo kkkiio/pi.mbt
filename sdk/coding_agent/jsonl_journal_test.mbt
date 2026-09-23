@@ -168,9 +168,9 @@ async test "persists various entries in memory and as JSONL" {
   inspect(journal.get_entries().length(), content="5")
 
   // Round-trip: entries written to disk parse back into the same values.
-  let temp_dir = @fs.tmpdir(prefix="pim-jsonl-roundtrip-")
+  let temp_dir = @coding_agent.create_temp_dir("pim-jsonl-roundtrip-")
   let path = "\{temp_dir}/journal.jsonl"
-  let file = @fs.create(path, allow_existing=true)
+  let file = @coding_agent.create_file(path, allow_existing=true)
   file.write(writer_text(writer))
   file.close()
   let fetched = @coding_agent.fetch_entries(path)
@@ -236,8 +236,8 @@ async test "persists various entries in memory and as JSONL" {
       },
     },
   ])
-  @fs.remove(path)
-  @fs.rmdir(temp_dir)
+  @coding_agent.remove_file(path)
+  @coding_agent.remove_dir(temp_dir)
 
   // The writer received the pi v4 header plus one mutation line per entry.
   inspect(
@@ -255,9 +255,11 @@ async test "persists various entries in memory and as JSONL" {
 
 ///|
 async test "fetch_entries reads persisted entries from disk" {
-  let temp_dir = @fs.tmpdir(prefix="pim-jsonl-session-journal-test-")
+  let temp_dir = @coding_agent.create_temp_dir(
+    "pim-jsonl-session-journal-test-",
+  )
   let path = "\{temp_dir}/journal.jsonl"
-  let file = @fs.create(path, allow_existing=true)
+  let file = @coding_agent.create_file(path, allow_existing=true)
   let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
     file,
     rand=@random.Rand::chacha8(),
@@ -285,6 +287,6 @@ async test "fetch_entries reads persisted entries from disk" {
     "type": "custom",
     "customType": "note",
   })
-  @fs.remove(path)
-  @fs.rmdir(temp_dir)
+  @coding_agent.remove_file(path)
+  @coding_agent.remove_dir(temp_dir)
 }

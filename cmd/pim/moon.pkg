@@ -1,7 +1,6 @@
 import {
   "moonbitlang/async",
-  "moonbitlang/async/fs",
-  "moonbitlang/async/stdio",
+  "moonbitlang/async/js_async",
   "moonbitlang/core/argparse",
   "moonbitlang/core/env",
   "moonbitlang/core/random",
@@ -13,12 +12,4 @@ import {
 
 pkgtype(kind: "executable")
 
-// glibc < 2.34 keeps pthread symbols in libpthread instead of libc; link it
-// explicitly so pim runs on debian:bullseye (glibc 2.31) task images.
-// Harmless on glibc >= 2.34, where libpthread is a stub.
-
-supported_targets = "+native"
-
-options(
-  link: { "native": { "cc-link-flags": "-lpthread -ldl" } },
-)
+supported_targets = "+js"

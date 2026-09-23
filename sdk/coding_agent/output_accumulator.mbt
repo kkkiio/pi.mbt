@@ -11,13 +11,35 @@ pub(all) struct TruncationResult {
   first_line_exceeds_limit : Bool
   max_lines : Int
   max_bytes : Int
-} derive(Eq, @debug.Debug, ToJson)
+} derive(Eq, @debug.Debug)
 
 ///|
 pub extend TruncationResult with Eq::{not_equal, equal}
 
 ///|
 pub extend TruncationResult with @debug.Debug::{to_repr}
+
+///|
+/// pi's `TruncationResult` uses camelCase keys, so this is written by hand:
+/// `derive(ToJson)` would serialize the field names as written.
+pub impl ToJson for TruncationResult with fn to_json(self : TruncationResult) -> Json {
+  {
+    "content": self.content,
+    "truncated": self.truncated,
+    "truncatedBy": match self.truncated_by {
+      Some(value) => value.to_json()
+      None => null
+    },
+    "totalLines": self.total_lines,
+    "totalBytes": self.total_bytes,
+    "outputLines": self.output_lines,
+    "outputBytes": self.output_bytes,
+    "lastLinePartial": self.last_line_partial,
+    "firstLineExceedsLimit": self.first_line_exceeds_limit,
+    "maxLines": self.max_lines,
+    "maxBytes": self.max_bytes,
+  }
+}
 
 ///|
 pub extend TruncationResult with ToJson::{to_json}
@@ -27,13 +49,25 @@ pub(all) struct OutputSnapshot {
   content : String
   truncation : TruncationResult
   full_output_path : String?
-} derive(Eq, @debug.Debug, ToJson)
+} derive(Eq, @debug.Debug)
 
 ///|
 pub extend OutputSnapshot with Eq::{not_equal, equal}
 
 ///|
 pub extend OutputSnapshot with @debug.Debug::{to_repr}
+
+///|
+pub impl ToJson for OutputSnapshot with fn to_json(self : OutputSnapshot) -> Json {
+  {
+    "content": self.content,
+    "truncation": self.truncation,
+    "fullOutputPath": match self.full_output_path {
+      Some(value) => value.to_json()
+      None => null
+    },
+  }
+}
 
 ///|
 pub extend OutputSnapshot with ToJson::{to_json}
@@ -62,30 +96,17 @@ pub struct OutputAccumulator {
   mut has_open_line : Bool
   mut finished : Bool
   mut temp_file_path : String?
-  mut temp_file : OutputFile?
+  mut temp_file : FsFile?
 }
 
 ///|
-struct OutputFile {
-  file : @fs.File
-}
-
-///|
-async fn create_temp_output_file(prefix : String) -> (String, OutputFile) {
-  let directory = @fs.tmpdir(prefix~)
+/// Spill the full output into a fresh temp directory:
+/// `<tmpdir>/<prefix><random>/output.log`, created 0700/0600.
+fn create_temp_output_file(prefix : String) -> (String, FsFile) raise FsError {
+  let directory = create_temp_dir(prefix)
   let path = "\{directory}/output.log"
-  let file = @fs.create(path, allow_existing=false, permission=0o600)
-  (path, { file, })
-}
-
-///|
-async fn OutputFile::write(self : OutputFile, data : Bytes) -> Unit {
-  self.file.write(data)
-}
-
-///|
-fn OutputFile::close(self : OutputFile) -> Unit {
-  self.file.close()
+  let file = create_file(path)
+  (path, file)
 }
 
 ///|
@@ -118,10 +139,10 @@ pub fn OutputAccumulator::OutputAccumulator(
 }
 
 ///|
-pub async fn OutputAccumulator::append(
+pub fn OutputAccumulator::append(
   self : OutputAccumulator,
   data : BytesView,
-) -> Unit {
+) -> Unit raise {
   if self.finished {
     fail("Cannot append to a finished output accumulator")
   }
@@ -202,13 +223,13 @@ pub async fn OutputAccumulator::append(
     self.total_decoded_bytes > self.max_bytes ||
     self.total_lines > self.max_lines
   match self.temp_file {
-    Some(file) => file.write(chunk)
+    Some(file) => file.write_bytes(chunk)
     None if exceeded => {
       self.ensure_temp_file()
       guard self.temp_file is Some(file) else {
         abort("temporary file was not created")
       }
-      file.write(chunk)
+      file.write_bytes(chunk)
     }
     None if !chunk.is_empty() => self.raw_chunks.push(chunk)
     None => ()
@@ -216,7 +237,7 @@ pub async fn OutputAccumulator::append(
 }
 
 ///|
-pub async fn OutputAccumulator::finish(self : OutputAccumulator) -> Unit {
+pub fn OutputAccumulator::finish(self : OutputAccumulator) -> Unit raise {
   guard !self.finished else { return }
   self.finished = true
   if !self.pending_utf8.is_empty() {
@@ -269,10 +290,10 @@ pub async fn OutputAccumulator::finish(self : OutputAccumulator) -> Unit {
 }
 
 ///|
-pub async fn OutputAccumulator::snapshot(
+pub fn OutputAccumulator::snapshot(
   self : OutputAccumulator,
   persist_if_truncated? : Bool = false,
-) -> OutputSnapshot {
+) -> OutputSnapshot raise {
   let mut snapshot_bytes = self.tail
   if !self.tail_starts_at_line_boundary {
     match snapshot_bytes.find(b"\n") {
@@ -391,12 +412,13 @@ pub fn OutputAccumulator::get_last_line_bytes(self : OutputAccumulator) -> Int {
 }
 
 ///|
-#warnings("-unused_async")
-async fn OutputAccumulator::ensure_temp_file(self : OutputAccumulator) -> Unit {
+fn OutputAccumulator::ensure_temp_file(
+  self : OutputAccumulator,
+) -> Unit raise FsError {
   guard self.temp_file_path is None else { return }
   let (path, file) = create_temp_output_file(self.temp_file_prefix)
   for chunk in self.raw_chunks {
-    file.write(chunk)
+    file.write_bytes(chunk)
   }
   self.raw_chunks.clear()
   self.temp_file_path = Some(path)

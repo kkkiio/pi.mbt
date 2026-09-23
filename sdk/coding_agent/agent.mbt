@@ -1,8 +1,8 @@
 ///|
 /// Create a new coding agent session pre-configured with the default
 /// system prompt (including AGENTS.md project instructions and `.agents/skills/`)
-/// and the native bash tool.
-pub async fn new_coding_session(
+/// and the bash tool.
+pub fn new_coding_session(
   llm : &@agent_loop.LLM,
   cwd~ : String,
   journal? : &@agent_session.SessionJournal = @agent_session.InMemorySessionJournal(),

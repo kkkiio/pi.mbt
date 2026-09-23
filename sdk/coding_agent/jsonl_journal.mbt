@@ -114,10 +114,10 @@ fn entry_mutation_json(
 }
 
 ///|
-pub async fn fetch_entries(
+pub fn fetch_entries(
   path : String,
 ) -> Array[@agent_session.SessionEntry] raise Failure {
-  let content = @fs.read_file(path).text() catch {
+  let content = read_text_file(path) catch {
     err => fail("failed to read session journal at \{path}: \{err}")
   }
   let has_trailing_newline = content.has_suffix("\n")

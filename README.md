@@ -4,9 +4,7 @@
 
 ## Install
 
-```bash
-moon install ./cmd/pim
-```
+TODO.
 
 ## Usage
 

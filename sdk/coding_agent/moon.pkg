@@ -2,10 +2,8 @@ import {
   "KKKIIO/pi/sdk/agent_loop",
   "KKKIIO/pi/sdk/agent_session",
   "KKKIIO/pi/sdk/tools",
-  "moonbitlang/async",
   "moonbitlang/async/io",
-  "moonbitlang/async/fs",
-  "moonbitlang/async/process",
+  "moonbitlang/async/js_async",
   "moonbitlang/core/cmp",
   "moonbitlang/core/debug",
   "moonbitlang/core/encoding/utf8",
@@ -14,9 +12,9 @@ import {
   "moonbitlang/core/random",
 }
 
-// Only the black-box tests need `@buffer` (the JSONL test writer).
 import {
+  "moonbitlang/async",
   "moonbitlang/core/buffer",
 } for "test"
 
-supported_targets = "+native"
+supported_targets = "+js"

@@ -9,15 +9,15 @@ async test "output accumulator preserves split UTF-8 and truncates complete line
   json_inspect(snapshot.truncation, content={
     "content": "你\nlast",
     "truncated": true,
-    "truncated_by": "lines",
-    "total_lines": 4,
-    "total_bytes": 21,
-    "output_lines": 2,
-    "output_bytes": 8,
-    "last_line_partial": false,
-    "first_line_exceeds_limit": false,
-    "max_lines": 2,
-    "max_bytes": 100,
+    "truncatedBy": "lines",
+    "totalLines": 4,
+    "totalBytes": 21,
+    "outputLines": 2,
+    "outputBytes": 8,
+    "lastLinePartial": false,
+    "firstLineExceedsLimit": false,
+    "maxLines": 2,
+    "maxBytes": 100,
   })
   output.close_temp_file()
 }
@@ -51,10 +51,10 @@ async test "output accumulator persists the original bytes after truncation" {
     fail("expected persisted output path")
   }
   output.close_temp_file()
-  inspect(@fs.read_file(path).binary(), content="b\"abcdef\"")
-  @fs.remove(path)
+  inspect(@coding_agent.read_bytes_file(path), content="b\"abcdef\"")
+  @coding_agent.remove_file(path)
   guard path.rev_before("/") is Some(directory) else {
     fail("expected temporary output directory")
   }
-  @fs.rmdir(directory)
+  @coding_agent.remove_dir(directory.to_owned())
 }

@@ -199,4 +199,21 @@ pub(all) struct ToolResult {
 pub type ToolResultDetail = Json
 
 ///|
+pub impl ToJson for ToolResult with fn to_json(self : ToolResult) -> Json {
+  {
+    "content": self.content,
+    "details": self.details,
+    "isError": self.is_error,
+    "terminate": self.terminate,
+    "usage": match self.usage {
+      Some(usage) => usage.to_json()
+      None => null
+    },
+  }
+}
+
+///|
+pub extend ToolResult with ToJson::{to_json}
+
+///|
 pub type ToolExecUpdateCallback = (Array[InputMessageContent], ToolResultDetail) -> Unit

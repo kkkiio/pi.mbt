@@ -30,7 +30,7 @@ fn agents_file_names() -> Array[String] {
 ///|
 /// Walk upward from `cwd` looking for AGENTS.md / AGENTS.override.md /
 /// CLAUDE.md. Returns files from the repository root toward `cwd`.
-pub async fn load_agents_files(cwd : String) -> Array[ProjectContextFile] {
+pub fn load_agents_files(cwd : String) -> Array[ProjectContextFile] {
   let files : Array[ProjectContextFile] = []
   let mut current = cwd
   let visited = Set::from_array([current])
@@ -59,18 +59,16 @@ fn parent_dir(path : String) -> String {
 }
 
 ///|
-async fn try_load_context_file(dir : String) -> ProjectContextFile? {
+fn try_load_context_file(dir : String) -> ProjectContextFile? {
   for name in agents_file_names() {
     let path = "\{dir}/\{name}"
-    let exists = @fs.exists(path) catch { _ => false }
-    if !exists {
+    if !path_exists(path) {
       continue
     }
-    let is_file = @fs.kind(path) is Regular
-    if !is_file {
+    if !is_regular_file(path) {
       continue
     }
-    let content = @fs.read_file(path).text() catch { _ => continue }
+    let content = read_text_file(path) catch { _ => continue }
     return Some({ path, content, })
   }
   None
@@ -79,9 +77,9 @@ async fn try_load_context_file(dir : String) -> ProjectContextFile? {
 ///|
 /// Discover skills under `dir`: every `<dir>/<name>.md`, plus every
 /// `<dir>/<name>/SKILL.md`. A missing or unreadable directory returns empty.
-pub async fn discover_skills(dir : String) -> Array[Skill] {
+pub fn discover_skills(dir : String) -> Array[Skill] {
   let skills : Array[Skill] = []
-  let entries = @fs.readdir(dir) catch { _ => return skills }
+  let entries = read_dir(dir) catch { _ => return skills }
   for entry in entries {
     if entry.has_prefix(".") {
       continue
@@ -91,9 +89,8 @@ pub async fn discover_skills(dir : String) -> Array[Skill] {
       add_skill_file(skills, entry_path)
     } else {
       let nested = "\{entry_path}/SKILL.md"
-      // exists() raises ENOTDIR when entry_path is a plain file; either way
-      // there is no nested skill here.
-      let has_nested = @fs.exists(nested) catch { _ => false }
+      // A non-directory entry simply has no nested `SKILL.md`.
+      let has_nested = path_exists(nested)
       if has_nested {
         add_skill_file(skills, nested)
       }
@@ -104,8 +101,8 @@ pub async fn discover_skills(dir : String) -> Array[Skill] {
 }
 
 ///|
-async fn add_skill_file(skills : Array[Skill], path : String) -> Unit {
-  let text = @fs.read_file(path).text() catch { _ => return }
+fn add_skill_file(skills : Array[Skill], path : String) -> Unit {
+  let text = read_text_file(path) catch { _ => return }
   let fallback = match skill_fallback_name(path) {
     "SKILL" => {
       // For <name>/SKILL.md layouts the directory carries the name.

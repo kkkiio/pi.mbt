@@ -29,9 +29,7 @@ pub fn new_bash_tool_definition(
         strict=true,
       ),
       execute: (_, input, on_update) => {
-        @async.with_task_group() <| group => {
-          execute_bash_tool(group, cwd, input, on_update~, exec~)
-        }
+        execute_bash_tool(cwd, input, on_update~, exec~)
       },
     }
     |> Some,
@@ -43,7 +41,10 @@ pub(all) struct BashExecParams {
   command : String
   cwd : String
   timeout : Int?
-  on_data : (async (BytesView) -> Unit)?
+  /// Called from the JS `data` handler for stdout and stderr, so it has no
+  /// coroutine context: it must stay synchronous. The throttled UI update is
+  /// scheduled with a JS timer for the same reason.
+  on_data : ((BytesView) -> Unit)?
   override_envs : Map[String, String]
   inherit_env : Bool
 }
@@ -59,7 +60,6 @@ pub extend BashToolInput with @json.FromJson::{from_json}
 
 ///|
 async fn execute_bash_tool(
-  group : @async.TaskGroup[@agent_loop.ToolResult],
   cwd : String,
   input : Json,
   on_update? : @agent_loop.ToolExecUpdateCallback,
@@ -80,28 +80,41 @@ async fn execute_bash_tool(
     temp_file_prefix="pim-bash",
   )
   let mut acceptingOutput = true
-  let mut updateTimer : @async.Task[Unit]? = None
+  let mut updateTimer : JsTimer? = None
   let mut updateDirty = false
   let mut lastUpdateAt : UInt64 = 0
+
+  // Data-path failures cannot cross the JS callback boundary (`on_data` is
+  // called from Node's `data` handler, which has no way to carry a MoonBit
+  // error), so the first one is recorded here and surfaced once the child has
+  // exited.
+  let mut dataError : String? = None
 
   let emitOutputUpdate = () => {
     guard on_update is Some(onUpdate) && updateDirty is true else { return }
     updateDirty = false
     lastUpdateAt = @env.now()
-    let snapshot = output.snapshot(persist_if_truncated=true)
+    let snapshot = output.snapshot(persist_if_truncated=true) catch {
+      // A throttled UI refresh is best effort: a failure here is reported by
+      // the terminal snapshot in `finish_output`.
+      _ => return
+    }
     onUpdate([@agent_loop.InputMessageContent::Text(snapshot.content)], {
       "truncation": if snapshot.truncation.truncated {
         snapshot.truncation
       } else {
         null
       },
-      "fullOutputPath": snapshot.full_output_path,
+      "fullOutputPath": match snapshot.full_output_path {
+        Some(value) => value.to_json()
+        None => null
+      },
     })
   }
 
   let clearUpdateTimer = () => {
     if updateTimer is Some(t) {
-      t.cancel()
+      clear_timeout(t)
       updateTimer = None
     }
   }
@@ -118,11 +131,13 @@ async fn execute_bash_tool(
     if updateTimer is None {
       let delay = lastUpdateAt + BASH_UPDATE_THROTTLE_MS.to_uint64() - now
       updateTimer = Some(
-        group.spawn(no_wait=true) <| () => {
-          @async.sleep(delay.to_int())
-          updateTimer = None
-          emitOutputUpdate()
-        },
+        set_timeout(
+          () => {
+            updateTimer = None
+            emitOutputUpdate()
+          },
+          delay.to_int(),
+        ),
       )
     }
   }
@@ -131,15 +146,19 @@ async fn execute_bash_tool(
     onUpdate([], {})
   }
 
-  let handleData = async fn(data : BytesView) {
-    if !acceptingOutput {
+  let handleData = fn(data : BytesView) {
+    if !acceptingOutput || dataError is Some(_) {
       return
     }
-    output.append(data)
-    scheduleOutputUpdate()
+    output.append(data) catch {
+      err => dataError = Some(err.to_string())
+    }
+    if dataError is None {
+      scheduleOutputUpdate()
+    }
   }
 
-  let finish_output = () => {
+  let finish_output = fn() raise {
     acceptingOutput = false
     output.finish()
     clearUpdateTimer()
@@ -222,6 +241,11 @@ async fn execute_bash_tool(
     }
   }
 
+  match dataError {
+    Some(message) => fail("failed to persist command output: \{message}")
+    None => ()
+  }
+
   let snapshot = finish_output()
   let (outputText, details) = formatOutput(snapshot, "(no output)")
   if exitCode != 0 {
@@ -240,7 +264,23 @@ async fn execute_bash_tool(
 struct BashToolDetails {
   truncation : TruncationResult?
   full_output_path : String?
-} derive(ToJson)
+}
+
+///|
+/// pi's `BashToolDetails` is `{ truncation?, fullOutputPath? }` with camelCase
+/// keys, so this is written by hand rather than derived.
+pub impl ToJson for BashToolDetails with fn to_json(self : BashToolDetails) -> Json {
+  {
+    "truncation": match self.truncation {
+      Some(value) => value.to_json()
+      None => null
+    },
+    "fullOutputPath": match self.full_output_path {
+      Some(value) => value.to_json()
+      None => null
+    },
+  }
+}
 
 ///|
 pub extend BashToolDetails with ToJson::{to_json}
@@ -253,42 +293,3 @@ const DEFAULT_MAX_BYTES : Int = 50 * 1024
 
 ///|
 const BASH_UPDATE_THROTTLE_MS = 100
-
-///|
-async fn local_bash_exec(params : BashExecParams) -> Int {
-  let timeout_ms = params.timeout.map_or(0, seconds => seconds * 1000)
-  let run = async fn() -> Int {
-    let (reader, writer) = @process.read_from_process()
-    @async.with_task_group() <| group => {
-      let process = @process.spawn(
-        group,
-        "/bin/bash",
-        ["-c", params.command],
-        stdout=writer,
-        stderr=writer,
-        cwd=params.cwd.view(),
-        extra_env=params.override_envs,
-        inherit_env=params.inherit_env,
-        cancel_handler=@process.hard_cancel(),
-        no_wait=true,
-      )
-      defer reader.close()
-      errdefer process.cancel()
-      for ;; {
-        match reader.read_some(max_len=4096) {
-          None => break
-          Some(chunk) => if params.on_data is Some(callback) { callback(chunk) }
-        }
-      }
-      process.wait()
-    }
-  }
-  if timeout_ms > 0 {
-    match @async.with_timeout_opt(timeout_ms, run) {
-      Some(code) => code
-      None => fail("timeout:\{params.timeout.unwrap_or(0)}")
-    }
-  } else {
-    run()
-  }
-}

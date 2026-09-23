@@ -21,7 +21,7 @@ license = "Apache-2.0"
 
 keywords = [ ]
 
-preferred_target = "native"
+preferred_target = "js"
 
 description = ""
 

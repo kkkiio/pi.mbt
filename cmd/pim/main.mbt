@@ -71,14 +71,14 @@ async fn main {
   let (journal, cleanup) = match session_dir {
     Some(dir) => {
       let file = try {
-        @fs.mkdir(dir, recursive=true)
+        @coding_agent.create_dir(dir)
         let rand = @random.Rand::new()
         let timestamp = @env.now().to_string()
         let id = rand.uint64().to_string()
         let path = "\{dir}/\{timestamp}_\{id}.jsonl"
         // Session journals contain prompts and tool output: owner-only,
         // and fail rather than truncate on collision/symlink.
-        @fs.create(path, allow_existing=false, permission=0o600)
+        @coding_agent.create_file(path)
       } catch {
         err => fatal("Error: \{clean_error_message("\{err}")}")
       }
@@ -97,6 +97,9 @@ async fn main {
     // JSONL 模式:每个 AgentSessionEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。
     session.subscribe(event => {
       write_stdout(session_event_to_json(event).stringify())
+      // Like pi's JSON subscriber, wait for the stdout queue between events:
+      // a slow reader then throttles the stream instead of buffering it.
+      flush_output()
     })
   } else {
     session.subscribe(event => {
@@ -128,6 +131,8 @@ async fn main {
     }
     write_stdout(output.to_string())
   }
+  // pi's `flushRawStdout`: never let the exit truncate queued output.
+  flush_output()
 }
 
 ///|
@@ -233,22 +238,13 @@ fn clean_error_message(error_text : String) -> String {
 }
 
 ///|
-async fn write_stdout(message : String) -> Unit {
-  // pi 的 print mode 对每段文本输出带尾部换行(`writeRawStdout`),这里对齐。
-  @stdio.stdout.write("\{message}\n") catch {
-    e => fatal("failed to write stdout: \{e}")
-  }
-}
-
-///|
-#cfg(target="native")
-extern "c" fn proc_exit_ffi(rval : Int) -> Unit = "exit"
-
-///|
+/// Exit with code 1 after the queued diagnostics have reached the OS. The
+/// writes are queued on the shared output chain, so `process.exit` cannot drop
+/// them; `panic()` after it only satisfies the type checker (`exit` never
+/// returns).
 async fn[T] fatal(message : String) -> T {
-  @stdio.stderr.write("\{message}\n") catch {
-    _ => ()
-  }
+  write_stderr(message)
+  flush_output()
   proc_exit_ffi(1)
   panic()
 }
