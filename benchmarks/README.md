@@ -3,9 +3,10 @@
 ## Terminal-Bench 2.1 via harbor
 
 `harbor/pim_agent.py` is a harbor agent adapter that runs pim inside task
-environments. pim is a native binary, so the adapter uploads the CI-built
-binary (`PIM_BINARY`) instead of installing a package, and injects
-`DEEPSEEK_API_KEY` into the agent process env only.
+environments. pim is a single-file executable (js bundle + bun runtime), so the
+adapter uploads the CI-built binary (`PIM_BINARY`) instead of installing a
+package, and injects `DEEPSEEK_API_KEY` into the agent process env only. Task
+images need no node: the bun runtime is embedded in the binary.
 
 Session journals land in `/logs/agent/pim/sessions` inside the environment and
 are collected via `--agent-include-logs "pim/**"`, so every trial artifact
@@ -34,16 +35,19 @@ Requires the `DEEPSEEK_API_KEY` repository secret.
 ### Local
 
 ```bash
-moon build --target native --release
+moon build --target js --release
+bun build --compile --outfile /tmp/pim _build/js/release/build/cmd/pim/pim.js
 PYTHONPATH=. harbor run \
   -d terminal-bench/terminal-bench-2-1 \
   -a benchmarks.harbor.pim_agent:Pim \
   -m deepseek/deepseek-v4-flash \
-  --ae PIM_BINARY="$PWD/_build/native/release/build/cmd/pim/pim.exe" \
+  --ae PIM_BINARY=/tmp/pim \
   --ae DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
   -i "hello-world" -n 1
 ```
 
-Known limitation: the binary is glibc-linked (built on ubuntu runners), so
-musl-based task environments (alpine) cannot run it. Terminal-Bench 2.1 task
-images are all glibc-based, so this does not affect the benchmark suite.
+Known limitation: CI builds the glibc variant (`--target=bun-linux-x64`), so
+musl-based task images (alpine) cannot run it. Build with
+`--target=bun-linux-x64-musl` for those, and note that alpine also needs
+`apk add libstdc++`. Terminal-Bench 2.1 task images are glibc-based, so this
+does not affect the benchmark suite.

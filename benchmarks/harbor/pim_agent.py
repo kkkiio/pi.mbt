@@ -1,8 +1,9 @@
 """Harbor adapter for pim, the MoonBit reimplementation of the pi coding agent.
 
-pim is a self-contained native binary built by CI on the runner, so install
-uploads the binary instead of installing a package. The provider credential
-arrives via DEEPSEEK_API_KEY and is injected only into the agent process env.
+pim is a self-contained single-file executable (a bun-compiled js bundle) built
+by CI on the runner, so install uploads the binary instead of installing a
+package. The provider credential arrives via DEEPSEEK_API_KEY and is injected
+only into the agent process env.
 """
 
 import shlex
@@ -28,8 +29,8 @@ class Pim(BaseInstalledAgent):
 
     @override
     async def install(self, environment: BaseEnvironment) -> None:
-        # pim's TLS stack loads the system CA store; slim base images may
-        # lack ca-certificates entirely.
+        # Bun-compiled pim carries its own TLS roots, but slim base images may
+        # still lack ca-certificates for the task's own scripts.
         await self.ensure_system_dependencies(environment, ("ca_certificates",))
 
         binary_value = self._get_env("PIM_BINARY")
