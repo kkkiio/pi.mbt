@@ -1,0 +1,20 @@
+{
+  "name": "@kkkiio/pim",
+  "version": "0.1.0",
+  "description": "MoonBit coding agent CLI (a pi subset) with a bash tool and JSONL session journals",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "pim": "dist/pim.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kkkiio/pi.mbt.git"
+  }
+}

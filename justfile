@@ -16,6 +16,10 @@ test:
     moon test
     just cram
 
+# Build the publishable npm package into cmd/pim/dist/ (see scripts/pack-npm.sh).
+package:
+    bash scripts/pack-npm.sh
+
 cram:
     moon build
     moon cram test --work-directory . tests/cram
