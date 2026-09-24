@@ -59,6 +59,15 @@ jobs:
           curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
           echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install js dependencies
+        # The js bundle imports pi-tui at runtime, and `bun build` below bundles
+        # it from node_modules.
+        run: npm ci
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0

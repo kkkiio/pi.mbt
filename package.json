@@ -1,20 +1,26 @@
 {
   "name": "@kkkiio/pim",
   "version": "0.1.0",
-  "description": "MoonBit coding agent CLI (a pi subset) with a bash tool and JSONL session journals",
-  "license": "Apache-2.0",
+  "description": "MoonBit coding agent CLI (a pi subset): fullscreen TUI, bash tool, JSONL session journals",
   "type": "module",
+  "license": "Apache-2.0",
   "bin": {
     "pim": "dist/pim.js"
   },
   "files": [
     "dist"
   ],
+  "dependencies": {
+    "@earendil-works/pi-tui": "0.87.1"
+  },
   "engines": {
     "node": ">=22.19.0"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kkkiio/pi.mbt.git"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
