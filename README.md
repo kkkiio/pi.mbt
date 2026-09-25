@@ -5,8 +5,8 @@
 ## Install
 
 ```bash
-just package            # 构建 cmd/pim/dist/pim.js(需要 moon 工具链)
-npm install -g ./cmd/pim # 需要 node >= 22.19;目录会被 symlink 到全局
+just package          # 构建 npm dist
+npm install -g .      # symlink 到全局
 ```
 
 ## Usage

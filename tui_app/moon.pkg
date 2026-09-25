@@ -1,16 +1,13 @@
 import {
   "moonbitlang/async",
+  "moonbitlang/async/aqueue",
   "moonbitlang/async/js_async",
-  "moonbitlang/core/argparse",
+  "moonbitlang/async/semaphore",
   "moonbitlang/core/env",
   "moonbitlang/core/random",
-  "KKKIIO/pi/sdk/coding_agent",
-  "KKKIIO/pi/sdk/providers",
   "KKKIIO/pi/sdk/agent_loop",
   "KKKIIO/pi/sdk/agent_session",
-  "KKKIIO/pi/tui_app",
+  "KKKIIO/pi/sdk/coding_agent",
 }
-
-pkgtype(kind: "executable")
 
 supported_targets = "+js"

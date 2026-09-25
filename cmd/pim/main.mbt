@@ -35,16 +35,25 @@ async fn main {
   }
   let prompts = match matches.values {
     { "print": prompts, .. } => prompts
-    _ => fatal("Error: only '-p' support for now")
+    _ => []
   }
   let mode = match matches.values {
     { "mode": [m, ..], .. } =>
       match m {
         "text" => Text
         "json" => Json
+        "rpc" => fatal("Error: mode 'rpc' is not supported yet")
         _ => fatal("Error: invalid mode '\{m}' (expected text or json)")
       }
     _ => Text
+  }
+  let interactive = prompts.length() == 0 &&
+    @tui_app.stdin_is_tty() &&
+    @tui_app.stdout_is_tty()
+  if !interactive && prompts.length() == 0 {
+    fatal(
+      "Error: no prompt (pass -p <prompt>, or run in a terminal for the TUI)",
+    )
   }
   let deepseek = @providers.DeepSeekProvider()
   // provider 构造失败(如缺 DEEPSEEK_API_KEY)是诊断,按输出流契约走 stderr;
@@ -67,6 +76,13 @@ async fn main {
   let session_dir = match matches.values.get("session_dir") {
     Some(dirs) if dirs.length() > 0 => Some(dirs[0])
     _ => None
+  }
+  // TUI 模式:会话(含 journal)由 tui_app 的 SessionHost 负责,这里不再自建。
+  if interactive {
+    @tui_app.run(llm, "deepseek-v4-flash", cwd, thinking, session_dir) catch {
+      err => fatal("Error: \{clean_error_message("\{err}")}")
+    }
+    return
   }
   let (journal, cleanup) = match session_dir {
     Some(dir) => {

@@ -18,13 +18,24 @@ Options:
   --thinking <thinking>        thinking effort level: low, high (default), or max
 ```
 
-## 缺少 -p
+## 非终端且没有 -p
 
-不带任何参数是使用错误;诊断写入 stderr,退出码为 1:
+没有 `-p` 时:stdin/stdout 都是终端才进全屏 TUI,否则(这里是 cram 的非终端环境)
+按 print 模式处理,而 print 模式必须有提示词 —— 诊断写入 stderr,退出码为 1:
 
 ```mooncram {output_stream: stderr}
 $ moon run cmd/pim --
-Error: only '-p' support for now
+Error: no prompt (pass -p <prompt>, or run in a terminal for the TUI)
+[1]
+```
+
+## 未实现的 --mode rpc
+
+`--mode` 只支持 text/json(与 pi 一致,rpc 未实现),错误同样是单行诊断:
+
+```mooncram {output_stream: stderr}
+$ moon run cmd/pim -- --mode rpc -p hi
+Error: mode 'rpc' is not supported yet
 [1]
 ```
 

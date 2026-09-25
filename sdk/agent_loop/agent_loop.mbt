@@ -8,6 +8,9 @@ pub async fn run_agent_loop(
   prompts : ArrayView[UserMessage],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
   steer_channel? : () -> ArrayView[UserMessage] = fn() { [] },
+  /// 只读的中断令牌:已置位时不再开新回合、不再执行工具;正在流式的请求由 provider 收尾
+  /// (产出 `stop_reason: Aborted` 的部分消息)。
+  abort? : AbortSignal = AbortSignal::never(),
   // TODO: support follow-up channel
   event_sink? : async (AgentEvent) -> Unit = fn(_) { () },
 ) -> LoopStopReason {
@@ -17,6 +20,10 @@ pub async fn run_agent_loop(
     pending_prompts += steer_messages
   }
   let reason : LoopStopReason = for ;; {
+    // 上一回合被中断:不再开新回合(此时 provider 已产出 Aborted 消息)。
+    if abort.is_aborted() {
+      break Aborted
+    }
     event_sink(AgentEvent::TurnStart)
     for prompt in pending_prompts {
       let msg = AgentMessage::User(prompt)
@@ -27,31 +34,35 @@ pub async fn run_agent_loop(
     }
     pending_prompts = []
     let mut message_started = false
-    let assistant_message = llm.generate({ system_prompt, messages, tools, }, sink=event => {
-      match event {
-        Start(partial~) => {
-          message_started = true
-          let msg = AgentMessage::Assistant(partial)
-          messages.push(msg)
-          event_sink(AgentEvent::MessageStart(msg))
-        }
-        TextStart(partial~, ..)
-        | TextDelta(partial~, ..)
-        | TextEnd(partial~, ..)
-        | ThinkingStart(partial~, ..)
-        | ThinkingDelta(partial~, ..)
-        | ThinkingEnd(partial~, ..)
-        | ToolCallStart(partial~, ..)
-        | ToolCallDelta(partial~, ..)
-        | ToolCallEnd(partial~, ..) =>
-          // 在 Start 之前到达的中间事件违反流契约,直接丢弃;终态消息由 generate 的返回值兜底。
-          if message_started {
+    let assistant_message = llm.generate(
+      { system_prompt, messages, tools, },
+      sink=event => {
+        match event {
+          Start(partial~) => {
+            message_started = true
             let msg = AgentMessage::Assistant(partial)
-            messages[messages.length() - 1] = msg
-            event_sink(AgentEvent::MessageUpdate(msg))
+            messages.push(msg)
+            event_sink(AgentEvent::MessageStart(msg))
           }
-      }
-    }) catch {
+          TextStart(partial~, ..)
+          | TextDelta(partial~, ..)
+          | TextEnd(partial~, ..)
+          | ThinkingStart(partial~, ..)
+          | ThinkingDelta(partial~, ..)
+          | ThinkingEnd(partial~, ..)
+          | ToolCallStart(partial~, ..)
+          | ToolCallDelta(partial~, ..)
+          | ToolCallEnd(partial~, ..) =>
+            // 在 Start 之前到达的中间事件违反流契约,直接丢弃;终态消息由 generate 的返回值兜底。
+            if message_started {
+              let msg = AgentMessage::Assistant(partial)
+              messages[messages.length() - 1] = msg
+              event_sink(AgentEvent::MessageUpdate(msg))
+            }
+        }
+      },
+      abort~,
+    ) catch {
       err => {
         let error_message = {
           let text = err.to_string()
@@ -118,7 +129,17 @@ pub async fn run_agent_loop(
           }
           event_sink(AgentEvent::ToolExecutionStart(tool_call))
           let call_timestamp = @env.now()
-          let tool_result = if assistant_message.stop_reason is Length {
+          let tool_result = if abort.is_aborted() {
+            // pi: 未执行的工具补一个 "Operation aborted" 结果,保证每个调用都有结果。
+            batch_terminate = false
+            ToolResultMessage::{
+              tool_call_id: tool_call.id,
+              tool_name: tool_call.name,
+              content: [InputMessageContent::Text("Operation aborted")],
+              is_error: true,
+              timestamp: call_timestamp,
+            }
+          } else if assistant_message.stop_reason is Length {
             batch_terminate = false
             ToolResultMessage::{
               tool_call_id: tool_call.id,

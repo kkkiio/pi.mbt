@@ -8,11 +8,20 @@
 .
 ├── AGENTS.md                 # Root — 全局规则
 ├── README.md                 # 用户文档与使用说明
-├── justfile                  # check / build / test / cram 命令
+├── justfile                  # check / build / test / cram / package 命令
 ├── moon.mod                  # MoonBit 模块元数据(依赖 moonbitlang/async)
+├── package.json              # npm 包根:依赖(@earendil-works/pi-tui)+ 发布契约(bin/files)
+├── dist/                     # gitignore;npm 交付物(dist/pim.js 由 scripts/pack-npm.sh 生成)
+├── scripts/
+│   └── pack-npm.sh           # 生成 dist/pim.js(npm 包根 = 仓库根)
 ├── cmd/
-│   └── pim/                  # pim 可执行入口;当前仅 -p/--print 非交互模式
+│   └── pim/                  # pim 可执行入口:print 模式 + 全屏 TUI(moon 包,无 npm manifest)
 │       └── main.mbt
+├── tui_app/                  # 全屏 TUI(pi-tui 绑定 + 组件 + 会话接线)
+│   ├── README.mbt.md         # 组件树与数据流
+│   ├── app.mbt               # TuiApp:视图状态 / mutator / 输入与退出
+│   ├── session_host.mbt      # 会话所有权:journal、多会话、事件 → 视图
+│   └── run.mbt               # 装配 + 斜杠命令循环 + 收尾
 ├── sdk/                      # 库代码(agent 组装与 provider 集成)
 │   ├── agent_loop/           # agent 事件循环与消息类型
 │   ├── agent_session/        # 会话、journal、listener、tool registry

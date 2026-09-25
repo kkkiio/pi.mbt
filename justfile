@@ -16,7 +16,7 @@ test:
     moon test
     just cram
 
-# Build the publishable npm package into cmd/pim/dist/ (see scripts/pack-npm.sh).
+# Build dist/pim.js, the npm dist of the root package (see scripts/pack-npm.sh).
 package:
     bash scripts/pack-npm.sh
 

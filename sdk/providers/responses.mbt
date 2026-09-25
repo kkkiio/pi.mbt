@@ -117,6 +117,9 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
   model~ : String,
   custom_tool_input_properties? : Map[String, String] = Map([]),
   now? : () -> UInt64 = @env.now,
+  /// 中断信号:置位后停止读流,返回已收到内容的 `Aborted` 消息(对应 pi 的
+  /// `signal` 交给 fetch、由 provider 产出 `stopReason: "aborted"` 的消息)。
+  abort? : @agent_loop.AbortSignal = @agent_loop.AbortSignal::never(),
 ) -> @agent_loop.AssistantMessage {
   let idle_timeout_ms : Int = 120_000
   let started_at = now()
@@ -124,6 +127,18 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
   let acc : Array[@agent_loop.AssistantMessageContent] = []
   let slots : Map[Int, ResponsesOutputSlot] = Map([])
   let final_message : @agent_loop.AssistantMessage = for ;; {
+    if abort.is_aborted() {
+      break @agent_loop.AssistantMessage::{
+        content: acc,
+        api,
+        provider,
+        model,
+        stop_reason: @agent_loop.StopReason::Aborted,
+        error_message: Some("Interrupted"),
+        usage: None,
+        timestamp: started_at,
+      }
+    }
     let idle_reason : String? = match
       (@async.with_timeout_opt(idle_timeout_ms) <| () => {
         reader.read_until("\n")
