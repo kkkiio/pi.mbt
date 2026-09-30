@@ -159,7 +159,7 @@ async fn main {
   // 磁盘上不会留下文件(见 `JsonlSessionJournal` 的 flush 规则)。
   let (journal, cleanup) = match resume_path {
     Some(path) => {
-      let entries = @coding_agent.fetch_entries(path) catch {
+      let entries = @coding_agent.fetch_active_entries(path) catch {
         err => fatal("Error: \{clean_error_message("\{err}")}")
       }
       let file = @coding_agent.open_lazy_file(path, append=true)

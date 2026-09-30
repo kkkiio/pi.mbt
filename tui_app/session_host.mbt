@@ -176,7 +176,7 @@ pub fn SessionHost::load_session(
   path : String,
   app : TuiApp,
 ) -> Unit {
-  let entries = @coding_agent.fetch_entries(path) catch {
+  let entries = @coding_agent.fetch_active_entries(path) catch {
     err => {
       app.push_error("resume: \{err}")
       return

@@ -302,6 +302,25 @@ async test "resuming over a torn tail repairs the file before appending" {
 }
 
 ///|
+/// A journal can hold an abandoned branch (pi writes one when a session is
+/// continued from an older entry). Resuming follows the active `parentId` chain
+/// from the last entry, so the abandoned branch neither hydrates the model nor
+/// becomes the parent of the next append.
+async test "resuming follows the active parentId chain" {
+  let temp_dir = @coding_agent.create_temp_dir("pim-jsonl-branch-")
+  let path = "\{temp_dir}/journal.jsonl"
+  @coding_agent.write_bytes_file(
+    path, b"{\"kind\":\"header\",\"version\":4,\"id\":\"hdr\",\"createdAt\":1,\"cwd\":\"/tmp\"}\n{\"id\":\"a1\",\"kind\":\"entry\",\"seq\":1,\"parentId\":null,\"timestamp\":1,\"type\":\"custom\",\"customType\":\"root\"}\n{\"id\":\"b1\",\"kind\":\"entry\",\"seq\":2,\"parentId\":\"a1\",\"timestamp\":2,\"type\":\"custom\",\"customType\":\"abandoned\"}\n{\"id\":\"c1\",\"kind\":\"entry\",\"seq\":3,\"parentId\":\"a1\",\"timestamp\":3,\"type\":\"custom\",\"customType\":\"active\"}\n",
+  )
+  json_inspect(
+    @coding_agent.fetch_active_entries(path).map(entry => entry.id),
+    content=["a1", "c1"],
+  )
+  @coding_agent.remove_file(path)
+  @coding_agent.remove_dir(temp_dir)
+}
+
+///|
 /// Resuming appends to the file that is already there: the header is not
 /// written twice, and `fetch_entries` reads back what the append stored.
 async test "appending to an existing journal keeps its header" {

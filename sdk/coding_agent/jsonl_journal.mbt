@@ -168,6 +168,45 @@ fn entry_mutation_json(
 }
 
 ///|
+/// pi 的 `buildSessionPath`:没有显式 leaf 时以最后一个条目为 leaf,沿 `parentId`
+/// 回到根。分支被放弃的条目不属于活动路径 —— 既不该进模型上下文,也不该成为
+/// 续写的父节点。
+fn active_path(
+  entries : Array[@agent_session.SessionEntry],
+) -> Array[@agent_session.SessionEntry] raise Failure {
+  if entries.length() == 0 {
+    return entries
+  }
+  let by_id : Map[String, @agent_session.SessionEntry] = Map([])
+  for entry in entries {
+    by_id[entry.id] = entry
+  }
+  let path : Array[@agent_session.SessionEntry] = []
+  let mut current : @agent_session.SessionEntry? = Some(
+    entries[entries.length() - 1],
+  )
+  while current is Some(entry) {
+    guard path.length() <= entries.length() else {
+      fail("session journal has a parentId cycle")
+    }
+    path.push(entry)
+    current = match entry.parent_id {
+      Some(id) => by_id.get(id)
+      None => None
+    }
+  }
+  path.rev()
+}
+
+///|
+/// 恢复用:读 journal 并只保留当前活动的 `parentId` 链。
+pub fn fetch_active_entries(
+  path : String,
+) -> Array[@agent_session.SessionEntry] raise Failure {
+  active_path(fetch_entries(path))
+}
+
+///|
 /// pi's `splitCompleteLines`: only a line that ends in `\n` is known to have
 /// been written whole, so an unterminated tail is a torn write.
 fn split_complete_lines(content : String) -> (String, Bool) {
