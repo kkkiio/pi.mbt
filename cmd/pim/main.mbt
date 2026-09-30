@@ -1,37 +1,41 @@
 ///|
 async fn main {
   let matches = @argparse.parse(
-    Command("pim", flags=[
-      FlagArg("continue", short='c', about="continue the most recent session"),
-      FlagArg(
-        "no_session",
-        long="no-session",
-        about="don't save the session (ephemeral)",
-      ),
-    ], options=[
-      OptionArg("print", short='p', about="prompt text"),
-      OptionArg(
-        "resume",
-        short='r',
-        about="continue the session whose name starts with this prefix",
-      ),
-      OptionArg(
-        "session_dir",
-        long="session-dir",
-        env="PIM_SESSION_DIR",
-        about="directory to store session JSONL files (default: <config>/sessions/<cwd>)",
-      ),
-      OptionArg(
-        "mode",
-        long="mode",
-        about="output mode: text or json (default text)",
-      ),
-      OptionArg(
-        "thinking",
-        long="thinking",
-        about="thinking effort level: low, high (default), or max",
-      ),
-    ]),
+    Command(
+      "pim",
+      flags=[
+        FlagArg("continue", short='c', about="continue the most recent session"),
+        FlagArg(
+          "no_session",
+          long="no-session",
+          about="don't save the session (ephemeral)",
+        ),
+      ],
+      options=[
+        OptionArg("print", short='p', about="prompt text"),
+        OptionArg(
+          "resume",
+          short='r',
+          about="continue the session whose name starts with this prefix",
+        ),
+        OptionArg(
+          "session_dir",
+          long="session-dir",
+          env="PIM_SESSION_DIR",
+          about="directory to store session JSONL files (default: <config>/sessions/<cwd>)",
+        ),
+        OptionArg(
+          "mode",
+          long="mode",
+          about="output mode: text or json (default text)",
+        ),
+        OptionArg(
+          "thinking",
+          long="thinking",
+          about="thinking effort level: low, high (default), or max",
+        ),
+      ],
+    ),
     env=@env.get_env_vars(),
   ) catch {
     err => arg_error("\{err}")
@@ -139,7 +143,14 @@ async fn main {
   }
   // TUI 模式:会话(含 journal)由 tui_app 的 SessionHost 负责,这里不再自建。
   if interactive {
-    @tui_app.run(llm, "deepseek-v4-flash", cwd, thinking, session_dir, resume_path~) catch {
+    @tui_app.run(
+      llm,
+      "deepseek-v4-flash",
+      cwd,
+      thinking,
+      session_dir,
+      resume_path~,
+    ) catch {
       err => fatal("Error: \{clean_error_message("\{err}")}")
     }
     return
@@ -187,7 +198,7 @@ async fn main {
   if mode is Json {
     // JSONL 模式:每个 AgentSessionEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。
     session.subscribe(event => {
-      write_stdout(session_event_to_json(event).stringify())
+      write_stdout(event.to_json().stringify())
       // Like pi's JSON subscriber, wait for the stdout queue between events:
       // a slow reader then throttles the stream instead of buffering it.
       flush_output()
@@ -234,73 +245,6 @@ enum OutputMode {
   /// 把每个会话事件投影成一行 JSON(JSONL)写到 stdout。
   Json
 } derive(Eq)
-
-///|
-/// 把 AgentSessionEvent 投影成 JSONL 事件(对齐 pi `--mode json` 的事件形状):
-/// loop 事件保持原样,auto_retry 事件对齐 pi 的 `auto_retry_start` /
-/// `auto_retry_end` 形状。
-fn session_event_to_json(event : @agent_session.AgentSessionEvent) -> Json {
-  match event {
-    Loop(agent_event) => agent_event_to_json(agent_event)
-    AutoRetryStart(attempt~, max_attempts~, delay_ms~, error_message~) =>
-      {
-        "type": "auto_retry_start",
-        "attempt": attempt,
-        "maxAttempts": max_attempts,
-        "delayMs": delay_ms,
-        "errorMessage": error_message,
-      }
-    AutoRetryEnd(attempt~, success~, final_error~) =>
-      {
-        "type": "auto_retry_end",
-        "success": success,
-        "attempt": attempt,
-        "finalError": match final_error {
-          Some(message) => message.to_json()
-          None => null
-        },
-      }
-  }
-}
-
-///|
-/// 把 AgentEvent 投影成 JSONL 事件(对齐 pi `--mode json` 的事件形状)。
-fn agent_event_to_json(event : @agent_loop.AgentEvent) -> Json {
-  match event {
-    AgentStart => { "type": "agent_start" }
-    TurnStart => { "type": "turn_start" }
-    MessageStart(message) =>
-      { "type": "message_start", "message": message.to_json() }
-    MessageUpdate(message) =>
-      { "type": "message_update", "message": message.to_json() }
-    MessageEnd(message) =>
-      { "type": "message_end", "message": message.to_json() }
-    ToolExecutionStart(call) =>
-      {
-        "type": "tool_execution_start",
-        "toolName": call.name,
-        "args": call.arguments,
-      }
-    ToolExecutionEnd(result) =>
-      {
-        "type": "tool_execution_end",
-        "toolName": result.tool_name,
-        "content": [
-          for c in result.content => c.to_json()
-        ],
-        "isError": result.is_error,
-      }
-    TurnEnd(assistant_message, tool_results) =>
-      {
-        "type": "turn_end",
-        "message": assistant_message.to_json(),
-        "toolCalls": [
-          for r in tool_results => r.tool_name
-        ],
-      }
-    AgentEnd(_) => { "type": "agent_end" }
-  }
-}
 
 ///|
 /// 把 argparse 错误按 pi 风格输出到 stderr 并退出：

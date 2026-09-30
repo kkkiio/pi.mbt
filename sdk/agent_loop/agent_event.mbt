@@ -213,6 +213,48 @@ pub impl ToJson for HostedTool with fn to_json(self : HostedTool) -> Json {
 }
 
 ///|
+/// pi 的 `--mode json` 事件形状:每行一个事件对象。
+pub impl ToJson for AgentEvent with fn to_json(self : AgentEvent) -> Json {
+  match self {
+    AgentStart => { "type": "agent_start" }
+    TurnStart => { "type": "turn_start" }
+    MessageStart(message) =>
+      { "type": "message_start", "message": message.to_json() }
+    MessageUpdate(message) =>
+      { "type": "message_update", "message": message.to_json() }
+    MessageEnd(message) =>
+      { "type": "message_end", "message": message.to_json() }
+    ToolExecutionStart(call) =>
+      {
+        "type": "tool_execution_start",
+        "toolName": call.name,
+        "args": call.arguments,
+      }
+    ToolExecutionEnd(result) =>
+      {
+        "type": "tool_execution_end",
+        "toolName": result.tool_name,
+        "content": [
+          for c in result.content => c.to_json()
+        ],
+        "isError": result.is_error,
+      }
+    TurnEnd(assistant_message, tool_results) =>
+      {
+        "type": "turn_end",
+        "message": assistant_message.to_json(),
+        "toolCalls": [
+          for r in tool_results => r.tool_name
+        ],
+      }
+    AgentEnd(_) => { "type": "agent_end" }
+  }
+}
+
+///|
+pub extend AgentEvent with ToJson::{to_json}
+
+///|
 pub(all) struct ToolResultMessage {
   tool_call_id : String
   tool_name : String

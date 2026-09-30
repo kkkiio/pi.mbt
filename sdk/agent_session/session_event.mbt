@@ -17,6 +17,36 @@ pub enum AgentSessionEvent {
 }
 
 ///|
+/// pi 的 `--mode json` 事件形状。`Loop` 不套壳:展开成 agent loop 自己的事件,
+/// 与 pi 的 `--mode json` 一致。
+pub impl ToJson for AgentSessionEvent with fn to_json(self : AgentSessionEvent) -> Json {
+  match self {
+    Loop(agent_event) => agent_event.to_json()
+    AutoRetryStart(attempt~, max_attempts~, delay_ms~, error_message~) =>
+      {
+        "type": "auto_retry_start",
+        "attempt": attempt,
+        "maxAttempts": max_attempts,
+        "delayMs": delay_ms,
+        "errorMessage": error_message,
+      }
+    AutoRetryEnd(attempt~, success~, final_error~) =>
+      {
+        "type": "auto_retry_end",
+        "success": success,
+        "attempt": attempt,
+        "finalError": match final_error {
+          Some(message) => message.to_json()
+          None => null
+        },
+      }
+  }
+}
+
+///|
+pub extend AgentSessionEvent with ToJson::{to_json}
+
+///|
 type EventListener = async (AgentSessionEvent) -> Unit
 
 ///|
