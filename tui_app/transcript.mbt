@@ -563,8 +563,11 @@ fn render_bash(
       }
     _ => ()
   }
+  // pi 只在拿得到真实退出码时才写 `(exit N)`(`bash-execution.ts`:状态未知就不写),
+  // 这里没有退出码,所以只标一个不谎报的失败记号;具体原因由结果文本给出
+  // ("Command exited with code 2" / "Command timed out..." / "Command aborted")。
   if is_error {
-    lines.push(" ".repeat(PAD) + theme.f_error("(exit 1)"))
+    lines.push(" ".repeat(PAD) + theme.f_error("(failed)"))
   }
   lines.push(rule)
   lines

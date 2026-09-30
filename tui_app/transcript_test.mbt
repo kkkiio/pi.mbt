@@ -188,6 +188,32 @@ async test "multi-line user message and CRLF tool result render one row per elem
 }
 
 ///|
+/// bash 的结果文本已经写了真实原因(`exit 2` / 超时 / 中断),所以块尾只标一个不
+/// 谎报的失败记号;pi 的 `bash-execution.ts` 同样只在拿得到真实退出码时才写
+/// `(exit N)`。
+async test "a failed bash result marks failure without inventing an exit code" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_tool_call("bash", { "command": "exit 2" }, id="call-bash")
+  transcript.push_tool_result(
+    "bash",
+    "Command exited with code 2",
+    true,
+    id="call-bash",
+  )
+  inspect(
+    render_rows(transcript, 40).join("\n"),
+    content=(
+      #|────────────────────────────────────────
+      #| $ exit 2
+      #| Command exited with code 2
+      #| (failed)
+      #|────────────────────────────────────────
+    ),
+  )
+}
+
+///|
 /// Live execution adds each call before its result, but replay adds both calls
 /// first. Neither path may exchange outputs between calls to the same tool.
 async test "resumed same-name tool calls retain their live output pairing" {
