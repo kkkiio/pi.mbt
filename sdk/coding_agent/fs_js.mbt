@@ -343,6 +343,57 @@ pub fn write_bytes_file(path : String, data : Bytes) -> Unit raise FsError {
 }
 
 ///|
+#module("node:fs")
+extern "js" fn rename_sync(old_path : String, new_path : String) -> Unit = "renameSync"
+
+///|
+extern "js" fn rename_file_ffi(
+  rename : (String, String) -> Unit,
+  old_path : String,
+  new_path : String,
+) -> FsResult =
+  #| function(rename, oldPath, newPath) {
+  #|   try {
+  #|     rename(oldPath, newPath);
+  #|     return { ok: true, content: undefined };
+  #|   } catch (error) {
+  #|     return { ok: false, content: error.message };
+  #|   }
+  #| }
+
+///|
+/// Replace `path` in one step: stage the new content in `path.tmp`, then
+/// rename it over the target, so a crash leaves either the old or the new
+/// content behind (pi's `publishFileAtomically`). The staged file is created
+/// with `permission` so the rename cannot widen the target's mode.
+pub fn write_file_atomically(
+  path : String,
+  data : Bytes,
+  permission? : Int = 0o600,
+) -> Unit raise FsError {
+  let temp_path = "\{path}.tmp"
+  let staged = create_file(temp_path, allow_existing=true, permission~) catch {
+    err => raise FsError(err.to_string())
+  }
+  let written = try {
+    staged.write_bytes(data)
+    true
+  } catch {
+    _ => false
+  }
+  staged.close()
+  guard written else {
+    ignore(remove_file_ffi(unlink_sync, temp_path))
+    raise FsError("failed to stage \{temp_path}")
+  }
+  let renamed = rename_file_ffi(rename_sync, temp_path, path)
+  if !renamed.is_ok() {
+    ignore(remove_file_ffi(unlink_sync, temp_path))
+    raise FsError(renamed.as_message())
+  }
+}
+
+///|
 /// List the entry names of a directory (no hidden-file filtering and no
 /// sorting: callers apply their own policy).
 pub fn read_dir(path : String) -> FixedArray[String] raise FsError {

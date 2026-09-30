@@ -168,11 +168,32 @@ fn entry_mutation_json(
 }
 
 ///|
+/// pi's `splitCompleteLines`: only a line that ends in `\n` is known to have
+/// been written whole, so an unterminated tail is a torn write.
+fn split_complete_lines(content : String) -> (String, Bool) {
+  if content.length() == 0 || content.has_suffix("\n") {
+    (content, false)
+  } else {
+    let lines = content.split("\n").to_array()
+    (lines[0:lines.length() - 1].join("\n") + "\n", true)
+  }
+}
+
+///|
+/// 读取 journal。崩溃时写了一半的尾行会被忽略,并从文件里去掉(pi 的 `openV4`
+/// 也这么做):留着的话,续写时新条目会接在残片后面,整行依旧非法,之后每次
+/// 恢复都会丢掉这一行之后的内容。
 pub fn fetch_entries(
   path : String,
 ) -> Array[@agent_session.SessionEntry] raise Failure {
   let content = read_text_file(path) catch {
     err => fail("failed to read session journal at \{path}: \{err}")
+  }
+  let (content, torn) = split_complete_lines(content)
+  if torn {
+    write_file_atomically(path, @utf8.encode(content)) catch {
+      err => fail("failed to repair session journal at \{path}: \{err}")
+    }
   }
   let has_trailing_newline = content.has_suffix("\n")
   let lines = content

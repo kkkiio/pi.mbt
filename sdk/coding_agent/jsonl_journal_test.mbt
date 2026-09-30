@@ -258,6 +258,50 @@ async test "persists various entries in memory and as JSONL" {
 }
 
 ///|
+/// A crash can leave a half-written final line behind. Reading the journal drops
+/// that fragment *and* repairs the file, so resuming appends on a fresh line —
+/// glued to the fragment every later entry would be unreadable.
+async test "resuming over a torn tail repairs the file before appending" {
+  let temp_dir = @coding_agent.create_temp_dir("pim-jsonl-torn-tail-")
+  let path = "\{temp_dir}/journal.jsonl"
+  @coding_agent.write_bytes_file(
+    path, b"{\"kind\":\"header\",\"version\":4,\"id\":\"hdr\",\"createdAt\":1,\"cwd\":\"/tmp\"}\n{\"id\":\"kept\",\"kind\":\"entry\",\"seq\":1,\"parentId\":null,\"timestamp\":7,\"type\":\"custom\",\"customType\":\"kept\"}\n{\"kind\":\"entry\",\"seq\":2,\"paren",
+  )
+  let entries = @coding_agent.fetch_entries(path)
+  inspect(entries.length(), content="1")
+  inspect(
+    @utf8.decode_lossy(@coding_agent.read_bytes_file(path)),
+    content=(
+      #|{"kind":"header","version":4,"id":"hdr","createdAt":1,"cwd":"/tmp"}
+      #|{"id":"kept","kind":"entry","seq":1,"parentId":null,"timestamp":7,"type":"custom","customType":"kept"}
+      #|
+    ),
+  )
+  let file = @coding_agent.open_append_file(path)
+  let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
+    file,
+    rand=@random.Rand::chacha8(),
+    cwd="/tmp",
+    now=() => 8,
+    fresh=false,
+  )
+  let _stored = journal.append([
+    {
+      id: "disk2",
+      content: @agent_session.SessionEntryContent::Custom(
+        custom_type="appended",
+        data=None,
+      ),
+    },
+  ])
+  file.close()
+  let resumed = @coding_agent.fetch_entries(path)
+  inspect(resumed.length(), content="2")
+  @coding_agent.remove_file(path)
+  @coding_agent.remove_dir(temp_dir)
+}
+
+///|
 /// Resuming appends to the file that is already there: the header is not
 /// written twice, and `fetch_entries` reads back what the append stored.
 async test "appending to an existing journal keeps its header" {
