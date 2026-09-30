@@ -1,11 +1,14 @@
 ///|
+pub const BASH_TOOL_NAME = "bash"
+
+///|
 pub fn new_bash_tool_definition(
   cwd? : String = @env.current_dir().unwrap(),
   exec? : async (BashExecParams) -> Int = local_bash_exec,
 ) -> @tools.ToolDefinition {
   {
-    name: "bash",
-    label: "bash",
+    name: BASH_TOOL_NAME,
+    label: BASH_TOOL_NAME,
     prompt_guidelines: ["Use bash for file operations like ls, rg, find"],
     callable_definition: {
       description: "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last \{DEFAULT_MAX_LINES} lines or \{DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",

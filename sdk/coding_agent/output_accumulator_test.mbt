@@ -1,4 +1,6 @@
 ///|
+/// Truncation keeps the last `max_lines` lines, and a UTF-8 sequence split
+/// across two `append` calls still decodes.
 async test "output accumulator preserves split UTF-8 and truncates complete lines" {
   let output = @coding_agent.OutputAccumulator(max_lines=2, max_bytes=100)
   output.append(b"first\nsecond\n\xe4\xbd")
@@ -23,6 +25,8 @@ async test "output accumulator preserves split UTF-8 and truncates complete line
 }
 
 ///|
+/// A single line longer than `max_bytes` is cut at a UTF-8 boundary and marked
+/// partial, keeping the original byte length for the spill footer.
 async test "output accumulator truncates a long final line at a UTF-8 boundary" {
   let output = @coding_agent.OutputAccumulator(max_lines=10, max_bytes=5)
   output.append(@utf8.encode("prefix你好"))
@@ -37,6 +41,8 @@ async test "output accumulator truncates a long final line at a UTF-8 boundary" 
 }
 
 ///|
+/// Truncation spills the original (untruncated) bytes to a temp file, and the
+/// snapshot's path is the file that actually holds them.
 async test "output accumulator persists the original bytes after truncation" {
   let output = @coding_agent.OutputAccumulator(
     max_lines=10,

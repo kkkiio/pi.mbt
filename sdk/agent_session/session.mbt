@@ -11,10 +11,13 @@ pub struct AgentSession {
   journal : &SessionJournal
   llm : &@agent_loop.LLM
   tool_registry : @tools.ToolRegistry
+  active_tools : Array[String]
   fanout : FanOutListener
   message_buffer : Array[@agent_loop.AgentMessage]
   system_prompt : String
   mut active_run_exists : Bool
+  /// 当前运行的中断控制器(每次 prompt 新建,结束后清空)。只有它能置位。
+  mut abort_controller : @agent_loop.AbortController?
 }
 
 ///|
@@ -23,13 +26,16 @@ pub fn AgentSession::AgentSession(
   system_prompt~ : String,
   journal? : &SessionJournal = InMemorySessionJournal(),
   tool_registry? : @tools.ToolRegistry = @tools.ToolRegistry(),
+  active_tools? : ArrayView[String] = [],
 ) -> AgentSession {
   AgentSession::{
     tool_registry,
+    active_tools: active_tools.to_owned(),
     journal,
     fanout: FanOutListener::FanOutListener(),
     llm,
     system_prompt,
+    abort_controller: None,
     message_buffer: journal
     .get_entries()
     .filter_map(e => {
@@ -47,6 +53,13 @@ pub fn AgentSession::AgentSession(
 }
 
 ///|
+/// Prompt the agent with the given `input` messages.
+/// 
+/// Auto-retry loop: a prompt whose assistant turn ends with a retryable
+/// error is re-run from the same context (bounded, exponential backoff),
+/// mirroring pi's session-level auto-retry: the failed turn's terminal Error
+/// message is dropped and the assistant generation continues — the user
+/// prompt and any prior tool work stay in place and are journaled once.
 pub async fn AgentSession::prompt(
   self : AgentSession,
   input : Array[@agent_loop.UserMessage],
@@ -56,8 +69,13 @@ pub async fn AgentSession::prompt(
       "Agent is already processing. Use 'steer' or 'followUp' to queue the message.",
     ) // TODO: support steer/follow_up
   }
-  let tool_registry = self.tool_registry
-  let tools = tool_registry.get_active_tools()
+  let tools : Array[@tools.ToolDefinition] = []
+  for name in self.active_tools {
+    guard self.tool_registry.get_tool(name) is Some(tool) else {
+      fail("unknown tool: \{name}")
+    }
+    tools.push(tool)
+  }
   let tool_map = tools.iter().map(t => (t.name, t)) |> Map::from_iter
   let agent_tools = tools.map(d => {
     if d.callable_definition is Some(c) {
@@ -69,18 +87,19 @@ pub async fn AgentSession::prompt(
       })
     } else {
       match d.name {
-        "web_search" => @agent_loop.Hosted(@agent_loop.WebSearch)
+        WEB_SEARCH_TOOL_NAME => @agent_loop.Hosted(@agent_loop.WebSearch)
         _ => fail("unknown hosted tool \\{d.name}")
       }
     }
   })
   self.active_run_exists = true
   defer (() => self.active_run_exists = false)()
-  // Auto-retry loop: a prompt whose assistant turn ends with a retryable
-  // error is re-run from the same context (bounded, exponential backoff),
-  // mirroring pi's session-level auto-retry: the failed turn's terminal Error
-  // message is dropped and the assistant generation continues — the user
-  // prompt and any prior tool work stay in place and are journaled once.
+  let abort_controller = @agent_loop.AbortController::new()
+  self.abort_controller = Some(abort_controller)
+  defer {
+    self.abort_controller = None
+    ()
+  }
   let mut retry_index = 0
   let mut pending_prompts = input
   for ;; {
@@ -91,6 +110,7 @@ pub async fn AgentSession::prompt(
       agent_tools,
       pending_prompts,
       tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+      abort=abort_controller.signal(),
       event_sink=event => {
         // Persist complete messages at their terminal events. User and
         // assistant messages are complete at MessageEnd (assistant streaming
@@ -199,4 +219,33 @@ pub fn AgentSession::subscribe(
   listener : EventListener,
 ) -> Unit {
   self.fanout.listeners.push(listener)
+}
+
+///|
+pub fn AgentSession::set_active_tools(
+  self : AgentSession,
+  names : ArrayView[String],
+) -> Unit raise {
+  for name in names {
+    guard self.tool_registry.get_tool(name) is Some(_) else {
+      fail("unknown tool: \{name}")
+    }
+  }
+  names.blit_to(self.active_tools)
+}
+
+///|
+pub fn AgentSession::active_tool_names(
+  self : AgentSession,
+) -> ArrayView[String] {
+  self.active_tools
+}
+
+///|
+/// 中断当前运行(如果没有正在跑的,则无效果)。
+pub fn AgentSession::interrupt(self : AgentSession) -> Unit {
+  match self.abort_controller {
+    Some(controller) => controller.abort()
+    None => ()
+  }
 }

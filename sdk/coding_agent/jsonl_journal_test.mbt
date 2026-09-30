@@ -27,6 +27,8 @@ fn writer_text(writer : BufferWriter) -> String {
 }
 
 ///|
+/// Appending keeps the preloaded entry and writes one JSONL line per entry;
+/// the serialized entries (`json_inspect` below) are the on-disk contract.
 async test "persists various entries in memory and as JSONL" {
   let writer = BufferWriter::BufferWriter()
   let preloaded : @agent_session.SessionEntry = {
@@ -174,6 +176,7 @@ async test "persists various entries in memory and as JSONL" {
   file.write(writer_text(writer))
   file.close()
   let fetched = @coding_agent.fetch_entries(path)
+  // Round-trip: entries written to disk parse back into the same values.
   json_inspect(fetched, content=[
     {
       "id": "e1",
@@ -236,6 +239,7 @@ async test "persists various entries in memory and as JSONL" {
       },
     },
   ])
+
   @coding_agent.remove_file(path)
   @coding_agent.remove_dir(temp_dir)
 
@@ -254,6 +258,8 @@ async test "persists various entries in memory and as JSONL" {
 }
 
 ///|
+/// `fetch_entries` parses a journal file back into the same entry shape that
+/// the writer emitted.
 async test "fetch_entries reads persisted entries from disk" {
   let temp_dir = @coding_agent.create_temp_dir(
     "pim-jsonl-session-journal-test-",

@@ -83,6 +83,7 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
   self : DeepSeekResponsesAPILLM,
   context : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
+  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
   let input = encode_responses_input(context)
   let custom_tool_input_properties = Map([])
@@ -174,6 +175,7 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
       read_responses_sse_stream(
         client,
         sink=attempt_sink,
+        abort~,
         api="openai-responses",
         provider="deepseek",
         model=self.model_id,

@@ -22,6 +22,8 @@ fn failure_message(error_text : String) -> String {
 }
 
 ///|
+/// stdout and stderr merge into one stream in arrival order; a successful run
+/// reports no truncation and the full text in `content`.
 async test "bash tool returns merged output, exit code and details" {
   let result = (bash_tool().execute)(
     "call-1",
@@ -38,6 +40,8 @@ async test "bash tool returns merged output, exit code and details" {
 }
 
 ///|
+/// A non-zero exit fails the call and appends `Command exited with code N`
+/// after the captured output.
 async test "bash tool reports a non-zero exit code" {
   let message = try {
     ignore(
@@ -54,6 +58,7 @@ async test "bash tool reports a non-zero exit code" {
 }
 
 ///|
+/// `timeout` kills the running command and fails with the elapsed seconds.
 async test "bash tool kills the command on timeout" {
   let message = try {
     ignore(
@@ -71,6 +76,8 @@ async test "bash tool kills the command on timeout" {
 }
 
 ///|
+/// Progress updates arrive while the command is still running, and the last
+/// one replays exactly the content the call returns.
 async test "bash tool streams throttled updates and a terminal update" {
   let updates : Array[Array[@agent_loop.InputMessageContent]] = []
   let result = (bash_tool().execute)(
@@ -94,6 +101,9 @@ async test "bash tool streams throttled updates and a terminal update" {
 }
 
 ///|
+/// Output past the display limit spills to a temp file; the footer's byte limit
+/// is pinned, and the path it prints is checked against `details` rather than
+/// snapshotted.
 async test "bash tool spills truncated output to a temp file" {
   // 200 lines x 601 bytes = 120200 raw bytes, past the 50KB display limit.
   let result = (bash_tool().execute)(

@@ -122,9 +122,14 @@ extern "js" fn spawn_bash_ffi(
   #| function(spawn, onData, command, cwd, envJson, inheritEnv, timeoutMs) {
   #|   const extra = JSON.parse(envJson);
   #|   const env = inheritEnv ? Object.assign({}, process.env, extra) : extra;
+  #|   // Detach on POSIX so the shell leads its own process group: `killTree`
+  #|   // can then signal the whole group and grandchildren (`sleep`, servers,
+  #|   // ...) die with the shell instead of surviving the abort as orphans.
+  #|   const detached = process.platform !== "win32";
   #|   const child = spawn("/bin/bash", ["-c", command], {
   #|     cwd,
   #|     env,
+  #|     detached,
   #|     stdio: ["ignore", "pipe", "pipe"],
   #|   });
   #|   let settled = false;
@@ -158,19 +163,38 @@ extern "js" fn spawn_bash_ffi(
   #|     }
   #|     finish();
   #|   });
+  #|   // Kill the entire process tree, mirroring pi's `killProcessTree`
+  #|   // (coding-agent/src/utils/shell.ts): a detached child leads its own
+  #|   // process group, so `-pid` reaches its descendants too. Falls back to
+  #|   // killing just the shell (and on Windows, where negative pids are not
+  #|   // supported) when the group signal is unavailable.
+  #|   const killTree = () => {
+  #|     if (child.exitCode !== null || child.signalCode !== null) {
+  #|       return;
+  #|     }
+  #|     if (detached && typeof child.pid === "number") {
+  #|       try {
+  #|         process.kill(-child.pid, "SIGKILL");
+  #|         return;
+  #|       } catch {
+  #|         // Fall through to the direct kill below.
+  #|       }
+  #|     }
+  #|     try {
+  #|       child.kill("SIGKILL");
+  #|     } catch {
+  #|       // Process already gone.
+  #|     }
+  #|   };
   #|   if (timeoutMs > 0) {
   #|     timer = setTimeout(() => {
   #|       timedOut = true;
-  #|       child.kill("SIGKILL");
+  #|       killTree();
   #|     }, timeoutMs);
   #|   }
   #|   return {
   #|     exited: () => exited,
-  #|     kill: () => {
-  #|       if (child.exitCode === null && child.signalCode === null) {
-  #|         child.kill("SIGKILL");
-  #|       }
-  #|     },
+  #|     kill: killTree,
   #|   };
   #| }
 
