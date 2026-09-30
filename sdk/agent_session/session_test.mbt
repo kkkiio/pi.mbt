@@ -743,3 +743,91 @@ async test "a completing tool call returns and records its result" {
   }
   assert_eq(text, "probe-ok")
 }
+
+///|
+/// Interrupt inside each backoff window, not from its start event. The deadline
+/// begins at interrupt, so the second attempt's initial 500ms wait is allowed.
+async test "interrupt cancels retry backoff without starting another attempt" {
+  for attempt in [1, 2] {
+    let llm = @faux.FauxLLM::FauxLLM()
+    let responses = Array::makei(attempt, _ => error_message("429 rate limit"))
+    responses.push(ok_message())
+    llm.set_responses(responses)
+    let journal = @agent_session.InMemorySessionJournal()
+    let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
+    let started = @async.Semaphore::Semaphore(1, initial_value=0)
+    let ends : Array[(Int, Bool, String?)] = []
+    session.subscribe(event => {
+      match event {
+        AutoRetryStart(attempt=number, ..) if number == attempt =>
+          started.release()
+        AutoRetryEnd(attempt~, success~, final_error~) =>
+          ends.push((attempt, success, final_error))
+        _ => ()
+      }
+    })
+    let finished = @async.with_task_group() <| group => {
+      group.spawn_bg(no_wait=true) <| async fn() {
+        started.acquire()
+        @async.sleep(20)
+        session.interrupt()
+        @async.sleep(200)
+        group.return_immediately(false)
+      }
+      session.prompt([user_message("first")])
+      true
+    }
+    assert_true(finished)
+    assert_eq(ends, [(attempt, false, Some("Retry cancelled"))])
+    assert_eq(llm.pending_responses(), 1)
+    // Raw history keeps the completed failures; cancellation adds no fake turn.
+    assert_eq(journal.get_entries().length(), attempt + 1)
+    session.prompt([user_message("next")])
+    assert_eq(llm.pending_responses(), 0)
+    assert_eq(journal.get_entries().length(), attempt + 3)
+    assert_eq(ends.length(), 1)
+  }
+}
+
+///|
+/// A retry that reaches generation but is interrupted must not report success.
+async test "interrupt during a retried generation reports a cancelled retry" {
+  let llm = @faux.FauxLLM::FauxLLM(chunk_delay_ms=20)
+  llm.set_responses([error_message("429 rate limit"), ok_message()])
+  let session = @agent_session.AgentSession(llm, system_prompt="")
+  let mut starts = 0
+  let ends : Array[(Int, Bool, String?)] = []
+  session.subscribe(event => {
+    match event {
+      Loop(MessageStart(Assistant(_))) => {
+        starts += 1
+        if starts == 2 {
+          session.interrupt()
+        }
+      }
+      AutoRetryEnd(attempt~, success~, final_error~) =>
+        ends.push((attempt, success, final_error))
+      _ => ()
+    }
+  })
+  @async.with_timeout(2000, () => session.prompt([user_message("go")]))
+  assert_eq(starts, 2)
+  assert_eq(ends, [(1, false, Some("Retry cancelled"))])
+}
+
+///|
+/// Without an interrupt the winning timer cancels its watcher and retries once.
+async test "a completed retry reports success and releases its abort watcher" {
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([error_message("429 rate limit"), ok_message()])
+  let session = @agent_session.AgentSession(llm, system_prompt="")
+  let ends : Array[(Int, Bool, String?)] = []
+  session.subscribe(event => {
+    if event is AutoRetryEnd(attempt~, success~, final_error~) {
+      ends.push((attempt, success, final_error))
+    }
+  })
+  @async.with_timeout(2000, () => session.prompt([user_message("go")]))
+  assert_eq(llm.pending_responses(), 0)
+  assert_eq(ends, [(1, true, None)])
+}

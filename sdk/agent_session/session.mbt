@@ -151,11 +151,31 @@ pub async fn AgentSession::prompt(
             error_message=message,
           ),
         )
-        @async.sleep(delay_ms)
         // Drop the failed turn's terminal Error message so the retried run
         // continues from the same context; the prompt is already in the
-        // buffer, so no new user message is pushed or journaled.
+        // buffer, so no new user message is pushed or journaled. Keep this
+        // projection clean even when the backoff is interrupted.
         drop_trailing_error_message(self.message_buffer)
+        let slept = @async.any([
+          async fn() {
+            @async.sleep(delay_ms)
+            true
+          },
+          async fn() {
+            abort_controller.signal().wait_abort()
+            false
+          },
+        ])
+        if !slept || abort_controller.signal().is_aborted() {
+          self.fanout.on_event(
+            AgentSessionEvent::AutoRetryEnd(
+              attempt=retry_index,
+              success=false,
+              final_error=Some("Retry cancelled"),
+            ),
+          )
+          break
+        }
         pending_prompts = []
         continue
       }
@@ -172,11 +192,12 @@ pub async fn AgentSession::prompt(
     }
     // The prompt settled: success, or the user/system aborted it.
     if retry_index > 0 {
+      let aborted = reason is @agent_loop.LoopStopReason::Aborted
       self.fanout.on_event(
         AgentSessionEvent::AutoRetryEnd(
           attempt=retry_index,
-          success=true,
-          final_error=None,
+          success=!aborted,
+          final_error=if aborted { Some("Retry cancelled") } else { None },
         ),
       )
     }

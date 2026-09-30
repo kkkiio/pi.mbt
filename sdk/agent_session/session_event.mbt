@@ -12,7 +12,7 @@ pub enum AgentSessionEvent {
     error_message~ : String
   )
   /// Emitted once a retried prompt settles: success after a retry, or the
-  /// budget exhausted / error not retryable.
+  /// budget exhausted / error not retryable / retry cancelled.
   AutoRetryEnd(attempt~ : Int, success~ : Bool, final_error~ : String?)
 }
 
