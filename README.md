@@ -29,3 +29,26 @@ pim -p "What's the capital of France? Respond with only the city name." --mode j
 # ...
 # {"type":"agent_end"}
 ```
+
+## Configuration
+
+| 变量              | 作用                                                 |
+| ----------------- | ---------------------------------------------------- |
+| `PIM_CONFIG_DIR`  | 配置目录,默认 `~/.pim`                               |
+| `PIM_SESSION_DIR` | 会话 JSONL 目录(等价于 `--session-dir`) |
+
+### 认证配置
+
+认证优先使用文件配置 `~/.pim/auth.json`:
+
+```json
+{
+  "deepseek": { "type": "api_key", "key": "sk-xxx" }
+}
+```
+
+也支持环境变量:
+
+```bash
+DEEPSEEK_API_KEY=sk-xxx pim -p "hi"
+```

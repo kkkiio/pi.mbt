@@ -1,3 +1,9 @@
+---
+defaults:
+  environment:
+    DEEPSEEK_API_KEY: ""
+---
+
 # pim CLI 契约测试
 
 这些示例被 `moon cram test` 使用，所有命令都是离线的。
@@ -18,13 +24,23 @@ Options:
   --thinking <thinking>        thinking effort level: low, high (default), or max
 ```
 
-## 缺少 -p
+## 没有 -p
 
-不带任何参数是使用错误;诊断写入 stderr,退出码为 1:
+print 模式必须有提示词 —— 诊断写入 stderr,退出码为 1:
 
 ```mooncram {output_stream: stderr}
 $ moon run cmd/pim --
 Error: only '-p' support for now
+[1]
+```
+
+## 未实现的 --mode rpc
+
+`--mode` 只支持 text/json(与 pi 一致,rpc 未实现),错误同样是单行诊断:
+
+```mooncram {output_stream: stderr}
+$ moon run cmd/pim -- --mode rpc -p hi
+Error: mode 'rpc' is not supported yet
 [1]
 ```
 
@@ -57,14 +73,41 @@ Error: invalid mode 'yaml' (expected text or json)
 [1]
 ```
 
-## 缺少 API key 时 -p 失败
+## 凭证来源与顺序
 
-没有 `DEEPSEEK_API_KEY` 时,`-p` 在 provider 构造阶段失败,退出码为 1;失败报告
-目前由 async runtime 输出到 stdout:
+凭证按 `auth.json` → 环境变量的顺序解析: pi 的顺序是 `--api-key` → `auth.json` → env,pim 还 没有 `--api-key`。
+配置目录由 `PIM_CONFIG_DIR` 覆盖,默认 `~/.pim`。
+
+目录存在但没有 `auth.json`、`DEEPSEEK_API_KEY` 也没配时失败,退出码 1:
 
 ```mooncram {output_stream: stderr}
-$ (unset DEEPSEEK_API_KEY; moon run cmd/pim -- -p hi)
-Error: miss DEEPSEEK_API_KEY
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-absent moon run cmd/pim -- -p hi
+Error: no DeepSeek API key (set DEEPSEEK_API_KEY, or add a "deepseek" entry to tests/cram/testdata/auth-absent/auth.json)
+[1]
+```
+
+`auth.json` 存在但 JSON 损坏时明确报错(不静默降级到环境变量):
+
+```mooncram {output_stream: stderr}
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-invalid-json moon run cmd/pim -- -p hi
+Error: tests/cram/testdata/auth-invalid-json/auth.json is not valid JSON: Invalid character 'n' at line 1, column 2
+[1]
+```
+
+`deepseek` 条目存在但不是 api_key 形状时同样报错 —— 拼错的条目如果被环境变量
+悄悄兜住,用户很难解释“为什么换了 key 没生效”:
+
+```mooncram {output_stream: stderr}
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-oauth-credential moon run cmd/pim -- -p hi
+Error: tests/cram/testdata/auth-oauth-credential/auth.json: "deepseek" is not an api_key credential (expected {"type": "api_key", "key": "sk-..."})
+[1]
+```
+
+`key` 为空同样不算凭证:
+
+```mooncram {output_stream: stderr}
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-empty-key moon run cmd/pim -- -p hi
+Error: tests/cram/testdata/auth-empty-key/auth.json: "deepseek" is not an api_key credential (expected {"type": "api_key", "key": "sk-..."})
 [1]
 ```
 

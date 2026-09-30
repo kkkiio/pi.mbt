@@ -11,9 +11,6 @@ moon cram test tests/live
 
 ## Smoke: A Real Round Trip That Answers
 
-The upstream pi smoke eval
-(`packages/evals/src/smoke.eval.ts`) runs the same prompt through a real
-provider and asserts the final reply is exactly `Paris`. `pim` mirrors that:
 `-p` prints the agent's final reply text to stdout, and the assertion is the
 full stdout content.
 
@@ -21,9 +18,6 @@ full stdout content.
 $ moon run cmd/pim -- -p "What's the capital of France? Respond with only the city name."
 Paris
 ```
-
-Without `DEEPSEEK_API_KEY` the run fails at provider construction instead of
-reaching the API, so this transcript only passes when a real key is exported.
 
 ## Watching The Agent Use Bash
 

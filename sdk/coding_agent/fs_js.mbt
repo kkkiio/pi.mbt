@@ -3,7 +3,7 @@
 ///
 /// The package targets js only, so every operation here is a thin
 /// synchronous wrapper over `node:fs` (plus `node:os` / `node:path` for the
-/// temp directory). Two rules shape the FFI below:
+/// temp and home directories). Two rules shape the FFI below:
 ///
 /// - Throwing Node APIs are wrapped in JavaScript `try`/`catch` and return a
 ///   `{ ok, content }` record. A JS exception cannot be observed by MoonBit
@@ -133,6 +133,17 @@ extern "js" fn mkdtemp_sync(prefix : String) -> String = "mkdtempSync"
 ///|
 #module("node:os")
 extern "js" fn os_tmpdir() -> String = "tmpdir"
+
+///|
+#module("node:os")
+extern "js" fn os_homedir() -> String = "homedir"
+
+///|
+/// The user's home directory (`os.homedir()`, which resolves `HOME` on POSIX
+/// and `USERPROFILE` on Windows). 
+pub fn home_dir() -> String {
+  os_homedir()
+}
 
 ///|
 #module("node:path")

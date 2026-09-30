@@ -42,13 +42,18 @@ async fn main {
       match m {
         "text" => Text
         "json" => Json
+        "rpc" => fatal("Error: mode 'rpc' is not supported yet")
         _ => fatal("Error: invalid mode '\{m}' (expected text or json)")
       }
     _ => Text
   }
-  let deepseek = @providers.DeepSeekProvider()
-  // provider 构造失败(如缺 DEEPSEEK_API_KEY)是诊断,按输出流契约走 stderr;
-  // 剥离 MoonBit 的 Failure(<loc> FAILED: msg) 包装,保留干净消息。
+  let api_key = resolve_deepseek_api_key() catch {
+    AuthConfigError(message) => fatal("Error: \{message}")
+  }
+  let deepseek = match api_key {
+    Some(api_key) => @providers.DeepSeekProvider(api_key~)
+    None => fatal("Error: \{missing_api_key_message()}")
+  }
   let thinking = match matches.values.get("thinking") {
     Some([level, ..]) => {
       guard level is ("low" | "high" | "max") else {
@@ -60,9 +65,7 @@ async fn main {
     }
     _ => "high"
   }
-  let llm = deepseek.new_llm("deepseek-v4-flash", thinking~) catch {
-    err => fatal("Error: \{clean_error_message("\{err}")}")
-  }
+  let llm = deepseek.new_llm("deepseek-v4-flash", thinking~)
   let cwd = @env.current_dir().unwrap()
   let session_dir = match matches.values.get("session_dir") {
     Some(dirs) if dirs.length() > 0 => Some(dirs[0])

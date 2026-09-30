@@ -35,11 +35,20 @@ fn retryable_status(code : Int) -> Bool {
 }
 
 ///|
-struct DeepSeekProvider {}
+///
+/// The key is injected by the caller instead of being read from the
+/// environment here, so credential resolution lives in `cmd/pim` (and, later,
+/// wherever `auth.json` is read). Temporary shape: once the stream-facing auth
+/// seam exists this field likely moves to per-request options.
+struct DeepSeekProvider {
+  api_key : String
+}
 
 ///|
-pub fn DeepSeekProvider::DeepSeekProvider() -> DeepSeekProvider {
-  DeepSeekProvider::{ }
+pub fn DeepSeekProvider::DeepSeekProvider(
+  api_key~ : String,
+) -> DeepSeekProvider {
+  { api_key, }
 }
 
 ///|
@@ -48,11 +57,7 @@ pub impl LLMProvider for DeepSeekProvider with fn new_llm(
   model_id,
   thinking? : String = "high",
 ) {
-  ignore(self)
-  guard @env.get_env_var("DEEPSEEK_API_KEY") is Some(api_key) else {
-    fail("miss DEEPSEEK_API_KEY")
-  }
-  DeepSeekResponsesAPILLM(api_key, model_id~, thinking~)
+  DeepSeekResponsesAPILLM(self.api_key, model_id~, thinking~)
 }
 
 ///|
