@@ -9,6 +9,7 @@ import {
   "KKKIIO/pi/sdk/providers",
   "KKKIIO/pi/sdk/agent_loop",
   "KKKIIO/pi/sdk/agent_session",
+  "KKKIIO/pi/tui_app",
 }
 
 pkgtype(kind: "executable")

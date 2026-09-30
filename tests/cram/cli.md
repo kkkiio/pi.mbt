@@ -59,13 +59,14 @@ Error: no session matches 'xyz'
 
 真正「落盘 / 续写」的路径要跑完一轮模型才能观察,因此归 `tests/live/`。
 
-## 没有 -p
+## 非终端且没有 -p
 
-print 模式必须有提示词 —— 诊断写入 stderr,退出码为 1:
+没有 `-p` 时:stdin/stdout 都是终端才进全屏 TUI,否则(这里是 cram 的非终端环境)
+按 print 模式处理,而 print 模式必须有提示词 —— 诊断写入 stderr,退出码为 1:
 
 ```mooncram {output_stream: stderr}
 $ moon run cmd/pim --
-Error: only '-p' support for now
+Error: no prompt (pass -p <prompt>, or run in a terminal for the TUI)
 [1]
 ```
 

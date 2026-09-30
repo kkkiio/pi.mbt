@@ -50,8 +50,13 @@ async fn main {
       }
     _ => Text
   }
-  if prompts.length() == 0 {
-    fatal("Error: only '-p' support for now")
+  let interactive = prompts.length() == 0 &&
+    @tui_app.stdin_is_tty() &&
+    @tui_app.stdout_is_tty()
+  if !interactive && prompts.length() == 0 {
+    fatal(
+      "Error: no prompt (pass -p <prompt>, or run in a terminal for the TUI)",
+    )
   }
   let no_session = matches.flags.get("no_session").unwrap_or(false)
   let continue_session = matches.flags.get("continue").unwrap_or(false)
@@ -131,6 +136,13 @@ async fn main {
         }
       }
     }
+  }
+  // TUI 模式:会话(含 journal)由 tui_app 的 SessionHost 负责,这里不再自建。
+  if interactive {
+    @tui_app.run(llm, "deepseek-v4-flash", cwd, thinking, session_dir, resume_path~) catch {
+      err => fatal("Error: \{clean_error_message("\{err}")}")
+    }
+    return
   }
   // 续写已有会话,否则开新的。两条路都用延迟打开的 writer:没有任何条目写出时,
   // 磁盘上不会留下文件(见 `JsonlSessionJournal` 的 flush 规则)。
