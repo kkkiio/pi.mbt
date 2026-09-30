@@ -431,3 +431,84 @@ pub extend FsFile with @io.Writer::{write_once, write, write_reader}
 pub fn FsFile::close(self : FsFile) -> Unit {
   close_sync(self.fd)
 }
+
+///|
+/// Open `path` for appending, creating it when absent.
+///
+/// Unlike `create_file`, an existing file is never truncated — this is how a
+/// resumed session keeps writing after its recorded entries.
+pub fn open_append_file(
+  path : String,
+  permission? : Int = 0o600,
+) -> FsFile raise FsError {
+  let res = open_file_ffi(open_sync, path, "a", permission)
+  guard res.is_ok() else { raise FsError(res.as_message()) }
+  { fd: res.as_int(), }
+}
+
+///|
+/// 延迟打开的会话文件:第一次写入时才创建/打开。
+///
+/// 会话在启动时就构造 journal,但用户可能一句话都没说(或第一轮就失败)。
+/// 早开文件会留下一堆空会话,`/resume` 也会挑中它们——所以在真正有东西可写之前,
+/// 不碰文件系统。
+pub struct LazyFile {
+  path : String
+  append : Bool
+  permission : Int
+  mut file : FsFile?
+}
+
+///|
+/// `append=false` 时首次写入独占创建(已存在则报错),`append=true` 时首次写入
+/// 追加到已有文件(续写已恢复的会话)。
+pub fn open_lazy_file(
+  path : String,
+  append? : Bool = false,
+  permission? : Int = 0o600,
+) -> LazyFile {
+  { path, append, permission, file: None, }
+}
+
+///|
+/// 第一次需要写入时打开底层文件。
+fn LazyFile::ensure_open(self : LazyFile) -> FsFile raise FsError {
+  match self.file {
+    Some(file) => file
+    None => {
+      let file = if self.append {
+        open_append_file(self.path, permission=self.permission)
+      } else {
+        create_file(self.path, permission=self.permission)
+      }
+      self.file = Some(file)
+      file
+    }
+  }
+}
+
+///|
+/// 没写过任何东西时关闭是空操作(文件也没被创建)。
+pub fn LazyFile::close(self : LazyFile) -> Unit {
+  match self.file {
+    Some(file) => file.close()
+    None => ()
+  }
+  self.file = None
+}
+
+///|
+#warnings("-unused_async")
+pub impl @io.Writer for LazyFile with fn write_once(
+  self : LazyFile,
+  bytes : Bytes,
+  offset~ : Int,
+  len~ : Int,
+) -> Int {
+  let file = self.ensure_open()
+  file.write_bytes(bytes[offset:offset + len].to_owned())
+  len
+}
+
+///|
+pub extend LazyFile with @io.Writer::{write_once, write, write_reader}

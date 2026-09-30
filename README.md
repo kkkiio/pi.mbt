@@ -37,6 +37,11 @@ pim -p "What's the capital of France? Respond with only the city name." --mode j
 | `PIM_CONFIG_DIR`  | 配置目录,默认 `~/.pim`                               |
 | `PIM_SESSION_DIR` | 会话 JSONL 目录(等价于 `--session-dir`) |
 
+会话默认落盘:不设 `PIM_SESSION_DIR`/`--session-dir` 时,提示词与工具输出会
+持久化到 `~/.pim/sessions/` 下(同时创建会话目录)。不想落盘(如敏感内容、
+一次性调试)请传 `--no-session`。多轮会话用 `--continue`(接着最近一次)或
+`--resume <前缀>`。
+
 ### 认证配置
 
 认证优先使用文件配置 `~/.pim/auth.json`:

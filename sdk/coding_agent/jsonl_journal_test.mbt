@@ -258,19 +258,25 @@ async test "persists various entries in memory and as JSONL" {
 }
 
 ///|
-/// `fetch_entries` parses a journal file back into the same entry shape that
-/// the writer emitted.
-async test "fetch_entries reads persisted entries from disk" {
+/// Resuming appends to the file that is already there: the header is not
+/// written twice, and `fetch_entries` reads back what the append stored.
+async test "appending to an existing journal keeps its header" {
   let temp_dir = @coding_agent.create_temp_dir(
     "pim-jsonl-session-journal-test-",
   )
   let path = "\{temp_dir}/journal.jsonl"
-  let file = @coding_agent.create_file(path, allow_existing=true)
+  // 续写已有会话:header 已经在文件里了。
+  @coding_agent.write_bytes_file(
+    path,
+    b"{\"kind\":\"header\",\"version\":4,\"id\":\"hdr\",\"createdAt\":1,\"cwd\":\"/tmp\"}\n",
+  )
+  let file = @coding_agent.open_append_file(path)
   let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
     file,
     rand=@random.Rand::chacha8(),
     cwd="/tmp",
     now=() => 7,
+    fresh=false,
   )
   let _stored = journal.append([
     {
@@ -295,4 +301,64 @@ async test "fetch_entries reads persisted entries from disk" {
   })
   @coding_agent.remove_file(path)
   @coding_agent.remove_dir(temp_dir)
+}
+
+///|
+/// Until the session has an assistant message nothing reaches the writer, so a
+/// first turn that never completed leaves no bytes — and, with a lazily opened
+/// file, no file — behind.
+async test "a journal stays in memory until the first assistant message" {
+  let writer = BufferWriter::BufferWriter()
+  let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
+    writer,
+    rand=@random.Rand::chacha8(),
+    cwd="/workspaces/pi.mbt",
+    now=() => 1786903823973,
+  )
+  let user_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::User({
+    content: [@agent_loop.InputMessageContent::Text("hello")],
+    timestamp: 1786903823973,
+  })
+  let assistant_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::Assistant({
+    content: [
+      @agent_loop.AssistantMessageContent::Text("hi", signature={
+        "type": "message",
+        "id": "msg_1",
+      }),
+    ],
+    api: "openai-responses",
+    provider: "deepseek",
+    model: "deepseek-v4-flash",
+    stop_reason: @agent_loop.StopReason::Stop,
+    error_message: None,
+    usage: None,
+    timestamp: 1786903823973,
+  })
+  ignore(
+    journal.append([
+      {
+        id: "u1",
+        content: @agent_session.SessionEntryContent::Message(user_message),
+      },
+    ]),
+  )
+  inspect(writer_text(writer), content="")
+  ignore(
+    journal.append([
+      {
+        id: "a1",
+        content: @agent_session.SessionEntryContent::Message(assistant_message),
+      },
+    ]),
+  )
+  // 第一条 assistant 到了:header 与已缓冲的条目一次性写出。
+  inspect(
+    writer_text(writer),
+    content=(
+      #|{"kind":"header","version":4,"id":"13219109","createdAt":1786903823973,"cwd":"/workspaces/pi.mbt"}
+      #|{"kind":"entry","lane":"main","id":"u1","seq":1,"parentId":null,"timestamp":1786903823973,"type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}],"timestamp":1786903823973}}
+      #|{"kind":"entry","lane":"main","id":"a1","seq":2,"parentId":"u1","timestamp":1786903823973,"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"hi","textSignature":"{\"type\":\"message\",\"id\":\"msg_1\"}"}],"api":"openai-responses","provider":"deepseek","model":"deepseek-v4-flash","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":1786903823973}}
+      #|
+    ),
+  )
 }

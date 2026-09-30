@@ -18,11 +18,46 @@ Usage: pim [options]
 
 Options:
   -h, --help                   Show help information.
+  -c, --continue               continue the most recent session
+  --no-session                 don't save the session (ephemeral)
   -p, --print <print>          prompt text
-  --session-dir <session_dir>  directory to store session JSONL files [env: PIM_SESSION_DIR]
+  -r, --resume <resume>        continue the session whose name starts with this prefix
+  --session-dir <session_dir>  directory to store session JSONL files (default: <config>/sessions/<cwd>) [env: PIM_SESSION_DIR]
   --mode <mode>                output mode: text or json (default text)
   --thinking <thinking>        thinking effort level: low, high (default), or max
 ```
+
+## 会话参数
+
+会话默认落盘到 `<config>/sessions/--<cwd 转义>--/`,`--no-session` 关闭落盘,
+`-c` 续写最新会话、`-r <前缀>` 按名字前缀续写。
+
+两个参数互斥,这一条在参数阶段就被拒绝 —— 不读凭证、不碰网络:
+
+```mooncram {output_stream: stderr}
+$ moon run cmd/pim -- --no-session -c -p hi
+Error: --no-session cannot be combined with --continue/--resume
+[1]
+```
+
+`-c` 与 `-r` 同理互斥 —— 隐式让其中一个优先会无声忽略用户指定的选择器:
+
+```mooncram {output_stream: stderr}
+$ moon run cmd/pim -- -c -r xyz -p hi
+Error: --continue cannot be combined with --resume
+[1]
+```
+
+`-r` 找不到会话同样是错误。这里把 `PIM_CONFIG_DIR` 指向空的配置目录,默认会话
+目录下自然一个会话都没有,所以**不需要新增任何 fixture**:
+
+```mooncram {output_stream: stderr}
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-absent DEEPSEEK_API_KEY=sk-fake moon run cmd/pim -- -r xyz -p hi
+Error: no session matches 'xyz'
+[1]
+```
+
+真正「落盘 / 续写」的路径要跑完一轮模型才能观察,因此归 `tests/live/`。
 
 ## 没有 -p
 

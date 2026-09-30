@@ -14,22 +14,35 @@ pub struct JsonlSessionJournal[W] {
   ids : Set[String]
   rand : @random.Rand
   lane : String
+  cwd : String
   mut seq : Int
   mut leaf_id : String?
+  /// 构造时已存在的条目数(已落盘)。flush 只写这个下标之后的条目。
+  start_index : Int
+  /// 是否已经开始落盘。`false` 时新条目只在内存里。
+  mut flushed : Bool
   now : () -> UInt64
 }
 
 ///|
-/// Create a new JSONL session journal that writes to the given `writer`.
-/// A session header line is written immediately. The caller is responsible for
-/// any parent directories, filename choice, and closing `writer` when done.
-pub async fn[W : @io.Writer] JsonlSessionJournal::JsonlSessionJournal(
+/// Create a JSONL session journal that writes to the given `writer`.
+///
+/// Nothing is written — and, when `writer` is a `LazyFile`, no file is even
+/// created — until the session has an assistant message, mirroring pi's
+/// `_persist`: a session that never got a reply leaves no trace on disk.
+/// The header is written at that first flush, so a resumed session passes
+/// `fresh=false` and appends straight to the entries already on file.
+///
+/// The caller is responsible for any parent directories, filename choice, and
+/// closing `writer` when done.
+pub fn[W] JsonlSessionJournal::JsonlSessionJournal(
   writer : W,
   entries? : Array[@agent_session.SessionEntry] = [],
   rand? : @random.Rand = @random.Rand::new(),
   cwd? : String = @env.current_dir().unwrap_or(""),
   now? : () -> UInt64 = @env.now,
   lane? : String = "main",
+  fresh? : Bool = true,
 ) -> JsonlSessionJournal[W] {
   let ids = Set([])
   let mut seq = 0
@@ -41,16 +54,7 @@ pub async fn[W : @io.Writer] JsonlSessionJournal::JsonlSessionJournal(
     }
     leaf_id = Some(entry.id)
   }
-  let header : Json = {
-    "kind": "header",
-    "version": 4,
-    "id": make_id(rand, ids),
-    "createdAt": Json::number(now().to_double()),
-    "cwd": cwd,
-  }
-  writer.write(header.stringify())
-  writer.write("\n")
-  { writer, entries, ids, rand, lane, seq, leaf_id, now, }
+  { writer, entries, ids, rand, lane, cwd, seq, leaf_id, start_index: entries.length(), flushed: !fresh, now, }
 }
 
 ///|
@@ -72,6 +76,10 @@ pub extend JsonlSessionJournal with @agent_session.SessionJournal::{
 }
 
 ///|
+/// Append entries, flushing lazily like pi's `_persist`: until the buffer holds
+/// an assistant message nothing reaches the writer —— 配合惰性打开的 writer,
+/// 文件也不会被创建。第一轮没跑完的会话因此不会在磁盘上留下痕迹。
+/// 首次 flush 写出 header + 全部缓冲条目,之后的条目随即追加。
 pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
   W,
 ] with fn append(self, provisioned) {
@@ -89,10 +97,44 @@ pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
     self.ids.add(p.id)
     self.entries.push(entry)
     stored.push(entry)
-    self.writer.write(entry_mutation_json(entry, self.lane).stringify())
-    self.writer.write("\n")
+    if self.flushed {
+      self.writer.write(entry_mutation_json(entry, self.lane).stringify())
+      self.writer.write("\n")
+    } else if self.has_assistant() {
+      let header : Json = {
+        "kind": "header",
+        "version": 4,
+        "id": make_id(self.rand, self.ids),
+        "createdAt": Json::number((self.now)().to_double()),
+        "cwd": self.cwd,
+      }
+      self.writer.write(header.stringify())
+      self.writer.write("\n")
+      // 只写本次新增的;构造时传入的条目已经在盘上了。
+      for i in self.start_index..<self.entries.length() {
+        self.writer.write(entry_mutation_json(self.entries[i], self.lane).stringify())
+        self.writer.write("\n")
+      }
+      // 在批次内也要立刻置位,否则同一批的下一条会再 flush 一次。
+      self.flushed = true
+    }
   }
   stored
+}
+
+///|
+/// 本次新增的条目里是否已经有 assistant 消息(pi 用它决定何时创建文件)。
+/// 只在未 flush 时调用,那时新条目最多几条用户消息,扫描成本可忽略。
+fn[W] JsonlSessionJournal::has_assistant(
+  self : JsonlSessionJournal[W],
+) -> Bool {
+  for i in self.start_index..<self.entries.length() {
+    match self.entries[i].content {
+      Message(Assistant(_)) => return true
+      _ => ()
+    }
+  }
+  false
 }
 
 ///|

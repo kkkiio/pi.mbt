@@ -96,3 +96,29 @@ fn resolve_deepseek_api_key() -> String? raise AuthConfigError {
       }
   }
 }
+
+///|
+/// 把 cwd 转成安全的目录名,与 pi `getDefaultSessionDir` 同规则:
+/// 去掉前导分隔符,再把 `/ \ :` 换成 `-`,外包一层 `--`。
+fn encode_cwd(cwd : String) -> String {
+  let chars = cwd.to_array()
+  let mut start = 0
+  while start < chars.length() && (chars[start] == '/' || chars[start] == '\\') {
+    start += 1
+  }
+  let out = StringBuilder()
+  for i in start..<chars.length() {
+    match chars[i] {
+      '/' | '\\' | ':' => out.write_string("-")
+      c => out.write_char(c)
+    }
+  }
+  "--\{out.to_string()}--"
+}
+
+///|
+/// 默认会话目录:`<config_dir>/sessions/--<cwd 转义>--`。
+/// 未显式给 `--session-dir` / `PIM_SESSION_DIR` 时,会话按 cwd 分桶落盘。
+fn default_session_dir(cwd : String) -> String {
+  "\{config_dir()}/sessions/\{encode_cwd(cwd)}"
+}
