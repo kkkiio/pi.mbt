@@ -250,9 +250,7 @@ async test "session prompt emits pi's event order" {
       },
     )
   })
-  session.prompt([
-    user_message("hi"),
-  ])
+  session.prompt([user_message("hi")])
   assert_eq(events, [
     "agent_start", "turn_start", "message_start:user", "message_end:user", "message_start:assistant",
     "message_end:assistant", "turn_end", "agent_end",
@@ -309,9 +307,7 @@ async test "mid-stream events before Start are dropped" {
       },
     )
   })
-  session.prompt([
-    user_message("hi"),
-  ])
+  session.prompt([user_message("hi")])
   assert_eq(events, [
     "agent_start", "turn_start", "message_start:user", "message_end:user", "message_start:assistant",
     "message_end:assistant", "turn_end", "agent_end",
@@ -378,11 +374,9 @@ async test "session interrupt ends the turn as aborted and journals it" {
   @async.with_task_group() <| group => {
     group.spawn_bg(async fn() {
       @async.sleep(20)
-      session.interrupt()
+      session.abort()
     })
-    session.prompt([
-      user_message("hi"),
-    ])
+    session.prompt([user_message("hi")])
   }
   let messages = journal
     .get_entries()
@@ -478,9 +472,7 @@ async test "session offers only its active tools to the model" {
     tool_registry=registry,
     active_tools=["read"],
   )
-  session.prompt([
-    user_message("hi"),
-  ])
+  session.prompt([user_message("hi")])
   assert_eq(seen, ["read"])
   assert_eq(session.active_tool_names(), ["read"])
   session.set_active_tools(["bash", @agent_session.WEB_SEARCH_TOOL_NAME])
@@ -488,9 +480,7 @@ async test "session offers only its active tools to the model" {
     "bash",
     @agent_session.WEB_SEARCH_TOOL_NAME,
   ])
-  session.prompt([
-    user_message("hi", timestamp=1786903823974),
-  ])
+  session.prompt([user_message("hi", timestamp=1786903823974)])
   assert_eq(seen, ["bash", @agent_session.WEB_SEARCH_TOOL_NAME])
 }
 
@@ -507,9 +497,7 @@ async test "activating an unregistered tool fails at prompt time" {
     active_tools=["bash", "web_search"],
   )
   let error_text = try {
-    session.prompt([
-      user_message("hi"),
-    ])
+    session.prompt([user_message("hi")])
     ""
   } catch {
     err => err.to_string()
@@ -518,23 +506,59 @@ async test "activating an unregistered tool fails at prompt time" {
 }
 
 ///|
-/// `on_abort` is pi's `signal.addEventListener("abort")`: handlers registered
-/// before the abort fire once on abort, handlers registered after fire
-/// immediately, and the signal stays idempotent.
-test "AbortSignal on_abort fires once, immediately when already aborted" {
+/// 已中断的信号上等待立即返回(不挂起),且重复 `abort` 仍然幂等。
+async test "wait_abort returns immediately when already aborted" {
   let controller = @agent_loop.AbortController::new()
   let signal = controller.signal()
-  let fired : Array[String] = []
-  signal.on_abort(() => fired.push("before"))
-  assert_eq(fired, [])
+  assert_false(signal.is_aborted())
   controller.abort()
-  assert_eq(fired, ["before"])
-  // 幂等:重复 abort 不再触发已消费的订阅。
+  assert_true(signal.is_aborted())
+  signal.wait_abort()
   controller.abort()
-  assert_eq(fired, ["before"])
-  // 已中断:登记时立即同步调用。
-  signal.on_abort(() => fired.push("after"))
-  assert_eq(fired, ["before", "after"])
+  assert_true(signal.is_aborted())
+}
+
+///|
+/// 广播唤醒全部等待者。
+async test "wait_abort wakes every waiter on abort" {
+  let controller = @agent_loop.AbortController::new()
+  let signal = controller.signal()
+  let woken : Array[String] = []
+  @async.with_task_group() <| group => {
+    for name in ["a", "b"] {
+      group.spawn_bg() <| () => {
+        signal.wait_abort()
+        woken.push(name)
+      }
+    }
+    @async.sleep(50)
+    assert_eq(woken, [])
+    controller.abort()
+  }
+  assert_eq(woken, ["a", "b"])
+}
+
+///|
+/// 等待被取消(超时)时不消费这次中断,也不留在等待队列里。
+async test "a cancelled wait_abort does not consume the abort signal" {
+  let controller = @agent_loop.AbortController::new()
+  let signal = controller.signal()
+  let log : Array[String] = []
+  @async.with_task_group() <| group => {
+    group.spawn_bg() <| () => {
+      @async.with_timeout(50, () => signal.wait_abort()) catch {
+        _ => log.push("cancelled")
+      }
+    }
+    group.spawn_bg() <| () => {
+      @async.sleep(80)
+      signal.wait_abort()
+      log.push("woken")
+    }
+    @async.sleep(150)
+    controller.abort()
+  }
+  assert_eq(log, ["cancelled", "woken"])
 }
 
 ///|
@@ -617,11 +641,9 @@ async test "interrupt during a running tool cancels it and records aborted resul
   @async.with_task_group() <| group => {
     group.spawn_bg(async fn() {
       @async.sleep(20)
-      session.interrupt()
+      session.abort()
     })
-    session.prompt([
-      user_message("go"),
-    ])
+    session.prompt([user_message("go")])
   }
   // 运行中的工具被取消,`defer` 清理已执行;批内后续调用不执行。
   assert_eq(log, ["cleanup"])
@@ -684,6 +706,87 @@ fn probe_tools(log : Array[String]) -> @tools.ToolRegistry {
 }
 
 ///|
+/// 每个事件一行 JSON(与 `--mode json` 同一个 `ToJson`),过滤掉流式增量。
+fn event_lines(events : Array[@agent_session.AgentSessionEvent]) -> String {
+  events
+  .filter(event => !(event is Loop(MessageUpdate(_))))
+  .map(event => event.to_json().stringify())
+  .join("\n")
+}
+
+///|
+/// 同一次 prompt 内发生两次"错误 → 恢复":每次恢复都结束当前重试窗口并归零,
+/// 所以第二次失败又从 `attempt=1` 开始(pi 在 `message_end` 上重置的契约)。
+async test "auto-retry window resets after each successful response" {
+  let tool_runs : Array[String] = []
+  let registry = probe_tools(tool_runs)
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([
+    @faux.faux_message(
+      [],
+      stop_reason=@agent_loop.StopReason::Error,
+      error_message=Some("overloaded_error"),
+    ),
+    @faux.faux_message(
+      [@faux.faux_tool_call("probe", {}, id="call-probe")],
+      stop_reason=@agent_loop.StopReason::ToolUse,
+    ),
+    @faux.faux_message(
+      [],
+      stop_reason=@agent_loop.StopReason::Error,
+      error_message=Some("rate limit exceeded"),
+    ),
+    @faux.faux_message([@faux.faux_text("done")]),
+  ])
+  let session = @agent_session.AgentSession(
+    llm,
+    system_prompt="",
+    tool_registry=registry,
+    active_tools=["probe"],
+  )
+  let events : Array[@agent_session.AgentSessionEvent] = []
+  session.subscribe(event => events.push(event))
+  session.prompt([user_message("go")])
+  assert_eq(tool_runs, ["probe"])
+  assert_eq(llm.pending_responses(), 0)
+  inspect(
+    event_lines(events),
+    content=(
+      #|{"type":"agent_start"}
+      #|{"type":"turn_start"}
+      #|{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"go"}],"timestamp":1786903823973}}
+      #|{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"go"}],"timestamp":1786903823973}}
+      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","errorMessage":null,"usage":null,"timestamp":0}}
+      #|{"type":"message_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","errorMessage":"overloaded_error","usage":null,"timestamp":0}}
+      #|{"type":"turn_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","errorMessage":"overloaded_error","usage":null,"timestamp":0},"toolCalls":[]}
+      #|{"type":"agent_end"}
+      #|{"type":"auto_retry_start","attempt":1,"maxAttempts":2,"delayMs":500,"errorMessage":"overloaded_error"}
+      #|{"type":"agent_start"}
+      #|{"type":"turn_start"}
+      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","errorMessage":null,"usage":null,"timestamp":0}}
+      #|{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-probe","name":"probe","arguments":{},"thoughtSignature":"{}"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"toolUse","errorMessage":null,"usage":null,"timestamp":0}}
+      #|{"type":"auto_retry_end","success":true,"attempt":1,"finalError":null}
+      #|{"type":"tool_execution_start","toolName":"probe","args":{}}
+      #|{"type":"tool_execution_end","toolName":"probe","content":[{"type":"text","text":"probe-ok"}],"isError":false}
+      #|{"type":"turn_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-probe","name":"probe","arguments":{},"thoughtSignature":"{}"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"toolUse","errorMessage":null,"usage":null,"timestamp":0},"toolCalls":["probe"]}
+      #|{"type":"turn_start"}
+      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","errorMessage":null,"usage":null,"timestamp":0}}
+      #|{"type":"message_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","errorMessage":"rate limit exceeded","usage":null,"timestamp":0}}
+      #|{"type":"turn_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","errorMessage":"rate limit exceeded","usage":null,"timestamp":0},"toolCalls":[]}
+      #|{"type":"agent_end"}
+      #|{"type":"auto_retry_start","attempt":1,"maxAttempts":2,"delayMs":500,"errorMessage":"rate limit exceeded"}
+      #|{"type":"agent_start"}
+      #|{"type":"turn_start"}
+      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","errorMessage":null,"usage":null,"timestamp":0}}
+      #|{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done","textSignature":"{}"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":0}}
+      #|{"type":"auto_retry_end","success":true,"attempt":1,"finalError":null}
+      #|{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"done","textSignature":"{}"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":0},"toolCalls":[]}
+      #|{"type":"agent_end"}
+    ),
+  )
+}
+
+///|
 /// The normal path: a tool that completes without any interrupt must let
 /// `prompt` return and must be journaled as a real result.
 ///
@@ -720,9 +823,7 @@ async test "a completing tool call returns and records its result" {
       @async.sleep(2000)
       group.return_immediately(false)
     }
-    session.prompt([
-      user_message("go"),
-    ])
+    session.prompt([user_message("go")])
     true
   }
   assert_true(finished)
@@ -770,7 +871,7 @@ async test "interrupt cancels retry backoff without starting another attempt" {
       group.spawn_bg(no_wait=true) <| async fn() {
         started.acquire()
         @async.sleep(20)
-        session.interrupt()
+        session.abort()
         @async.sleep(200)
         group.return_immediately(false)
       }
@@ -802,7 +903,7 @@ async test "interrupt during a retried generation reports a cancelled retry" {
       Loop(MessageStart(Assistant(_))) => {
         starts += 1
         if starts == 2 {
-          session.interrupt()
+          session.abort()
         }
       }
       AutoRetryEnd(attempt~, success~, final_error~) =>

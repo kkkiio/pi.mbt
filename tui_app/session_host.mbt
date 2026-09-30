@@ -73,7 +73,9 @@ fn SessionHost::close_current(self : SessionHost) -> Unit {
 
 ///|
 /// 换一个全新会话(关掉旧 journal)。
-pub fn SessionHost::new_session(self : SessionHost) -> Unit raise @coding_agent.FsError {
+pub fn SessionHost::new_session(
+  self : SessionHost,
+) -> Unit raise @coding_agent.FsError {
   let active_tools = self.session.active_tool_names()
   self.close_current()
   let (journal, close_journal, session_path) = open_journal(self.session_dir)
@@ -98,7 +100,7 @@ pub fn SessionHost::close(self : SessionHost) -> Unit {
 ///|
 /// 中断当前运行(ESC 且 agent 在跑时由视图层调用)。
 pub fn SessionHost::interrupt(self : SessionHost) -> Unit {
-  self.session.interrupt()
+  self.session.abort()
 }
 
 ///|
@@ -184,11 +186,11 @@ pub fn SessionHost::load_session(
   let active_tools = self.session.active_tool_names()
   self.close_current()
   let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
-    file,
-    entries~,
-    fresh=false,
-  )
-  as &@agent_session.SessionJournal
+      file,
+      entries~,
+      fresh=false,
+    )
+    as &@agent_session.SessionJournal
   self.close_journal = () => file.close()
   self.session_path = Some(path)
   self.session = @coding_agent.new_coding_session(
@@ -223,10 +225,7 @@ fn session_stem(path : String) -> String {
 ///
 /// 只渲染会出现在消息流里的内容;`ModelChange` / `Compaction` / `Custom`
 /// 本期不渲染。
-fn replay(
-  entries : Array[@agent_session.SessionEntry],
-  app : TuiApp,
-) -> Unit {
+fn replay(entries : Array[@agent_session.SessionEntry], app : TuiApp) -> Unit {
   for entry in entries {
     match entry.content {
       Message(User(message)) =>
@@ -274,7 +273,10 @@ fn replay_assistant(
   if !text.is_empty() {
     app.assistant_delta(text, false)
   }
-  app.assistant_end(stop_reason_name(message.stop_reason), message.error_message)
+  app.assistant_end(
+    stop_reason_name(message.stop_reason),
+    message.error_message,
+  )
   for call in calls {
     app.tool_call(call.name, call.arguments, id=call.id)
   }

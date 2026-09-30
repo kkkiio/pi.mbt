@@ -108,6 +108,7 @@ pub fn faux_tool_call(
 pub fn faux_message(
   content : Array[@agent_loop.AssistantMessageContent],
   stop_reason? : @agent_loop.StopReason = @agent_loop.StopReason::Stop,
+  error_message? : String? = None,
   api? : String = "faux",
   provider? : String = "faux",
   model? : String = "faux-1",
@@ -119,7 +120,7 @@ pub fn faux_message(
     provider,
     model,
     stop_reason,
-    error_message: None,
+    error_message,
     usage: None,
     timestamp,
   }

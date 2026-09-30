@@ -9,14 +9,13 @@
 /// 因此控制器与它发出的信号共享同一个对象(置位立即可见)。
 pub struct AbortSignal {
   mut flag : Bool
-  /// `on_abort` 登记的回调,`abort()` 触发时清空。
-  mut listeners : Array[() -> Unit]
+  cond : @cond_var.Cond
 }
 
 ///|
 /// 永远不会被中断的信号(调用方不关心中断时的默认值)。
 pub fn AbortSignal::never() -> AbortSignal {
-  AbortSignal::{ flag: false, listeners: [], }
+  AbortSignal::{ flag: false, cond: @cond_var.Cond::Cond(), }
 }
 
 ///|
@@ -25,26 +24,11 @@ pub fn AbortSignal::is_aborted(self : AbortSignal) -> Bool {
 }
 
 ///|
-/// 订阅中断:若已中断,立即同步调用一次 `handler`;否则登记,待 `abort()` 时调用。
-///
-/// 对应 Web / pi 的 `signal.addEventListener("abort", handler)`。回调是同步的
-/// (可能在任意协程、甚至 JS 回调里被触发),需要挂起协程请改用 `wait_abort`。
-pub fn AbortSignal::on_abort(self : AbortSignal, handler : () -> Unit) -> Unit {
-  if self.flag {
-    handler()
-  } else {
-    self.listeners.push(handler)
-  }
-}
-
-///|
-/// 挂起当前协程直到中断被请求(已中断则立即返回)。事件驱动,不轮询;
-/// 当前协程被取消时这次等待一并取消。
+/// 挂起当前协程直到中断被请求(已中断则立即返回)。
 pub async fn AbortSignal::wait_abort(self : AbortSignal) -> Unit {
-  guard !self.flag else { return }
-  let gate = @async.Semaphore::Semaphore(1, initial_value=0)
-  self.on_abort(() => gate.release())
-  gate.acquire()
+  while !self.flag {
+    self.cond.wait()
+  }
 }
 
 ///|
@@ -54,7 +38,9 @@ pub struct AbortController {
 
 ///|
 pub fn AbortController::new() -> AbortController {
-  AbortController::{ signal: AbortSignal::{ flag: false, listeners: [], }, }
+  AbortController::{
+    signal: AbortSignal::{ flag: false, cond: @cond_var.Cond::Cond(), },
+  }
 }
 
 ///|
@@ -64,15 +50,11 @@ pub fn AbortController::signal(self : AbortController) -> AbortSignal {
 }
 
 ///|
-/// 请求中断(幂等):置位后一次性触发所有 `on_abort` 订阅。
+/// 请求中断(幂等):置位后广播唤醒全部等待者。
 pub fn AbortController::abort(self : AbortController) -> Unit {
   if self.signal.flag {
     return
   }
   self.signal.flag = true
-  let listeners = self.signal.listeners
-  self.signal.listeners = []
-  for handler in listeners {
-    handler()
-  }
+  self.signal.cond.broadcast()
 }

@@ -94,7 +94,7 @@ async test "aborting a running bash tool kills the command and records an aborte
   @async.with_task_group() <| group => {
     group.spawn_bg(async fn() {
       @async.sleep(300)
-      session.interrupt()
+      session.abort()
     })
     session.prompt([
       @agent_loop.UserMessage::{
