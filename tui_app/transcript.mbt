@@ -16,8 +16,8 @@ enum TranscriptItem {
   Error(String)
   /// assistant 消息:text, thinking, stop_reason, error_message。
   Assistant(String, String, String?, String?)
-  /// 工具调用 + 可选结果:name, args, result, is_error。
-  Tool(String, Json, String?, Bool)
+  /// 工具调用 + 可选结果:name, args, result, is_error;按 call id 配对。
+  Tool(String, Json, String?, Bool, id~ : String)
 }
 
 ///|
@@ -139,28 +139,34 @@ pub fn Transcript::push_tool_call(
   self : Transcript,
   name : String,
   arguments : Json,
+  id~ : String,
 ) -> Unit {
-  self.push_item(TranscriptItem::Tool(keep_text(name), arguments, None, false))
+  self.push_item(
+    TranscriptItem::Tool(keep_text(name), arguments, None, false, id~),
+  )
 }
 
 ///|
-/// 把结果回填到最后一条同名、尚无结果的工具调用;找不到就补一条只有结果的。
+/// 按 call id 回填工具结果;调用已被裁掉时补一条只有结果的记录。
 pub fn Transcript::push_tool_result(
   self : Transcript,
   name : String,
   text : String,
   is_error : Bool,
+  id~ : String,
 ) -> Unit {
   let mut index = self.items.length()
   while index > 0 {
     index -= 1
     match self.items[index] {
-      TranscriptItem::Tool(tool_name, arguments, None, _) if tool_name == name => {
+      TranscriptItem::Tool(tool_name, arguments, None, _, id=call_id) if call_id ==
+        id => {
         self.items[index] = TranscriptItem::Tool(
-          name,
+          tool_name,
           arguments,
           Some(keep_text(text)),
           is_error,
+          id~,
         )
         return
       }
@@ -173,6 +179,7 @@ pub fn Transcript::push_tool_result(
       Json::empty_object(),
       Some(keep_text(text)),
       is_error,
+      id~,
     ),
   )
 }
@@ -306,7 +313,7 @@ fn render_item(
       render_assistant(
         transcript, text, thinking, stop_reason, error_message, width,
       )
-    TranscriptItem::Tool(name, arguments, result, is_error) =>
+    TranscriptItem::Tool(name, arguments, result, is_error, ..) =>
       render_tool(transcript, name, arguments, result, is_error, width)
   }
 }

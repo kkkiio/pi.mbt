@@ -242,6 +242,7 @@ fn replay(
           result.tool_name,
           tool_result_text(result),
           result.is_error,
+          id=result.tool_call_id,
         )
       _ => ()
     }
@@ -250,7 +251,7 @@ fn replay(
 
 ///|
 /// 回放一条 assistant 消息:思考/正文先进消息流,工具调用随后成块
-/// (与实时事件同一顺序,这样 `push_tool_result` 能配上对)。
+/// (与实时事件同样按 call id 配对结果,不依赖同名调用的顺序)。
 fn replay_assistant(
   message : @agent_loop.AssistantMessage,
   app : TuiApp,
@@ -275,7 +276,7 @@ fn replay_assistant(
   }
   app.assistant_end(stop_reason_name(message.stop_reason), message.error_message)
   for call in calls {
-    app.tool_call(call.name, call.arguments)
+    app.tool_call(call.name, call.arguments, id=call.id)
   }
 }
 
@@ -383,13 +384,14 @@ fn SessionHost::on_event(
         MessageEnd(_) => ()
         ToolExecutionStart(call) => {
           app.begin_work(call.name)
-          app.tool_call(call.name, call.arguments)
+          app.tool_call(call.name, call.arguments, id=call.id)
         }
         ToolExecutionEnd(result) =>
           app.tool_result(
             result.tool_name,
             tool_result_text(result),
             result.is_error,
+            id=result.tool_call_id,
           )
         TurnEnd(_, _) => ()
         AgentEnd(_) => app.set_idle()

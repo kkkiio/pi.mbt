@@ -49,9 +49,11 @@ async test "multi-line bash command renders one row per element" {
   @tui_app.load_module()
   let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
   transcript.push_user("run the snippet")
-  transcript.push_tool_call("bash", {
-    "command": "python3 - <<'PY'\nprint(\"greeting\")\nPY",
-  })
+  transcript.push_tool_call(
+    "bash",
+    { "command": "python3 - <<'PY'\nprint(\"greeting\")\nPY" },
+    id="call-bash",
+  )
   inspect(
     render_rows(transcript, 40).join("\n"),
     content=(
@@ -76,8 +78,17 @@ async test "tool previews count visual rows and preserve expanded output" {
   for (name, limit) in [("bash", 20), ("grep", 10)] {
     let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
     let output = "0123456789".repeat(limit + 2)
-    transcript.push_tool_call(name, { "command": "run", "pattern": "match" })
-    transcript.push_tool_result(name, "HEAD\n" + output + "\nTAIL", false)
+    transcript.push_tool_call(
+      name,
+      { "command": "run", "pattern": "match" },
+      id=name,
+    )
+    transcript.push_tool_result(
+      name,
+      "HEAD\n" + output + "\nTAIL",
+      false,
+      id=name,
+    )
     let collapsed = render_rows(transcript, 11)
     assert_eq(
       collapsed[2],
@@ -110,14 +121,16 @@ async test "tool rows respect narrow widths and wide unicode with ANSI" {
   @tui_app.load_module()
   let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
   for name in ["bash", "grep", "read"] {
-    transcript.push_tool_call(name, {
-      "command": "echo diagnostic",
-      "path": "/a/very/long/path/to/a/file",
-    })
+    transcript.push_tool_call(
+      name,
+      { "command": "echo diagnostic", "path": "/a/very/long/path/to/a/file" },
+      id=name,
+    )
     transcript.push_tool_result(
       name,
       "\u{1b}[31m中文🙂é\u{1b}[0m".repeat(30),
       true,
+      id=name,
     )
   }
   for expanded in [false, true] {
@@ -133,7 +146,11 @@ async test "tool rows respect narrow widths and wide unicode with ANSI" {
 async test "multi-line tool summary renders one row per element" {
   @tui_app.load_module()
   let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
-  transcript.push_tool_call("grep", { "pattern": "first\nsecond" })
+  transcript.push_tool_call(
+    "grep",
+    { "pattern": "first\nsecond" },
+    id="call-grep",
+  )
   inspect(
     render_rows(transcript, 40).join("\n"),
     content=(
@@ -151,8 +168,8 @@ async test "multi-line user message and CRLF tool result render one row per elem
   @tui_app.load_module()
   let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
   transcript.push_user("line one\nline two")
-  transcript.push_tool_call("bash", { "command": "printf a" })
-  transcript.push_tool_result("bash", "a\r\nb", false)
+  transcript.push_tool_call("bash", { "command": "printf a" }, id="call-bash")
+  transcript.push_tool_result("bash", "a\r\nb", false, id="call-bash")
   inspect(
     render_rows(transcript, 40).join("\n"),
     content=(
@@ -168,4 +185,69 @@ async test "multi-line user message and CRLF tool result render one row per elem
       #|────────────────────────────────────────
     ),
   )
+}
+
+///|
+/// Live execution adds each call before its result, but replay adds both calls
+/// first. Neither path may exchange outputs between calls to the same tool.
+async test "resumed same-name tool calls retain their live output pairing" {
+  let dir = @coding_agent.create_temp_dir("pim-replay-tools-")
+  defer @coding_agent.remove_dir(dir)
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([
+    @faux.faux_message(
+      [
+        @faux.faux_tool_call("bash", { "command": "printf ALPHA" }, id="call-z"),
+        @faux.faux_tool_call("bash", { "command": "printf OMEGA" }, id="call-a"),
+      ],
+      stop_reason=@agent_loop.StopReason::ToolUse,
+    ),
+    @faux.faux_message([@faux.faux_text("DONE")]),
+  ])
+  let host = @tui_app.SessionHost::new(llm, dir, Some(dir))
+  defer host.close()
+  let app = @tui_app.TuiApp::load("test", dir, "high")
+  defer app.stop()
+  app.reset_transcript()
+  host.attach(app)
+  app.submit("go")
+  host.prompt(app.take_submission(), app)
+  let live = render_rows(app.transcript, 60).join("\n")
+  assert_true(live.contains("$ printf ALPHA\n ALPHA"))
+  assert_true(live.contains("$ printf OMEGA\n OMEGA"))
+  let sessions = @coding_agent.list_sessions(dir)
+  assert_eq(sessions.length(), 1)
+  host.load_session("\{dir}/\{sessions[0]}.jsonl", app)
+  assert_eq(render_rows(app.transcript, 60).join("\n"), live)
+}
+
+///|
+/// Results can arrive in either order; neither name nor FIFO/LIFO order is an ID.
+async test "same-name tool results match call IDs in either result order" {
+  @tui_app.load_module()
+  for reversed in [false, true] {
+    let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+    transcript.push_tool_call(
+      "bash",
+      { "command": "printf ALPHA" },
+      id="call-z",
+    )
+    transcript.push_tool_call(
+      "bash",
+      { "command": "printf OMEGA" },
+      id="call-a",
+    )
+    let results = if reversed {
+      [("call-a", "OMEGA"), ("call-z", "ALPHA")]
+    } else {
+      [("call-z", "ALPHA"), ("call-a", "OMEGA")]
+    }
+    for (id, text) in results {
+      transcript.push_tool_result("bash", text, false, id~)
+    }
+    let rendered = render_rows(transcript, 60).join("\n")
+    assert_eq(transcript.item_count(), 2)
+    assert_true(rendered.contains("$ printf ALPHA\n ALPHA"))
+    assert_true(rendered.contains("$ printf OMEGA\n OMEGA"))
+  }
 }

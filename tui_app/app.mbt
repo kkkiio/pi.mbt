@@ -356,8 +356,9 @@ pub fn TuiApp::tool_call(
   self : TuiApp,
   name : String,
   arguments : Json,
+  id~ : String,
 ) -> Unit {
-  self.transcript.push_tool_call(name, arguments)
+  self.transcript.push_tool_call(name, arguments, id~)
   self.tui.request_render()
 }
 
@@ -367,8 +368,9 @@ pub fn TuiApp::tool_result(
   name : String,
   text : String,
   is_error : Bool,
+  id~ : String,
 ) -> Unit {
-  self.transcript.push_tool_result(name, text, is_error)
+  self.transcript.push_tool_result(name, text, is_error, id~)
   self.tui.request_render()
 }
 

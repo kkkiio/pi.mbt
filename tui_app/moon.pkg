@@ -11,6 +11,10 @@ import {
   "KKKIIO/pi/sdk/coding_agent",
 }
 
+import {
+  "KKKIIO/pi/sdk/providers/faux",
+} for "test"
+
 supported_targets = "+js"
 
 // 把内置主题嵌进产物
