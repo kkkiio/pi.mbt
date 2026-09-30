@@ -81,38 +81,17 @@ CLI 契约由 `tests/cram/` 下的 `mooncram` 转录持续验证。
 
 ## Operation Guide
 
-检查(警告即错误):
+日常迭代流程:
 
 ```bash
-moon check --deny-warn
-```
-
-构建 CLI 产物:
-
-```bash
-moon build
-```
-
-运行全部测试(`moon test` + cram):
-
-```bash
+just check
+just fmt
 just test
-```
-
-只跑 CLI 契约测试:
-
-```bash
-moon cram test --work-directory . tests/cram
+just build
 ```
 
 跑真实 provider 的 live 测试(需要 `DEEPSEEK_API_KEY`):
 
 ```bash
 moon cram test --work-directory . tests/live
-```
-
-新增或改动 `mooncram` 转录时,单独跑受影响的文件:
-
-```bash
-moon cram test --work-directory . tests/cram/cli.md
 ```
