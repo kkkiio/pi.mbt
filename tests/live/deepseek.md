@@ -11,37 +11,25 @@ moon cram test tests/live
 
 ## Smoke: A Real Round Trip That Answers
 
-The upstream pi smoke eval
-(`packages/evals/src/smoke.eval.ts`) runs the same prompt through a real
-provider and asserts the final reply is exactly `Paris`. `pim` mirrors that:
 `-p` prints the agent's final reply text to stdout, and the assertion is the
 full stdout content.
 
 ```mooncram
-$ pim.exe -p "What's the capital of France? Respond with only the city name."
+$ moon run cmd/pim -- -p "What's the capital of France? Respond with only the city name."
 Paris
 ```
 
-Without `DEEPSEEK_API_KEY` the run fails at provider construction instead of
-reaching the API, so this transcript only passes when a real key is exported.
-
 ## Watching The Agent Use Bash
 
-`--mode json` streams one event per line, so we can verify the agent really
-*acts*: the task forces the `bash` tool, and the `tool_execution_start` /
-`tool_execution_end` records join the stream. We match the events together
-with the tool name, and use a regex on the command and the returned content
-to confirm the command ran and its output flowed back. We also assert the
-user `message_start` carries a numeric `timestamp`, pinning the wire shape
-of pi-aligned user messages.
+`--mode json` streams one event per line, so we can verify the agent really _acts_: the task forces the `bash` tool, and the `tool_execution_start` / `tool_execution_end` records join the stream.
 
 ```mooncram
-$ pim.exe --mode json -p "Use the bash tool to run exactly: echo pim-cram. Then respond with only the command output." 2>/dev/null \
+$ moon run cmd/pim -- --mode json -p "Use the bash tool to run exactly: echo pim-cram. Then respond with only the command output." 2>/dev/null \
 >   | moon run --target native -e 'import {
 >   "bobzhang/jsonl@0.2.0",
 >   "moonbitlang/async",
 > }
-> 
+>
 > async fn main {
 >   let mut used_bash = false
 >   let mut bash_output_seen = false

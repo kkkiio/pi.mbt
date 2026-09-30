@@ -7,3 +7,7 @@ import {
   "moonbitlang/core/random",
   "moonbitlang/core/string",
 }
+
+import {
+  "KKKIIO/pi/sdk/providers/faux",
+} for "test"

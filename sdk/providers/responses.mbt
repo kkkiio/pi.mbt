@@ -117,6 +117,9 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
   model~ : String,
   custom_tool_input_properties? : Map[String, String] = Map([]),
   now? : () -> UInt64 = @env.now,
+  /// 中断信号:置位后停止读流,返回已收到内容的 `Aborted` 消息(对应 pi 的
+  /// `signal` 交给 fetch、由 provider 产出 `stopReason: "aborted"` 的消息)。
+  abort? : @agent_loop.AbortSignal = @agent_loop.AbortSignal::never(),
 ) -> @agent_loop.AssistantMessage {
   let idle_timeout_ms : Int = 120_000
   let started_at = now()
@@ -124,11 +127,23 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
   let acc : Array[@agent_loop.AssistantMessageContent] = []
   let slots : Map[Int, ResponsesOutputSlot] = Map([])
   let final_message : @agent_loop.AssistantMessage = for ;; {
-    let idle_reason : String? = match
-      (@async.with_timeout_opt(idle_timeout_ms) <| () => {
-        reader.read_until("\n")
-      }) {
-      Some(Some(raw)) => {
+    if abort.is_aborted() {
+      break aborted_message(acc, api~, provider~, model~, now=started_at)
+    }
+    // 三路竞速:读行、中断与 120s 空闲超时。abort 置位或流停止发送数据时
+    // 立即返回,不互相卡住(`any` 会取消还没完成的分支)。`any` 只返回胜者
+    // 的返回值,所以每个分支用不同的 `Race` 变体标记自己的身份。
+    let raced : Race = @async.any([
+      async fn() { read_until_task(reader) },
+      async fn() { wait_abort_task(abort) },
+      async fn() { idle_timeout_task(idle_timeout_ms) },
+    ])
+    match raced {
+      // abort 赢了:返回已收到内容的 Aborted 消息。
+      Race::Aborted =>
+        break aborted_message(acc, api~, provider~, model~, now=started_at)
+      // 读到一行:空行 = 事件边界,flush;非空行缓存。
+      Race::Line(raw) => {
         let trimmed = raw.trim()
         if trimmed.is_empty() {
           let flushed = flush_sse_event(
@@ -148,14 +163,14 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
         } else {
           data_lines.push(trimmed)
         }
+        // 读到的是数据行,继续下一轮竞速。
         continue
       }
-      Some(None) => None
-      // Wording matters: the session-level retry policy matches "timed out"
-      // (pi's phrasing), so a stall past the provider's retry window still
-      // reads as a transient condition there.
-      None => Some("Responses stream timed out (idle for \{idle_timeout_ms}ms)")
+      // EOF 或空闲超时赢了:fall through 到下面的 flush,超时分支改报
+      // 重试型超时错误,EOF 分支报提前结束。
+      Race::Eof | Race::IdleTimeout => ()
     }
+    let idle_timed_out = raced is Race::IdleTimeout
     let flushed = flush_sse_event(
       data_lines,
       sink~,
@@ -170,15 +185,80 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
     if flushed is Some(message) {
       break message
     }
-    match idle_reason {
-      // A silent stall is a transient provider/network condition: it is
-      // retried (within the caller's retry window, i.e. while no event has
-      // streamed) instead of failing the run.
-      Some(reason) => raise RetryableApiError(reason)
-      None => fail("Responses stream ended before a terminal event")
+    match idle_timed_out {
+      true =>
+        // A silent stall is a transient provider/network condition: it is
+        // retried (within the caller's retry window, i.e. while no event has
+        // streamed) instead of failing the run.
+        // Wording matters: the session-level retry policy matches "timed out"
+        // (pi's phrasing), so a stall past the provider's retry window still
+        // reads as a transient condition there.
+        raise RetryableApiError(
+          "Responses stream timed out (idle for \{idle_timeout_ms}ms)",
+        )
+      false => fail("Responses stream ended before a terminal event")
     }
   }
   final_message
+}
+
+///|
+/// 竞速结果:胜者身份。`any` 只返回胜者的返回值,不吿知下标,所以每个分支
+/// 都要在返回值里带上自己的编码。
+priv enum Race {
+  /// 读到一行(可能为空行,即 SSE 事件分隔符)。
+  Line(String)
+  /// 流结束(EOF)。
+  Eof
+  /// 中断被请求。
+  Aborted
+  /// 空闲超时:既不读数据也不中断时的停滞保护。
+  IdleTimeout
+}
+
+///|
+/// 竞速分支:读一行。读到 = Line,EOF = Eof。
+async fn[R : @io.Reader] read_until_task(reader : R) -> Race {
+  match reader.read_until("\n") {
+    Some(raw) => Race::Line(raw.to_string())
+    None => Race::Eof
+  }
+}
+
+///|
+/// 竞速分支:中断等待。abort 置位时立即返回;永不置位则永远挂起,由
+/// `@async.any` 取消。
+async fn wait_abort_task(abort : @agent_loop.AbortSignal) -> Race {
+  abort.wait_abort()
+  Race::Aborted
+}
+
+///|
+/// 竞速分支:空闲超时。既不读到数据也不中断时,把流当作停滞报错。
+async fn idle_timeout_task(timeout_ms : Int) -> Race {
+  @async.sleep(timeout_ms)
+  Race::IdleTimeout
+}
+
+///|
+/// 中断时返回的消息:保留已收到的内容,对应 pi 的 `stopReason: "aborted"`。
+fn aborted_message(
+  acc : Array[@agent_loop.AssistantMessageContent],
+  api~ : String,
+  provider~ : String,
+  model~ : String,
+  now~ : UInt64,
+) -> @agent_loop.AssistantMessage {
+  {
+    content: acc,
+    api,
+    provider,
+    model,
+    stop_reason: @agent_loop.StopReason::Aborted,
+    error_message: Some("Interrupted"),
+    usage: None,
+    timestamp: now,
+  }
 }
 
 ///|
@@ -324,7 +404,9 @@ fn parse_sse_event(
             ),
           )
           slots[output_index] = Thinking(content_index)
-          sse_delta(@agent_loop.ThinkingStart(content_index~, partial=in_flight()))
+          sse_delta(
+            @agent_loop.ThinkingStart(content_index~, partial=in_flight()),
+          )
         }
         "message" => {
           let item : ResponseOutputMessage = @json.from_json(item_json)
@@ -424,7 +506,9 @@ fn parse_sse_event(
         current + delta,
         signature~,
       )
-      sse_delta(@agent_loop.ThinkingDelta(content_index~, delta~, partial=in_flight()))
+      sse_delta(
+        @agent_loop.ThinkingDelta(content_index~, delta~, partial=in_flight()),
+      )
     }
     "response.reasoning_summary_part.done" => {
       let payload : ResponseOutputIndexEvent = @json.from_json(json)
@@ -440,7 +524,13 @@ fn parse_sse_event(
         current + "\n\n",
         signature~,
       )
-      sse_delta(@agent_loop.ThinkingDelta(content_index~, delta="\n\n", partial=in_flight()))
+      sse_delta(
+        @agent_loop.ThinkingDelta(
+          content_index~,
+          delta="\n\n",
+          partial=in_flight(),
+        ),
+      )
     }
     "response.output_text.delta" | "response.refusal.delta" => {
       let payload : ResponseDeltaEvent = @json.from_json(json)
@@ -457,7 +547,9 @@ fn parse_sse_event(
         current + delta,
         signature~,
       )
-      sse_delta(@agent_loop.TextDelta(content_index~, delta~, partial=in_flight()))
+      sse_delta(
+        @agent_loop.TextDelta(content_index~, delta~, partial=in_flight()),
+      )
     }
     "response.function_call_arguments.delta" => {
       let payload : ResponseDeltaEvent = @json.from_json(json)
@@ -538,7 +630,11 @@ fn parse_sse_event(
           )
           slots.remove(output_index)
           sse_delta(
-            @agent_loop.ThinkingEnd(content_index~, content=final_text, partial=in_flight()),
+            @agent_loop.ThinkingEnd(
+              content_index~,
+              content=final_text,
+              partial=in_flight(),
+            ),
           )
         }
         ("message", Some(Text(content_index))) => {
@@ -568,7 +664,13 @@ fn parse_sse_event(
             signature~,
           )
           slots.remove(output_index)
-          sse_delta(@agent_loop.TextEnd(content_index~, content=final_text, partial=in_flight()))
+          sse_delta(
+            @agent_loop.TextEnd(
+              content_index~,
+              content=final_text,
+              partial=in_flight(),
+            ),
+          )
         }
         ("function_call", Some(FunctionCall(content_index, _))) => {
           let item : ResponseFunctionToolCall = @json.from_json(item_json)

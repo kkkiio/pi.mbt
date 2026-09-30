@@ -21,11 +21,11 @@ license = "Apache-2.0"
 
 keywords = [ ]
 
-preferred_target = "native"
+preferred_target = "js"
 
 description = ""
 
 import {
-  "moonbitlang/async@0.20.4",
+  "moonbitlang/async@0.22.2",
   "bobzhang/jsonl@0.2.0",
 }

@@ -95,6 +95,9 @@ pub impl ToJson for SessionEntry with fn to_json(self) -> Json {
 }
 
 ///|
+pub extend SessionEntry with ToJson::{to_json}
+
+///|
 pub impl FromJson for SessionEntry with fn from_json(json, path) {
   guard json is Object(fields) else {
     decode_error(path, "SessionEntry::from_json: expected object")
@@ -167,8 +170,11 @@ pub impl FromJson for SessionEntry with fn from_json(json, path) {
     }
     _ => decode_error(content_path, "unknown entry type \{entry_type}")
   }
-  { id, seq: seq.to_int(), parent_id, timestamp, content }
+  { id, seq: seq.to_int(), parent_id, timestamp, content, }
 }
+
+///|
+pub extend SessionEntry with @json.FromJson::{from_json}
 
 ///|
 fn[T] decode_error(
@@ -216,7 +222,7 @@ fn parse_agent_message(
         fields.get("timestamp"),
         path.add_key("timestamp"),
       )
-      User({ content: contents, timestamp })
+      User({ content: contents, timestamp, })
     }
     "assistant" => {
       guard fields.get("content") is Some(Array(items)) else {
@@ -349,7 +355,7 @@ fn parse_assistant_content(
       }
       let arguments = fields.get("arguments").unwrap_or(Json::empty_object())
       ToolCall(
-        { id, name, arguments },
+        { id, name, arguments, },
         signature=parse_signature(fields.get("thoughtSignature")),
       )
     }
@@ -469,6 +475,13 @@ pub fn InMemorySessionJournal::InMemorySessionJournal(
     leaf_id: None,
     now,
   }
+}
+
+///|
+pub extend InMemorySessionJournal with SessionJournal::{
+  get_entries,
+  append,
+  generate_id,
 }
 
 ///|

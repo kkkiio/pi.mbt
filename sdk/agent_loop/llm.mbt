@@ -5,7 +5,13 @@
 /// response stream inline in the calling task (no background task), following
 /// the callback/sink model.
 pub(open) trait LLM {
-  async fn generate(Self, Context, sink~ : async (GenerationEvent) -> Unit) -> AssistantMessage
+  async fn generate(
+    Self,
+    Context,
+    sink~ : async (GenerationEvent) -> Unit,
+    /// 本次运行的中断令牌(只读),对应 pi 传给 stream function 的 `signal`。
+    abort~ : AbortSignal,
+  ) -> AssistantMessage
 }
 
 ///|
@@ -86,6 +92,9 @@ pub(all) enum GenerationEvent {
 } derive(Debug)
 
 ///|
+pub extend GenerationEvent with Debug::{to_repr}
+
+///|
 pub(all) enum StopReason {
   /// Streaming is still in progress; replaced by a terminal reason when the
   /// turn ends. Must never appear in persisted journal entries.
@@ -98,6 +107,9 @@ pub(all) enum StopReason {
   Aborted
   Error
 } derive(Debug)
+
+///|
+pub extend StopReason with Debug::{to_repr}
 
 ///|
 pub(all) struct Usage {
@@ -113,6 +125,9 @@ pub(all) struct Usage {
   total_tokens : Int
   cost : UsageCost
 } derive(Debug)
+
+///|
+pub extend Usage with Debug::{to_repr}
 
 ///|
 pub impl ToJson for Usage with fn to_json(self : Usage) -> Json {
@@ -147,6 +162,9 @@ pub(all) struct UsageCost {
 } derive(Debug)
 
 ///|
+pub extend UsageCost with Debug::{to_repr}
+
+///|
 pub impl ToJson for UsageCost with fn to_json(self : UsageCost) -> Json {
   Json::object({
     "input": self.input.to_json(),
@@ -156,6 +174,9 @@ pub impl ToJson for UsageCost with fn to_json(self : UsageCost) -> Json {
     "total": self.total.to_json(),
   })
 }
+
+///|
+pub extend UsageCost with ToJson::{to_json}
 
 ///|
 pub impl Show for StopReason with fn to_string(self : StopReason) -> String {
@@ -170,6 +191,9 @@ pub impl Show for StopReason with fn to_string(self : StopReason) -> String {
 }
 
 ///|
+pub extend StopReason with Show::{to_string, output}
+
+///|
 /// Serialized values match pi's `StopReason` strings.
 pub impl ToJson for StopReason with fn to_json(self : StopReason) -> Json {
   match self {
@@ -181,3 +205,6 @@ pub impl ToJson for StopReason with fn to_json(self : StopReason) -> Json {
     Error => "error".to_json()
   }
 }
+
+///|
+pub extend StopReason with ToJson::{to_json}

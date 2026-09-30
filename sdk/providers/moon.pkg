@@ -7,4 +7,6 @@ import {
   "moonbitlang/async",
 }
 
-supported_targets = "+native"
+options(
+  targets: { "deepseek_abort_js_test.mbt": [ "js" ] },
+)

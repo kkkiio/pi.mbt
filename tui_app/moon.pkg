@@ -1,0 +1,30 @@
+import {
+  "moonbitlang/async",
+  "moonbitlang/async/aqueue",
+  "moonbitlang/async/js_async",
+  "moonbitlang/async/semaphore",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+  "moonbitlang/core/random",
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/agent_session",
+  "KKKIIO/pi/sdk/coding_agent",
+}
+
+import {
+  "KKKIIO/pi/sdk/providers/faux",
+} for "test"
+
+supported_targets = "+js"
+
+// 把内置主题嵌进产物
+rule(
+  name: "embed-theme",
+  command: "moon tool embed --text --name light_theme -i $input -o $output",
+)
+
+dev_build(
+  rule: "embed-theme",
+  input: "theme/light.json",
+  output: "theme_builtin_gen.mbt",
+)

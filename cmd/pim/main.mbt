@@ -1,54 +1,88 @@
 ///|
-/// `pim` 的输出模式,对齐 pi 的 `--mode`。
-enum OutputMode {
-  /// 只把 agent 的最终回复文本写到 stdout。
-  Text
-  /// 把每个会话事件投影成一行 JSON(JSONL)写到 stdout。
-  Json
-} derive(Eq)
-
-///|
 async fn main {
   let matches = @argparse.parse(
-    Command("pim", options=[
-      OptionArg("print", short='p', about="prompt text"),
-      OptionArg(
-        "session_dir",
-        long="session-dir",
-        env="PIM_SESSION_DIR",
-        about="directory to store session JSONL files",
-      ),
-      OptionArg(
-        "mode",
-        long="mode",
-        about="output mode: text or json (default text)",
-      ),
-      OptionArg(
-        "thinking",
-        long="thinking",
-        about="thinking effort level: low, high (default), or max",
-      ),
-    ]),
+    Command(
+      "pim",
+      flags=[
+        FlagArg("continue", short='c', about="continue the most recent session"),
+        FlagArg(
+          "no_session",
+          long="no-session",
+          about="don't save the session (ephemeral)",
+        ),
+      ],
+      options=[
+        OptionArg("print", short='p', about="prompt text"),
+        OptionArg(
+          "resume",
+          short='r',
+          about="continue the session whose name starts with this prefix",
+        ),
+        OptionArg(
+          "session_dir",
+          long="session-dir",
+          env="PIM_SESSION_DIR",
+          about="directory to store session JSONL files (default: <config>/sessions/<cwd>)",
+        ),
+        OptionArg(
+          "mode",
+          long="mode",
+          about="output mode: text or json (default text)",
+        ),
+        OptionArg(
+          "thinking",
+          long="thinking",
+          about="thinking effort level: low, high (default), or max",
+        ),
+      ],
+    ),
     env=@env.get_env_vars(),
   ) catch {
     err => arg_error("\{err}")
   }
   let prompts = match matches.values {
     { "print": prompts, .. } => prompts
-    _ => fatal("Error: only '-p' support for now")
+    _ => []
   }
   let mode = match matches.values {
     { "mode": [m, ..], .. } =>
       match m {
         "text" => Text
         "json" => Json
+        "rpc" => fatal("Error: mode 'rpc' is not supported yet")
         _ => fatal("Error: invalid mode '\{m}' (expected text or json)")
       }
     _ => Text
   }
-  let deepseek = @providers.DeepSeekProvider()
-  // provider 构造失败(如缺 DEEPSEEK_API_KEY)是诊断,按输出流契约走 stderr;
-  // 剥离 MoonBit 的 Failure(<loc> FAILED: msg) 包装,保留干净消息。
+  let interactive = prompts.length() == 0 &&
+    @tui_app.stdin_is_tty() &&
+    @tui_app.stdout_is_tty()
+  if !interactive && prompts.length() == 0 {
+    fatal(
+      "Error: no prompt (pass -p <prompt>, or run in a terminal for the TUI)",
+    )
+  }
+  let no_session = matches.flags.get("no_session").unwrap_or(false)
+  let continue_session = matches.flags.get("continue").unwrap_or(false)
+  let resume_prefix = match matches.values.get("resume") {
+    Some([name, ..]) => Some(name)
+    _ => None
+  }
+  if no_session && (continue_session || resume_prefix is Some(_)) {
+    fatal("Error: --no-session cannot be combined with --continue/--resume")
+  }
+  // 隐式让 --continue 优先会无声忽略用户指定的 resume 前缀,可能恢复到
+  // 错误的会话:两个选择器同时给出直接报错。
+  if continue_session && resume_prefix is Some(_) {
+    fatal("Error: --continue cannot be combined with --resume")
+  }
+  let api_key = resolve_deepseek_api_key() catch {
+    AuthConfigError(message) => fatal("Error: \{message}")
+  }
+  let deepseek = match api_key {
+    Some(api_key) => @providers.DeepSeekProvider(api_key~)
+    None => fatal("Error: \{missing_api_key_message()}")
+  }
   let thinking = match matches.values.get("thinking") {
     Some([level, ..]) => {
       guard level is ("low" | "high" | "max") else {
@@ -60,35 +94,103 @@ async fn main {
     }
     _ => "high"
   }
-  let llm = deepseek.new_llm("deepseek-v4-flash", thinking~) catch {
-    err => fatal("Error: \{clean_error_message("\{err}")}")
-  }
+  let llm = deepseek.new_llm("deepseek-v4-flash", thinking~)
   let cwd = @env.current_dir().unwrap()
-  let session_dir = match matches.values.get("session_dir") {
-    Some(dirs) if dirs.length() > 0 => Some(dirs[0])
-    _ => None
+  let session_dir = if no_session {
+    None
+  } else {
+    match matches.values.get("session_dir") {
+      Some(dirs) if dirs.length() > 0 => Some(dirs[0])
+      _ => Some(default_session_dir(cwd))
+    }
   }
-  let (journal, cleanup) = match session_dir {
+  let start = if continue_session {
+    @coding_agent.SessionStart::Latest
+  } else {
+    match resume_prefix {
+      Some(prefix) => @coding_agent.SessionStart::Named(prefix)
+      None => @coding_agent.SessionStart::Fresh
+    }
+  }
+  // 要续写的会话(没有则为 None)。`-r` 找不到 / 多命中都是错误;
+  // `-c` 在没有会话时退化成新会话(对齐 pi `continueRecent`)。
+  let resume_path = match session_dir {
+    None => None
     Some(dir) => {
-      let file = try {
-        @fs.mkdir(dir, recursive=true)
-        let rand = @random.Rand::new()
-        let timestamp = @env.now().to_string()
-        let id = rand.uint64().to_string()
-        let path = "\{dir}/\{timestamp}_\{id}.jsonl"
-        // Session journals contain prompts and tool output: owner-only,
-        // and fail rather than truncate on collision/symlink.
-        @fs.create(path, allow_existing=false, permission=0o600)
-      } catch {
+      let pick = @coding_agent.resolve_session_start(dir, start) catch {
+        err => {
+          let detail = err.to_string()
+          fatal("Error: \{clean_error_message(detail)}")
+        }
+      }
+      match pick {
+        Found(name) => Some("\{dir}/\{name}.jsonl")
+        None =>
+          match resume_prefix {
+            Some(prefix) => {
+              let detail = "no session matches '\{prefix}'"
+              fatal("Error: \{detail}")
+            }
+            None => None
+          }
+        Ambiguous(candidates) => {
+          let label = resume_prefix.unwrap_or("")
+          let detail = "'\{label}' matches \{candidates.length()} sessions: \{candidates.join(", ")}"
+          fatal("Error: \{detail}")
+        }
+      }
+    }
+  }
+  // TUI 模式:会话(含 journal)由 tui_app 的 SessionHost 负责,这里不再自建。
+  if interactive {
+    @tui_app.run(
+      llm,
+      "deepseek-v4-flash",
+      cwd,
+      thinking,
+      session_dir,
+      resume_path~,
+    ) catch {
+      err => fatal("Error: \{clean_error_message("\{err}")}")
+    }
+    return
+  }
+  // 续写已有会话,否则开新的。两条路都用延迟打开的 writer:没有任何条目写出时,
+  // 磁盘上不会留下文件(见 `JsonlSessionJournal` 的 flush 规则)。
+  let (journal, cleanup) = match resume_path {
+    Some(path) => {
+      let entries = @coding_agent.fetch_active_entries(path) catch {
         err => fatal("Error: \{clean_error_message("\{err}")}")
       }
+      let file = @coding_agent.open_lazy_file(path, append=true)
       (
-        @coding_agent.JsonlSessionJournal::JsonlSessionJournal(file)
+        @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
+          file,
+          entries~,
+          fresh=false,
+        )
         as &@agent_session.SessionJournal,
         () => file.close(),
       )
     }
-    None => (@agent_session.InMemorySessionJournal(), () => ())
+    None =>
+      match session_dir {
+        Some(dir) => {
+          @coding_agent.create_dir(dir) catch {
+            err => fatal("Error: \{clean_error_message("\{err}")}")
+          }
+          let rand = @random.Rand::new()
+          let path = "\{dir}/\{@env.now()}_\{rand.uint64()}.jsonl"
+          // Session journals contain prompts and tool output: owner-only (0600).
+          let file = @coding_agent.open_lazy_file(path)
+          (
+            @coding_agent.JsonlSessionJournal::JsonlSessionJournal(file)
+            as &@agent_session.SessionJournal,
+            () => file.close(),
+          )
+        }
+        None => (@agent_session.InMemorySessionJournal(), () => ())
+      }
   }
   defer cleanup()
   let session = @coding_agent.new_coding_session(llm, cwd~, journal~)
@@ -96,7 +198,10 @@ async fn main {
   if mode is Json {
     // JSONL 模式:每个 AgentSessionEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。
     session.subscribe(event => {
-      write_stdout(session_event_to_json(event).stringify())
+      write_stdout(event.to_json().stringify())
+      // Like pi's JSON subscriber, wait for the stdout queue between events:
+      // a slow reader then throttles the stream instead of buffering it.
+      flush_output()
     })
   } else {
     session.subscribe(event => {
@@ -128,74 +233,18 @@ async fn main {
     }
     write_stdout(output.to_string())
   }
+  // pi's `flushRawStdout`: never let the exit truncate queued output.
+  flush_output()
 }
 
 ///|
-/// 把 AgentSessionEvent 投影成 JSONL 事件(对齐 pi `--mode json` 的事件形状):
-/// loop 事件保持原样,auto_retry 事件对齐 pi 的 `auto_retry_start` /
-/// `auto_retry_end` 形状。
-fn session_event_to_json(event : @agent_session.AgentSessionEvent) -> Json {
-  match event {
-    Loop(agent_event) => agent_event_to_json(agent_event)
-    AutoRetryStart(attempt~, max_attempts~, delay_ms~, error_message~) =>
-      {
-        "type": "auto_retry_start",
-        "attempt": attempt,
-        "maxAttempts": max_attempts,
-        "delayMs": delay_ms,
-        "errorMessage": error_message,
-      }
-    AutoRetryEnd(attempt~, success~, final_error~) =>
-      {
-        "type": "auto_retry_end",
-        "success": success,
-        "attempt": attempt,
-        "finalError": match final_error {
-          Some(message) => message.to_json()
-          None => null
-        },
-      }
-  }
-}
-
-///|
-/// 把 AgentEvent 投影成 JSONL 事件(对齐 pi `--mode json` 的事件形状)。
-fn agent_event_to_json(event : @agent_loop.AgentEvent) -> Json {
-  match event {
-    AgentStart => { "type": "agent_start" }
-    TurnStart => { "type": "turn_start" }
-    MessageStart(message) =>
-      { "type": "message_start", "message": message.to_json() }
-    MessageUpdate(message) =>
-      { "type": "message_update", "message": message.to_json() }
-    MessageEnd(message) =>
-      { "type": "message_end", "message": message.to_json() }
-    ToolExecutionStart(call) =>
-      {
-        "type": "tool_execution_start",
-        "toolName": call.name,
-        "args": call.arguments,
-      }
-    ToolExecutionEnd(result) =>
-      {
-        "type": "tool_execution_end",
-        "toolName": result.tool_name,
-        "content": [
-          for c in result.content => c.to_json()
-        ],
-        "isError": result.is_error,
-      }
-    TurnEnd(assistant_message, tool_results) =>
-      {
-        "type": "turn_end",
-        "message": assistant_message.to_json(),
-        "toolCalls": [
-          for r in tool_results => r.tool_name
-        ],
-      }
-    AgentEnd(_) => { "type": "agent_end" }
-  }
-}
+/// `pim` 的输出模式,对齐 pi 的 `--mode`。
+enum OutputMode {
+  /// 只把 agent 的最终回复文本写到 stdout。
+  Text
+  /// 把每个会话事件投影成一行 JSON(JSONL)写到 stdout。
+  Json
+} derive(Eq)
 
 ///|
 /// 把 argparse 错误按 pi 风格输出到 stderr 并退出：
@@ -233,22 +282,13 @@ fn clean_error_message(error_text : String) -> String {
 }
 
 ///|
-async fn write_stdout(message : String) -> Unit {
-  // pi 的 print mode 对每段文本输出带尾部换行(`writeRawStdout`),这里对齐。
-  @stdio.stdout.write("\{message}\n") catch {
-    e => fatal("failed to write stdout: \{e}")
-  }
-}
-
-///|
-#cfg(target="native")
-extern "c" fn proc_exit_ffi(rval : Int) -> Unit = "exit"
-
-///|
+/// Exit with code 1 after the queued diagnostics have reached the OS. The
+/// writes are queued on the shared output chain, so `process.exit` cannot drop
+/// them; `panic()` after it only satisfies the type checker (`exit` never
+/// returns).
 async fn[T] fatal(message : String) -> T {
-  @stdio.stderr.write("\{message}\n") catch {
-    _ => ()
-  }
+  write_stderr(message)
+  flush_output()
   proc_exit_ffi(1)
   panic()
 }

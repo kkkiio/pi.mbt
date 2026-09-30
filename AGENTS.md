@@ -6,22 +6,38 @@
 
 ```text
 .
-├── AGENTS.md                 # Root — 全局规则
-├── README.md                 # 用户文档与使用说明
-├── justfile                  # check / build / test / cram 命令
-├── moon.mod                  # MoonBit 模块元数据(依赖 moonbitlang/async)
+├── AGENTS.md
+├── README.md
+├── justfile
+├── moon.mod
+├── package.json
+├── dist/                     # gitignore;npm 交付物
+├── scripts/
+│   └── pack-npm.sh           # 生成 dist/pim.js(npm 包根 = 仓库根)
 ├── cmd/
-│   └── pim/                  # pim 可执行入口;当前仅 -p/--print 非交互模式
-│       └── main.mbt
+│   └── pim/                  # pim 可执行入口:print 模式 + 全屏 TUI(moon 包,无 npm manifest)
+│       ├── main.mbt
+│       └── config.mbt        # 用户配置目录与凭证读取(PIM_CONFIG_DIR / auth.json)
+├── tui_app/                  # 全屏 TUI(pi-tui 绑定 + 组件 + 会话接线)
+│   ├── README.mbt.md         # 组件树与数据流
+│   ├── app.mbt               # TuiApp:视图状态 / mutator / 输入与退出
+│   ├── session_host.mbt      # 会话所有权:journal、多会话、事件 → 视图
+│   ├── run.mbt               # 装配 + 斜杠命令循环 + 收尾
+│   ├── app_test.mbt
+│   ├── transcript_test.mbt
+│   ├── theme/light.json
+│   └── theme_builtin_gen.mbt # 由 `moon tool embed` 生成
 ├── sdk/                      # 库代码(agent 组装与 provider 集成)
 │   ├── agent_loop/           # agent 事件循环与消息类型
 │   ├── agent_session/        # 会话、journal、listener、tool registry
 │   ├── coding_agent/         # agent 组装、system prompt、bash 工具、输出累加
-│   ├── providers/            # LLM provider(当前: DeepSeek responses API)
+│   ├── providers/            # LLM provider
+│   │   └── faux/             # 脚本化假 provider(测试基建)
 │   └── tools/                # 工具定义
 └── tests/
     ├── cram/                 # CLI 契约离线测试转录(由 moon cram test 执行)
-    │   └── cli.md
+    │   ├── cli.md
+    │   └── testdata/         # 入库的只读 fixture(PIM_CONFIG_DIR 用的隔离配置目录)
     └── live/                 # 真实 provider 测试转录(opt-in,需 DEEPSEEK_API_KEY)
         └── deepseek.md
 ```
@@ -34,9 +50,8 @@
 ## Domain Language
 
 - **pi** — 上游 TypeScript coding agent(https://github.com/earendil-works/pi),pim 的行为对齐目标。
-- **pim** — 本项目的 native CLI 可执行文件产物(由 `cmd/pim` 构建为 `pim.exe`)。
+- **pim** — 本项目的 CLI 可执行文件产物。
 - **mooncram** — 测试转录中的可执行终端会话块(` ```mooncram `),由 `moon cram test` 校验命令输出与退出状态。
-- **-p / --print** — pi 的非交互模式:处理 prompt 后打印回复并退出;`pim` 当前唯一支持的选项。
 
 ## Policies & Mandatory Rules
 
@@ -46,65 +61,37 @@
 
 ### CLI Contract Test Policy
 
-CLI 契约由 `tests/cram/` 下的 `mooncram` 转录持续验证。变更 CLI 参数、stdout/stderr、退出状态或用户工作流时:
+CLI 契约由 `tests/cram/` 下的 `mooncram` 转录持续验证。
 
-- 在对应的转录文件(`tests/cram/cli.md` 等)中同步更新,转录直接调用产物名 `pim.exe`。
-- 所有 cram 用例必须离线确定:不依赖 API key、不发网络请求;prompt 路径用
-  缺 key 失败或参数校验失败覆盖,不包含时间戳、随机值、绝对临时路径或环境相关颜色。
-- 未实现的命令保留红色规格(failing transcript)作为实现目标;不要改写期望输出来掩盖实现缺口。
+- 在对应的转录文件(`tests/cram/cli.md` 等)中同步行为。
+- 涉及凭证的用例必须把 `PIM_CONFIG_DIR` 指向隔离目录,避免开发机的 `~/.pim/auth.json` 影响结果。
 
 ### Live Provider Test Policy
 
-真实 provider 测试放在 `tests/live/`,与离线套件分离:`just test` 和 CI 不跑它们。
+真实 provider 测试放在 `tests/live/`,与离线套件分离。
 
 - 运行方式:`just eval`(若本地存在 `.env.test` 会自动加载);或显式
-  `DEEPSEEK_API_KEY=sk-... moon cram test tests/live`。本地 key 放在
+  `DEEPSEEK_API_KEY=sk-... moon cram test --work-directory . tests/live`。本地 key 放在
   git-ignored 的 `.env*` 文件里,跑 live 测试前先检查是否存在。
 - 没有 key(且没有 `.env.test`)时用例会失败,这是预期行为——live 测试是
   opt-in,不假装离线可过。
 - 转录只断言稳定契约(如最终回复恰好为 `Paris`),不复现模型输出细节。
-
-### Output Stream Contract
-
-对齐 pi 的输出流约定:成功结果与 `--help` 输出到 stdout;诊断与参数错误输出到 stderr,
-参数错误按 pi 风格格式化为单行 `Error: <detail>`(不附带 usage 块)。`pim` 不得让未
-捕获的参数解析错误泄漏到 stdout(`cmd/pim/main.mbt` 已 catch `@argparse.parse` 的
-raise,取首行改写后写入 stderr)。
+- 需要验证凭证来源(auth.json vs 环境变量)时,用隔离的 `PIM_CONFIG_DIR` 并在
+  子 shell 里 `unset` 环境变量,这样才能真正证明读的是哪个来源。
 
 ## Operation Guide
 
-检查(警告即错误):
+日常迭代流程:
 
 ```bash
-moon check --deny-warn
-```
-
-构建 native 可执行文件:
-
-```bash
-moon build --target native
-```
-
-运行全部测试(`moon test` + cram):
-
-```bash
+just check
+just fmt
 just test
-```
-
-只跑 CLI 契约测试:
-
-```bash
-moon cram test tests/cram
+just build
 ```
 
 跑真实 provider 的 live 测试(需要 `DEEPSEEK_API_KEY`):
 
 ```bash
-moon cram test tests/live
-```
-
-新增或改动 `mooncram` 转录时,单独跑受影响的文件:
-
-```bash
-moon cram test tests/cram/cli.md
+moon cram test --work-directory . tests/live
 ```
