@@ -4,11 +4,14 @@
 
 ## Install
 
-TODO.
+```bash
+just package          # 构建 npm dist
+npm install -g .      # symlink 到全局
+```
 
 ## Usage
 
-当前只支持 `-p/--print` 单轮、非交互模式:
+`-p/--print` 单轮、非交互模式:
 
 ```bash
 DEEPSEEK_API_KEY=sk-xxx

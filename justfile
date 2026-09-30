@@ -16,6 +16,10 @@ test:
     moon test
     just cram
 
+# Build dist/pim.js, the npm dist of the root package (see scripts/pack-npm.sh).
+package:
+    bash scripts/pack-npm.sh
+
 cram:
     moon build
     moon cram test --work-directory . tests/cram
