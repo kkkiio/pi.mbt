@@ -74,11 +74,9 @@ fn read_auth_api_key(provider_id : String) -> String? raise AuthConfigError {
         Object(fields) =>
           match (fields.get("type"), fields.get("key")) {
             (Some(String("api_key")), Some(String(key))) if !key.is_empty() =>
-            Some(key)
+              Some(key)
             _ =>
-              raise AuthConfigError(
-                not_an_api_key_message(path, provider_id),
-              )
+              raise AuthConfigError(not_an_api_key_message(path, provider_id))
           }
         _ => raise AuthConfigError(not_an_api_key_message(path, provider_id))
       }

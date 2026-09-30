@@ -8,8 +8,7 @@
 
 ///|
 /// HOME 目录(把 footer 里的绝对路径缩成 `~`)。
-extern "js" fn home_dir() -> String =
-  "() => process.env.HOME || process.env.USERPROFILE || ''"
+extern "js" fn home_dir() -> String = "() => process.env.HOME || process.env.USERPROFILE || ''"
 
 ///|
 /// 固定格式化为三位小数(与 pi `toFixed(3)` 一致)。

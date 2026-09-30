@@ -267,8 +267,7 @@ async test "appending to an existing journal keeps its header" {
   let path = "\{temp_dir}/journal.jsonl"
   // 续写已有会话:header 已经在文件里了。
   @coding_agent.write_bytes_file(
-    path,
-    b"{\"kind\":\"header\",\"version\":4,\"id\":\"hdr\",\"createdAt\":1,\"cwd\":\"/tmp\"}\n",
+    path, b"{\"kind\":\"header\",\"version\":4,\"id\":\"hdr\",\"createdAt\":1,\"cwd\":\"/tmp\"}\n",
   )
   let file = @coding_agent.open_append_file(path)
   let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
@@ -320,20 +319,21 @@ async test "a journal stays in memory until the first assistant message" {
     timestamp: 1786903823973,
   })
   let assistant_message : @agent_loop.AgentMessage = @agent_loop.AgentMessage::Assistant({
-    content: [
-      @agent_loop.AssistantMessageContent::Text("hi", signature={
-        "type": "message",
-        "id": "msg_1",
-      }),
-    ],
-    api: "openai-responses",
-    provider: "deepseek",
-    model: "deepseek-v4-flash",
-    stop_reason: @agent_loop.StopReason::Stop,
-    error_message: None,
-    usage: None,
-    timestamp: 1786903823973,
-  })
+      content: [
+        @agent_loop.AssistantMessageContent::Text("hi", signature={
+          "type": "message",
+          "id": "msg_1",
+        }),
+      ],
+      api: "openai-responses",
+      provider: "deepseek",
+      model: "deepseek-v4-flash",
+      stop_reason: @agent_loop.StopReason::Stop,
+      error_message: None,
+      usage: None,
+      timestamp: 1786903823973,
+    },
+  )
   ignore(
     journal.append([
       {

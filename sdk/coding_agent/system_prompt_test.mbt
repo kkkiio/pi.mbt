@@ -24,12 +24,15 @@ test "system prompt lists active tool guidelines" {
     cwd="/workspaces/pi.mbt",
     guidelines=["Use bash for file operations like ls, rg, find"],
   )
-  inspect(system_prompt, content=(
-    #|You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
-    #|
-    #|Guidelines:
-    #|- Use bash for file operations like ls, rg, find
-    #|Current working directory: /workspaces/pi.mbt
-    #|
-  ))
+  inspect(
+    system_prompt,
+    content=(
+      #|You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.
+      #|
+      #|Guidelines:
+      #|- Use bash for file operations like ls, rg, find
+      #|Current working directory: /workspaces/pi.mbt
+      #|
+    ),
+  )
 }

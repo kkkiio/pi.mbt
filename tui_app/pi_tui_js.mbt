@@ -15,9 +15,7 @@ let pi_tui_ns : Ref[Value?] = Ref(None)
 pub async fn load_module() -> Unit {
   match pi_tui_ns.val {
     Some(_) => ()
-    None => {
-      pi_tui_ns.val = Some(@js_async.Promise::wait(import_pi_tui()))
-    }
+    None => pi_tui_ns.val = Some(@js_async.Promise::wait(import_pi_tui()))
   }
 }
 

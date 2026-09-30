@@ -15,7 +15,7 @@ pub struct PromptEditor {
 pub fn prompt_editor_new(tui : Tui, theme : Theme) -> PromptEditor {
   let handler : Ref[(String) -> Unit] = Ref(fn(_text) { () })
   let editor = editor_new(tui, fn(text) { (handler.val)(text) }, theme)
-  PromptEditor::{ editor, handler }
+  PromptEditor::{ editor, handler, }
 }
 
 ///|

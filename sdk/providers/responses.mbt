@@ -186,7 +186,7 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
       break message
     }
     match idle_timed_out {
-      true => {
+      true =>
         // A silent stall is a transient provider/network condition: it is
         // retried (within the caller's retry window, i.e. while no event has
         // streamed) instead of failing the run.
@@ -194,9 +194,8 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
         // (pi's phrasing), so a stall past the provider's retry window still
         // reads as a transient condition there.
         raise RetryableApiError(
-            "Responses stream timed out (idle for \{idle_timeout_ms}ms)",
-          )
-      }
+          "Responses stream timed out (idle for \{idle_timeout_ms}ms)",
+        )
       false => fail("Responses stream ended before a terminal event")
     }
   }

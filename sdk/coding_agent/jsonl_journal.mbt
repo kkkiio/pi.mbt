@@ -54,7 +54,19 @@ pub fn[W] JsonlSessionJournal::JsonlSessionJournal(
     }
     leaf_id = Some(entry.id)
   }
-  { writer, entries, ids, rand, lane, cwd, seq, leaf_id, start_index: entries.length(), flushed: !fresh, now, }
+  {
+    writer,
+    entries,
+    ids,
+    rand,
+    lane,
+    cwd,
+    seq,
+    leaf_id,
+    start_index: entries.length(),
+    flushed: !fresh,
+    now,
+  }
 }
 
 ///|
@@ -112,7 +124,9 @@ pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
       self.writer.write("\n")
       // 只写本次新增的;构造时传入的条目已经在盘上了。
       for i in self.start_index..<self.entries.length() {
-        self.writer.write(entry_mutation_json(self.entries[i], self.lane).stringify())
+        self.writer.write(
+          entry_mutation_json(self.entries[i], self.lane).stringify(),
+        )
         self.writer.write("\n")
       }
       // 在批次内也要立刻置位,否则同一批的下一条会再 flush 一次。
@@ -125,9 +139,7 @@ pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
 ///|
 /// 本次新增的条目里是否已经有 assistant 消息(pi 用它决定何时创建文件)。
 /// 只在未 flush 时调用,那时新条目最多几条用户消息,扫描成本可忽略。
-fn[W] JsonlSessionJournal::has_assistant(
-  self : JsonlSessionJournal[W],
-) -> Bool {
+fn[W] JsonlSessionJournal::has_assistant(self : JsonlSessionJournal[W]) -> Bool {
   for i in self.start_index..<self.entries.length() {
     match self.entries[i].content {
       Message(Assistant(_)) => return true

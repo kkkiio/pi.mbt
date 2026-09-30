@@ -203,7 +203,11 @@ pub fn pad_left(text : String, columns : Int) -> String {
 
 ///|
 /// 一整行背景色块:内容补到 `width` 再套背景色。
-pub fn bg_line(hex_bg : (String) -> String, text : String, width : Int) -> String {
+pub fn bg_line(
+  hex_bg : (String) -> String,
+  text : String,
+  width : Int,
+) -> String {
   hex_bg(pad_right(text, width))
 }
 

@@ -44,7 +44,7 @@ async test "a session turn persists exactly one journal file" {
   llm.set_responses([@faux.faux_message([@faux.faux_text("hi")])])
   let file = @coding_agent.open_lazy_file(path)
   let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(file)
-  as &@agent_session.SessionJournal
+    as &@agent_session.SessionJournal
   let session = @coding_agent.new_coding_session(llm, cwd=dir, journal~)
   // Nothing has been said yet: the file must not exist.
   assert_false(@coding_agent.path_exists(path))
@@ -52,15 +52,13 @@ async test "a session turn persists exactly one journal file" {
   file.close()
   assert_true(@coding_agent.path_exists(path))
   assert_eq(@coding_agent.list_sessions(dir), ["s1"])
-  let roles = @coding_agent
-    .fetch_entries(path)
-    .map(entry => {
-      match entry.content {
-        Message(User(_)) => "user"
-        Message(Assistant(_)) => "assistant"
-        _ => "other"
-      }
-    })
+  let roles = @coding_agent.fetch_entries(path).map(entry => {
+    match entry.content {
+      Message(User(_)) => "user"
+      Message(Assistant(_)) => "assistant"
+      _ => "other"
+    }
+  })
   assert_eq(roles, ["user", "assistant"])
   @coding_agent.remove_file(path)
   @coding_agent.remove_dir(dir)
@@ -76,7 +74,7 @@ async test "a resumed session hydrates its journal into the next prompt" {
   first.set_responses([@faux.faux_message([@faux.faux_text("first reply")])])
   let file = @coding_agent.open_lazy_file(path)
   let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(file)
-  as &@agent_session.SessionJournal
+    as &@agent_session.SessionJournal
   let session = @coding_agent.new_coding_session(first, cwd=dir, journal~)
   session.prompt([user_message("hello")])
   file.close()
@@ -86,11 +84,11 @@ async test "a resumed session hydrates its journal into the next prompt" {
   let second = ContextCapturingLLM::{ seen: [], }
   let resumed_file = @coding_agent.open_lazy_file(path, append=true)
   let resumed_journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
-    resumed_file,
-    entries~,
-    fresh=false,
-  )
-  as &@agent_session.SessionJournal
+      resumed_file,
+      entries~,
+      fresh=false,
+    )
+    as &@agent_session.SessionJournal
   let resumed = @coding_agent.new_coding_session(
     second,
     cwd=dir,
@@ -108,8 +106,7 @@ async test "a resumed session hydrates its journal into the next prompt" {
     }
   })
   assert_eq(roles, ["user", "assistant", "user"])
-  let headers = @coding_agent
-    .read_text_file(path)
+  let headers = @coding_agent.read_text_file(path)
     .split("\n")
     .to_array()
     .filter(line => line.to_owned().contains("\"kind\":\"header\""))
