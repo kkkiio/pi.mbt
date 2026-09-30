@@ -1,4 +1,45 @@
 ///|
+/// pi wraps a compaction summary in these markers when it projects the summary
+/// into the model context (`COMPACTION_SUMMARY_PREFIX` / `_SUFFIX`).
+const COMPACTION_SUMMARY_PREFIX : String = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
+
+///|
+const COMPACTION_SUMMARY_SUFFIX : String = "\n</summary>"
+
+///|
+/// 从 journal 条目投影出模型上下文。压缩条目把此前的历史换成"总结 + 保留尾部"
+/// (pi 的 `buildContextEntries` + `sessionEntryToContextMessages`):总结作为一条
+/// user 消息注入,被摘要掉的历史不再进上下文。错误回合留在 journal 里(它是
+/// write-ahead log),同样不进上下文。
+fn project_messages(
+  entries : ArrayView[SessionEntry],
+) -> Array[@agent_loop.AgentMessage] {
+  let messages : Array[@agent_loop.AgentMessage] = []
+  for entry in entries {
+    match entry.content {
+      Compaction(summary~, retained_tail~, ..) => {
+        messages.clear()
+        messages.push(
+          @agent_loop.AgentMessage::User({
+            content: [
+              @agent_loop.InputMessageContent::Text(
+                COMPACTION_SUMMARY_PREFIX + summary + COMPACTION_SUMMARY_SUFFIX,
+              ),
+            ],
+            timestamp: entry.timestamp,
+          }),
+        )
+        messages.append(retained_tail)
+      }
+      Message(Assistant(m)) if m.stop_reason is Error => ()
+      Message(m) => messages.push(m)
+      _ => ()
+    }
+  }
+  messages
+}
+
+///|
 pub struct AgentSession {
   journal : &SessionJournal
   llm : &@agent_loop.LLM
@@ -27,18 +68,7 @@ pub fn AgentSession::AgentSession(
     llm,
     system_prompt,
     active_run_abort_controller: None,
-    message_buffer: journal
-    .get_entries()
-    .filter_map(e => {
-      match e.content {
-        // Superseded or partial failure turns are kept in the journal (the
-        // write-ahead log) but excluded from hydrated model context, so a
-        // resumed session never replays an error turn into the prompt.
-        Message(Assistant(m)) if m.stop_reason is Error => None
-        Message(m) => Some(m)
-        _ => None
-      }
-    }),
+    message_buffer: project_messages(journal.get_entries()),
   }
 }
 

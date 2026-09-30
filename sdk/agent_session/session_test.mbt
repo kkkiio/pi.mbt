@@ -166,6 +166,84 @@ async test "is_retryable_error_message rejects non-retryable and limit errors" {
 }
 
 ///|
+/// `role: text` 一行一条上下文消息,方便快照出投影后的模型上下文。
+fn context_lines(messages : Array[@agent_loop.AgentMessage]) -> String {
+  messages
+  .map(message => {
+    match message {
+      @agent_loop.AgentMessage::User(user) =>
+        "user: \{input_text(user.content)}"
+      @agent_loop.AgentMessage::Assistant(assistant) => {
+        let parts = assistant.content.map(block => {
+          match block {
+            @agent_loop.AssistantMessageContent::Text(text, ..) => text
+            _ => "<non-text>"
+          }
+        })
+        "assistant: \{parts.join(" ")}"
+      }
+      @agent_loop.AgentMessage::ToolResult(result) =>
+        "toolResult: \{input_text(result.content)}"
+    }
+  })
+  .join("\n")
+}
+
+///|
+fn input_text(content : Array[@agent_loop.InputMessageContent]) -> String {
+  content
+  .map(block => {
+    match block {
+      @agent_loop.InputMessageContent::Text(text) => text
+      _ => "<non-text>"
+    }
+  })
+  .join(" ")
+}
+
+///|
+/// 恢复带压缩记录的 journal:模型上下文是"总结(user 消息)+ 保留尾部",压缩前的
+/// 历史已被替换(pi 的 `buildContextEntries`)。否则被摘要掉的历史会重新进上下文,
+/// 而压缩记录被丢掉。
+async test "hydrating a compacted journal projects the summary and kept tail" {
+  let journal = @agent_session.InMemorySessionJournal()
+  ignore(
+    journal.append([
+      { id: "u1", content: Message(User(user_message("compacted away"))), },
+      { id: "a1", content: Message(Assistant(ok_message())), },
+      {
+        id: "c1",
+        content: Compaction(
+          summary="the earlier exchange was a greeting",
+          retained_tail=[User(user_message("kept turn"))],
+          tokens_before=4096,
+          details=None,
+          usage=None,
+        ),
+      },
+      { id: "u2", content: Message(User(user_message("after"))), },
+    ]),
+  )
+  let session = @agent_session.AgentSession(
+    StubLLM::{ },
+    system_prompt="",
+    journal~,
+  )
+  inspect(
+    context_lines(session.message_buffer),
+    content=(
+      #|user: The conversation history before this point was compacted into the following summary:
+      #|
+      #|<summary>
+      #|the earlier exchange was a greeting
+      #|</summary>
+      #|user: kept turn
+      #|user: after
+    ),
+  )
+}
+
+///|
 /// Replaying a journal skips `Error` assistant messages and keeps every other
 /// entry, so a failed request never re-enters the context.
 async test "session hydration drops Error assistant messages from the journal" {
