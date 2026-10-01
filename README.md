@@ -1,5 +1,7 @@
 # pi.mbt
 
+[![Coverage Status](https://coveralls.io/repos/github/kkkiio/pi.mbt/badge.svg?branch=main)](https://coveralls.io/github/kkkiio/pi.mbt?branch=main)
+
 用 MoonBit 重新实现的 [pi](https://github.com/earendil-works/pi) coding agent 子集。
 
 ## Install

@@ -1,0 +1,38 @@
+# Shared MoonBit setup for this repository's workflows.
+#
+# Ported from moonbitlang/core's `.github/actions/setup`. Deliberately no
+# dependency cache: the installer always re-downloads the CLI and re-bundles
+# `core` (it never skips an existing install), so a cache would have to
+# *replace* the install rather than warm it up to pay off — and core runs this
+# same install on every job without one.
+#
+# Windows is not handled: every job here runs on ubuntu-latest. Adding it means
+# copying core's `runner.os == 'Windows'` branch into the install step.
+
+name: "Setup MoonBit"
+description: "Install the MoonBit CLI and update the package registry."
+
+inputs:
+  version:
+    description: "MoonBit CLI version to install: latest, nightly, or a pinned release."
+    required: false
+    default: "latest"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install MoonBit CLI
+      shell: bash
+      run: |
+        curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash -s "${{ inputs.version }}"
+        echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+    - name: Verify installation
+      shell: bash
+      run: |
+        moon version --all
+
+    - name: Update Registry
+      shell: bash
+      run: |
+        moon update
