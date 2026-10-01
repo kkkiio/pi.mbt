@@ -54,10 +54,7 @@ jobs:
           key: pim-build-js-${{ hashFiles('**/*.mbt', '**/moon.pkg', 'moon.mod') }}
           restore-keys: pim-build-js-
 
-      - name: Install MoonBit
-        run: |
-          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
-          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+      - uses: ./.github/actions/setup
 
       - uses: actions/setup-node@v4
         with:

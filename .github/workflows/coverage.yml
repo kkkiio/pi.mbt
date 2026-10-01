@@ -1,0 +1,66 @@
+# Coverage for the offline test suite: `moon test --enable-coverage` → Coveralls,
+# plus the summary on the run page.
+#
+# Ported from moonbitlang/core's `.github/workflows/misc-check.yml` (coverage step);
+# the MoonBit setup shared with every other workflow lives in .github/actions/setup.
+#
+# `continue-on-error` is deliberate: coverage is a report, not a gate. A Coveralls
+# outage or a rejected upload must never block a merge. Add a threshold step below
+# if you want it to gate.
+#
+# `secrets.GITHUB_TOKEN` is used as the Coveralls repo token, exactly as core does:
+# it needs no third-party signup and is available even for pull requests from forks.
+
+name: coverage
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  coverage:
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MOON_COVE_REPORT_ENABLED: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # tui_app's blackbox tests import @earendil-works/pi-tui at runtime, so the
+      # js dependencies must be installed before `moon test` runs.
+      - name: Install js dependencies
+        run: npm ci
+
+      # Offline suite only: `tests/live` needs DEEPSEEK_API_KEY and is opt-in.
+      # `moon cram` does not emit coverage traces, so `just cram` is not run here.
+      - name: moon test
+        run: moon test --enable-coverage
+
+      - name: coverage report
+        run: |
+          moon coverage report -f summary > coverage_summary.txt
+          # Put the coverage report in the pipeline output.
+          cat coverage_summary.txt >> "$GITHUB_STEP_SUMMARY"
+          # `-o` is ignored on the send path: the tool writes its own temporary
+          # coverage.json and deletes it after the upload.
+          moon coverage report \
+            -f coveralls \
+            --service-name github \
+            --service-job-id "$GITHUB_RUN_NUMBER" \
+            --service-pull-request "${{ github.event.number }}" \
+            --send-to coveralls
+        env:
+          COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
