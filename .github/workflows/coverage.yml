@@ -35,6 +35,15 @@ jobs:
 
       - uses: ./.github/actions/setup
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # tui_app's blackbox tests import @earendil-works/pi-tui at runtime, so the
+      # js dependencies must be installed before `moon test` runs.
+      - name: Install js dependencies
+        run: npm ci
+
       # Offline suite only: `tests/live` needs DEEPSEEK_API_KEY and is opt-in.
       # `moon cram` does not emit coverage traces, so `just cram` is not run here.
       - name: moon test
