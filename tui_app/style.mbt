@@ -40,7 +40,18 @@ extern "js" fn bg_hex(hex : String, text : String, true_color : Bool) -> String 
   #|   const gi = Math.max(0,Math.min(23,Math.ceil((gray-8)/10-.5))), gv = 8+10*gi;
   #|   const index = Math.max(r,g,b)-Math.min(r,g,b)<10 && distance(gv,gv,gv)<distance(cube[q(r)],cube[q(g)],cube[q(b)]) ? 232+gi : 16+36*q(r)+6*q(g)+q(b);
   #|   const open = trueColor ? `\u001b[48;2;${r};${g};${b}m` : `\u001b[48;5;${index}m`;
-  #|   return open + text.replace(/\u001b\[(?:0|49)m/g, '$&' + open) + "\u001b[49m";
+  #|   return open + text.replace(/\u001b\[([\d;:]*)m/g, (sequence, parameters) => {
+  #|     const codes = parameters.split(';');
+  #|     for (let i = 0; i < codes.length; i++) {
+  #|       const code = Number(codes[i].split(':')[0]);
+  #|       if (code === 0 || code === 49) return sequence + open;
+  #|       // Extended color payloads may contain zeroes, which are not SGR resets.
+  #|       if ((code === 38 || code === 48 || code === 58) && !codes[i].includes(':')) {
+  #|         i += codes[i+1] === '2' ? 4 : codes[i+1] === '5' ? 2 : 0;
+  #|       }
+  #|     }
+  #|     return sequence;
+  #|   }) + "\u001b[49m";
   #| }
 
 ///|

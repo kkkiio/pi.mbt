@@ -316,7 +316,7 @@ fn align_line(left : String, right : String, width : Int) -> String {
 
 ///|
 /// 渲染底栏两行(全 dim,上下文段按阈值着色)。
-pub impl Widget for Footer with fn render(self, width) {
+impl Widget for Footer with fn render(self, width) {
   if width <= 0 {
     return [self.theme.f_dim("")]
   }
@@ -327,6 +327,3 @@ pub impl Widget for Footer with fn render(self, width) {
   )
   [path_line, stats_line]
 }
-
-///|
-pub extend Footer with Widget::{render, invalidate}

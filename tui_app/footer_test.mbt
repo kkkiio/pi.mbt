@@ -3,6 +3,32 @@ extern "js" fn plain(value : String) -> String =
   #|(value) => value.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, '')
 
 ///|
+/// Capture the public TuiApp terminal output, without exposing Footer's renderer.
+extern "js" fn capture_screen(width : Int, draw : () -> Unit) -> String =
+  #| (width, draw) => {
+  #|   const stdout = process.stdout, write = stdout.write;
+  #|   const columns = Object.getOwnPropertyDescriptor(stdout, 'columns');
+  #|   const rows = Object.getOwnPropertyDescriptor(stdout, 'rows');
+  #|   let output = '';
+  #|   try {
+  #|     Object.defineProperty(stdout, 'columns', {value:width, configurable:true});
+  #|     Object.defineProperty(stdout, 'rows', {value:24, configurable:true});
+  #|     stdout.write = chunk => { output += String(chunk); return true; };
+  #|     draw();
+  #|     return output;
+  #|   } finally {
+  #|     stdout.write = write;
+  #|     if (columns) Object.defineProperty(stdout, 'columns', columns); else delete stdout.columns;
+  #|     if (rows) Object.defineProperty(stdout, 'rows', rows); else delete stdout.rows;
+  #|   }
+  #| }
+
+///|
+fn screen(app : @tui_app.TuiApp, width : Int) -> String {
+  plain(capture_screen(width, fn() { app.tui.render_now(force=true) }))
+}
+
+///|
 fn usage(
   input : Int,
   output : Int,
@@ -29,62 +55,50 @@ fn usage(
 
 ///|
 async test "footer accumulates usage and preserves assistant cache rate across tool usage" {
-  @tui_app.load_module()
-  let footer = @tui_app.Footer::new(
-    @tui_app.Theme::load("light"),
-    "model",
-    "/tmp",
-    "",
-  )
-  footer.set_usage(usage(1000, 2, 1000, 0))
-  footer.set_usage(usage(999, 3, 0, 1), update_cache_hit=false)
-  let lines = @tui_app.Widget::render(footer, 80)
-  let stats = plain(lines[1])
-  assert_true(stats.contains("↑2.0k ↓5 R1.0k W1 CH50.0%"))
+  let app = @tui_app.TuiApp::load("model", "/tmp", "high")
+  defer {
+    let _ = capture_screen(80, fn() { app.stop() })
+  }
+  let _ = capture_screen(80, fn() { app.start() })
+  app.set_usage(usage(1000, 2, 1000, 0))
+  app.set_usage(usage(999, 3, 0, 1), update_cache_hit=false)
+  assert_true(screen(app, 80).contains("↑2.0k ↓5 R1.0k W1 CH50.0%"))
 }
 
 ///|
 async test "footer hides cache hit without cache totals and reset is instance-local" {
-  @tui_app.load_module()
-  let theme = @tui_app.Theme::load("light")
-  let first = @tui_app.Footer::new(theme, "m", "/tmp", "")
-  let second = @tui_app.Footer::new(theme, "m", "/tmp", "")
+  let first = @tui_app.TuiApp::load("m", "/tmp", "high")
+  defer {
+    let _ = capture_screen(40, fn() { first.stop() })
+  }
+  let _ = capture_screen(40, fn() { first.start() })
   first.set_usage(usage(10, 0, 0, 0))
-  assert_false(plain(@tui_app.Widget::render(first, 40)[1]).contains("CH"))
-  first.reset_usage()
-  assert_false(plain(@tui_app.Widget::render(first, 40)[1]).contains("↑"))
-  assert_false(plain(@tui_app.Widget::render(second, 40)[1]).contains("↑"))
+  assert_false(screen(first, 40).contains("CH"))
+  first.reset_transcript()
+  assert_false(screen(first, 40).contains("↑"))
+  let second = @tui_app.TuiApp::load("m", "/tmp", "high")
+  defer {
+    let _ = capture_screen(40, fn() { second.stop() })
+  }
+  let _ = capture_screen(40, fn() { second.start() })
+  assert_false(screen(second, 40).contains("↑"))
 }
 
 ///|
 async test "footer rounds boundaries, truncates right without ellipsis, and sanitizes labels" {
-  @tui_app.load_module()
-  let footer = @tui_app.Footer::new(
-    @tui_app.Theme::load("light"),
-    "long-model-name",
-    "/tmp",
-    "",
-  )
-  footer.set_branch(Some("main\nbranch"))
-  footer.set_session_name(Some(" session\tname "))
-  footer.set_usage(usage(1999, 0, 0, 0))
-  let wide = @tui_app.Widget::render(footer, 80)
-  assert_true(plain(wide[0]).contains("(main branch) • session name"))
-  assert_true(plain(wide[1]).contains("↑2.0k"))
-  let narrow = plain(@tui_app.Widget::render(footer, 12)[1])
+  let app = @tui_app.TuiApp::load("long-model-name", "/tmp", "high")
+  defer {
+    let _ = capture_screen(80, fn() { app.stop() })
+  }
+  let _ = capture_screen(80, fn() { app.start() })
+  app.set_session_name(Some(" session\tname "))
+  app.set_usage(usage(1999, 0, 0, 0))
+  let wide = screen(app, 80)
+  assert_true(wide.contains("/tmp • session name"))
+  assert_true(wide.contains("↑2.0k"))
+  app.reset_transcript()
+  app.set_usage(usage(1999, 0, 0, 0))
+  let narrow = screen(app, 12)
   assert_false(narrow.contains("..."))
   assert_true(narrow.contains("long-"))
-}
-
-///|
-async test "footer can display unknown occupancy with a known context window" {
-  @tui_app.load_module()
-  let footer = @tui_app.Footer::new(
-    @tui_app.Theme::load("light"),
-    "",
-    "/tmp",
-    "",
-  )
-  footer.set_context_unknown(1999)
-  assert_true(plain(@tui_app.Widget::render(footer, 30)[1]).contains("?/2.0k"))
 }

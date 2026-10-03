@@ -498,3 +498,69 @@ async test "bash truncation distinguishes byte limits and preserves untruncated 
     assert_false(rows.contains("showing 3 of 7 lines"))
   }
 }
+
+///|
+async test "bash preview and expansion retain whitespace-sensitive output" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_tool_call("bash", { "command": "printf indented" }, id="call")
+  transcript.push_tool_result("bash", "  value\n\n", false, id="call")
+  for expanded in [false, true] {
+    transcript.set_expanded_tool_output(expanded)
+    let rows = render_rows(transcript, 30)
+    assert_eq(rows.length(), 7)
+    assert_eq(rows[3], "   value" + " ".repeat(22))
+    assert_eq(rows[4], " ".repeat(30))
+    assert_eq(rows[5], " ".repeat(30))
+  }
+}
+
+///|
+async test "card backgrounds restore shorthand and combined resets without mistaking RGB zeroes" {
+  @tui_app.load_module()
+  let theme = @tui_app.Theme::load("light")
+  let open = theme
+    .bg("toolSuccessBg", "")
+    .strip_suffix("\u{1b}[49m")
+    .unwrap()
+    .to_owned()
+  for reset in ["\u{1b}[m", "\u{1b}[0;32m", "\u{1b}[1;49m", "\u{1b}[;32m"] {
+    assert_true(
+      theme
+      .bg("toolSuccessBg", "before" + reset + "after")
+      .contains(reset + open),
+    )
+  }
+  for
+    color in [
+      "\u{1b}[38;2;0;49;0m", "\u{1b}[48;2;0;49;0m", "\u{1b}[38:2::0:49:0m",
+    ] {
+    assert_false(
+      theme.bg("toolSuccessBg", color + "text").contains(color + open),
+    )
+  }
+}
+
+///|
+async test "cached markdown follows content, width, and thinking changes" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_user("A user **message**")
+  transcript.start_assistant()
+  transcript.set_assistant_content([("Alpha **bold** omega", false)])
+  let first = @tui_app.Widget::render(transcript, 50)
+  assert_eq(@tui_app.Widget::render(transcript, 50), first)
+  transcript.set_assistant_content([("Replacement", false)])
+  let replacement = render_rows(transcript, 50).join("\n")
+  assert_true(replacement.contains("Replacement"))
+  assert_false(replacement.contains("Alpha"))
+  let text = @tui_app.Widget::render(transcript, 50)
+  transcript.set_assistant_content([("Replacement", true)])
+  assert_true(@tui_app.Widget::render(transcript, 50) != text)
+  transcript.set_expanded_thinking(false)
+  assert_true(render_rows(transcript, 50).join("\n").contains("Thinking..."))
+  transcript.set_expanded_thinking(true)
+  let narrow = render_rows(transcript, 12)
+  assert_true(narrow.length() > render_rows(transcript, 50).length())
+  assert_eq(render_rows(transcript, 12), narrow)
+}

@@ -31,6 +31,8 @@ pub struct Transcript {
   mut expanded_thinking : Bool
   tool_overrides : Map[Int, Bool]
   thinking_overrides : Map[String, Bool]
+  /// One latest render per message block; streaming replaces entries instead of growing the cache.
+  markdown_cache : Map[String, (String, Int, Bool, String, Array[String])]
 }
 
 ///|
@@ -63,6 +65,7 @@ pub fn Transcript::new(theme : Theme) -> Transcript {
     expanded_thinking: true,
     tool_overrides: Map([]),
     thinking_overrides: Map([]),
+    markdown_cache: Map([]),
   }
 }
 
@@ -388,11 +391,7 @@ pub fn Transcript::click(self : Transcript, row : Int, width : Int) -> Bool {
               .get(key)
               .unwrap_or(self.expanded_thinking)
             let rows = render_assistant_block(
-              self.theme,
-              text,
-              thinking,
-              expanded,
-              width,
+              self, text, thinking, expanded, width, key,
             )
             if thinking && row >= block_top && row < block_top + rows.length() {
               self.thinking_overrides[key] = !expanded
@@ -418,6 +417,7 @@ fn Transcript::push_item(self : Transcript, item : TranscriptItem) -> Unit {
     self.items = self.items[2:].to_owned()
     self.tool_overrides.clear()
     self.thinking_overrides.clear()
+    self.markdown_cache.clear()
     self.items.push(TranscriptItem::Note("… earlier messages omitted"))
   }
   self.items.push(item)
@@ -484,7 +484,8 @@ fn render_item(
       }
       rows
     }
-    TranscriptItem::User(text) => render_user(theme, text, width)
+    TranscriptItem::User(text) =>
+      render_user(transcript, text, width, "user:\{index}")
     TranscriptItem::Note(text) =>
       render_plain(text, fn(text) { theme.f_dim(text) }, width)
     TranscriptItem::Error(text) =>
@@ -522,20 +523,24 @@ fn render_item(
 
 ///|
 /// 用户消息:整块 `userMessageBg` 背景,上下各留一行 padding(pi `Box(padX=1,padY=1)`)。
-fn render_user(theme : Theme, text : String, width : Int) -> Array[String] {
+fn render_user(
+  transcript : Transcript,
+  text : String,
+  width : Int,
+  key : String,
+) -> Array[String] {
+  let theme = transcript.theme
   let bg = fn(text : String) { theme.bg_user(text) }
   let lines : Array[String] = []
   lines.push(bg_blank(bg, width))
   let content_width = available_width(width, PAD * 2)
   for
-    wrapped in render_markdown_themed(
-      theme,
+    wrapped in transcript.cached_markdown(
+      key,
       physical_lines(text).join("\n"),
       content_width,
-      padding_x=0,
       body_role="userMessageText",
-      preserve_ordered_markers=true,
-      preserve_backslash_escapes=true,
+      user=true,
     ) {
     lines.push(bg_line(bg, " ".repeat(PAD) + wrapped, width))
   }
@@ -591,7 +596,15 @@ fn render_assistant(
     let expanded = transcript.thinking_overrides
       .get("\{item_index}:\{block_index}")
       .unwrap_or(transcript.expanded_thinking)
-    for line in render_assistant_block(theme, text, thinking, expanded, width) {
+    for
+      line in render_assistant_block(
+        transcript,
+        text,
+        thinking,
+        expanded,
+        width,
+        "\{item_index}:\{block_index}",
+      ) {
       lines.push(line)
     }
   }
@@ -621,23 +634,57 @@ fn render_assistant(
 
 ///|
 fn render_assistant_block(
-  theme : Theme,
+  transcript : Transcript,
   text : String,
   thinking : Bool,
   expanded : Bool,
   width : Int,
+  key : String,
 ) -> Array[String] {
   if thinking && !expanded {
-    [pad_left(italic(theme.f_thinking("Thinking...")), PAD)]
+    [pad_left(italic(transcript.theme.f_thinking("Thinking...")), PAD)]
   } else {
-    render_markdown_themed(
-      theme,
+    transcript.cached_markdown(
+      key,
       text.trim().to_owned(),
       width,
       body_role=if thinking { "thinkingText" } else { "text" },
       body_italic=thinking,
     )
   }
+}
+
+///|
+fn Transcript::cached_markdown(
+  self : Transcript,
+  key : String,
+  text : String,
+  width : Int,
+  body_role~ : String,
+  body_italic? : Bool = false,
+  user? : Bool = false,
+) -> Array[String] {
+  let true_color = terminal_true_color()
+  if self.markdown_cache.get(key)
+    is Some((cached_text, cached_width, cached_color, cached_role, lines)) &&
+    cached_text == text &&
+    cached_width == width &&
+    cached_color == true_color &&
+    cached_role == body_role {
+    return lines
+  }
+  let lines = render_markdown_themed(
+    self.theme,
+    text,
+    width,
+    padding_x=if user { 0 } else { 1 },
+    body_role~,
+    body_italic~,
+    preserve_ordered_markers=user,
+    preserve_backslash_escapes=user,
+  )
+  self.markdown_cache[key] = (text, width, true_color, body_role, lines)
+  lines
 }
 
 ///|
@@ -809,7 +856,7 @@ fn render_bash(
       for
         line in result_preview(
           theme,
-          text.trim().to_owned(),
+          text,
           BASH_PREVIEW_LINES,
           expanded,
           content_width,
