@@ -6,6 +6,7 @@ import {
   "moonbitlang/core/env",
   "moonbitlang/core/random",
   "moonbitlang/core/string",
+  "moonbitlang/x/time",
 }
 
 import {

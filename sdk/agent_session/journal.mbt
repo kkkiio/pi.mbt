@@ -5,21 +5,18 @@ using @agent_loop {type AgentMessage}
 pub(open) trait SessionJournal {
   fn generate_id(Self) -> String
   /// Append caller-provisioned entries. The journal assigns the
-  /// storage-owned fields (`seq`, `parent_id`, `timestamp`), persists the
+  /// storage-owned fields (`parent_id`, `timestamp`), persists the
   /// entries, and returns them in stored form.
   async fn append(Self, ArrayView[NewSessionEntry]) -> Array[SessionEntry]
   fn get_entries(Self) -> ArrayView[SessionEntry]
 }
 
 ///|
-/// A stored journal entry. The JSON shape mirrors pi's v4 session entries:
-/// flattened fields, storage-assigned `seq`/`parentId`/`timestamp`, and a
-/// `type` discriminant alongside the variant payload.
+/// A stored pi v3 session entry. Entry timestamps serialize as UTC ISO
+/// strings; timestamps inside messages remain Unix milliseconds.
 pub(all) struct SessionEntry {
   id : String
-  /// Storage-assigned sequence number, monotonically increasing per journal.
-  seq : Int
-  /// The lane leaf at append time; `None` for the first entry.
+  /// The branch leaf at append time; `None` for the first entry.
   parent_id : String?
   /// Storage-assigned persist time, Unix milliseconds.
   timestamp : UInt64
@@ -28,7 +25,7 @@ pub(all) struct SessionEntry {
 
 ///|
 /// Caller-provisioned entry: everything except the storage-assigned fields
-/// (`seq`, `parent_id`, `timestamp`).
+/// (`parent_id`, `timestamp`).
 pub(all) struct NewSessionEntry {
   id : String
   content : SessionEntryContent
@@ -40,27 +37,25 @@ pub(all) enum SessionEntryContent {
   ModelChange(provider~ : String, model_id~ : String)
   Compaction(
     summary~ : String,
-    retained_tail~ : Array[AgentMessage],
+    first_kept_entry_id~ : String,
     tokens_before~ : Int,
     details~ : Json?,
     usage~ : @agent_loop.Usage?
   )
   Custom(custom_type~ : String, data~ : Json?)
+  /// pi metadata entries not used by the current agent (for example thinking levels).
+  Metadata(Json)
 }
 
 ///|
 pub impl ToJson for SessionEntry with fn to_json(self) -> Json {
   let obj : Map[String, Json] = Map([])
   obj["id"] = self.id.to_json()
-  obj["seq"] = self.seq.to_json()
   obj["parentId"] = match self.parent_id {
     Some(id) => id.to_json()
     None => Json::null()
   }
-  // pi stores timestamps as JSON numbers; UInt64's own ToJson emits a
-  // string, so convert explicitly. Millisecond timestamps fit safely in a
-  // JSON double.
-  obj["timestamp"] = Json::number(self.timestamp.to_double())
+  obj["timestamp"] = format_journal_timestamp(self.timestamp).to_json()
   match self.content {
     Message(message) => {
       obj["type"] = "message".to_json()
@@ -71,10 +66,10 @@ pub impl ToJson for SessionEntry with fn to_json(self) -> Json {
       obj["provider"] = provider.to_json()
       obj["modelId"] = model_id.to_json()
     }
-    Compaction(summary~, retained_tail~, tokens_before~, details~, usage~) => {
+    Compaction(summary~, first_kept_entry_id~, tokens_before~, details~, usage~) => {
       obj["type"] = "compaction".to_json()
       obj["summary"] = summary.to_json()
-      obj["retainedTail"] = retained_tail.to_json()
+      obj["firstKeptEntryId"] = first_kept_entry_id.to_json()
       obj["tokensBefore"] = tokens_before.to_json()
       if details is Some(details) {
         obj["details"] = details
@@ -90,6 +85,13 @@ pub impl ToJson for SessionEntry with fn to_json(self) -> Json {
         obj["data"] = data
       }
     }
+    Metadata(Object(fields)) =>
+      for key, value in fields {
+        if key != "id" && key != "parentId" && key != "timestamp" {
+          obj[key] = value
+        }
+      }
+    Metadata(_) => abort("session metadata must be an object")
   }
   Json::object(obj)
 }
@@ -105,14 +107,14 @@ pub impl FromJson for SessionEntry with fn from_json(json, path) {
   guard fields.get("id") is Some(String(id)) else {
     decode_error(path, "SessionEntry::from_json: invalid id")
   }
-  guard fields.get("seq") is Some(Number(seq, ..)) else {
-    decode_error(path, "SessionEntry::from_json: invalid seq")
-  }
   let parent_id = match fields.get("parentId") {
     Some(String(id)) => Some(id)
     _ => None
   }
-  let timestamp = parse_timestamp(fields.get("timestamp"), path)
+  let timestamp = parse_journal_timestamp(
+    fields.get("timestamp"),
+    path.add_key("timestamp"),
+  )
   guard fields.get("type") is Some(String(entry_type)) else {
     decode_error(path, "SessionEntry::from_json: missing type")
   }
@@ -137,13 +139,9 @@ pub impl FromJson for SessionEntry with fn from_json(json, path) {
       guard fields.get("summary") is Some(String(summary)) else {
         decode_error(content_path, "compaction entry is missing summary")
       }
-      guard fields.get("retainedTail") is Some(Array(tail)) else {
-        decode_error(content_path, "compaction entry is missing retainedTail")
-      }
-      let retained_tail = []
-      for i, item in tail {
-        retained_tail.push(
-          parse_agent_message(item, path.add_key("retainedTail").add_index(i)),
+      guard fields.get("firstKeptEntryId") is Some(String(first_kept_entry_id)) else {
+        decode_error(
+          content_path, "compaction entry is missing firstKeptEntryId",
         )
       }
       guard fields.get("tokensBefore") is Some(Number(tokens_before, ..)) else {
@@ -156,7 +154,7 @@ pub impl FromJson for SessionEntry with fn from_json(json, path) {
       }
       Compaction(
         summary~,
-        retained_tail~,
+        first_kept_entry_id~,
         tokens_before=tokens_before.to_int(),
         details=fields.get("details"),
         usage~,
@@ -168,13 +166,54 @@ pub impl FromJson for SessionEntry with fn from_json(json, path) {
       }
       Custom(custom_type~, data=fields.get("data"))
     }
-    _ => decode_error(content_path, "unknown entry type \{entry_type}")
+    "thinking_level_change" | "session_info" | "label" | "usage" =>
+      Metadata(json)
+    _ =>
+      decode_error(content_path, "unsupported session entry type \{entry_type}")
   }
-  { id, seq: seq.to_int(), parent_id, timestamp, content, }
+  { id, parent_id, timestamp, content, }
 }
 
 ///|
 pub extend SessionEntry with @json.FromJson::{from_json}
+
+///|
+/// Shared by the session header and entries, matching Date.toISOString().
+pub fn format_journal_timestamp(timestamp : UInt64) -> String {
+  let millis = timestamp.reinterpret_as_int64()
+  let date = @time.PlainDateTime::from_unix_second(
+    millis / 1000,
+    (millis % 1000).to_int() * 1_000_000,
+    @time.utc_offset,
+  ) catch {
+    error => abort(error.to_string())
+  }
+  let pad = (value : Int, width : Int) => {
+    let text = value.to_string()
+    "0".repeat(width - text.length()) + text
+  }
+  "\{pad(date.year(), 4)}-\{pad(date.month(), 2)}-\{pad(date.day(), 2)}T\{pad(date.hour(), 2)}:\{pad(date.minute(), 2)}:\{pad(date.second(), 2)}.\{pad(date.nanosecond() / 1_000_000, 3)}Z"
+}
+
+///|
+fn parse_journal_timestamp(
+  json : Json?,
+  path : @json.JsonPath,
+) -> UInt64 raise @json.JsonDecodeError {
+  guard json is Some(String(text)) && text.length() == 24 else {
+    decode_error(path, "invalid ISO timestamp")
+  }
+  guard text.strip_suffix("Z") is Some(date_text) else {
+    decode_error(path, "invalid ISO timestamp")
+  }
+  let date : @time.PlainDateTime = @string.FromStr::from_str(date_text) catch {
+    _ => decode_error(path, "invalid ISO timestamp")
+  }
+  let millis = date.to_unix_second() * 1000 +
+    (date.nanosecond() / 1_000_000).to_int64()
+  guard millis >= 0 else { decode_error(path, "invalid ISO timestamp") }
+  millis.reinterpret_as_uint64()
+}
 
 ///|
 fn[T] decode_error(
@@ -209,14 +248,13 @@ fn parse_agent_message(
   }
   match role {
     "user" => {
-      guard fields.get("content") is Some(Array(items)) else {
-        decode_error(path, "User message: missing content")
-      }
-      let contents = []
-      for i, item in items {
-        contents.push(
-          parse_input_content(item, path.add_key("content").add_index(i)),
-        )
+      let contents = match fields.get("content") {
+        Some(String(text)) => [@agent_loop.InputMessageContent::Text(text)]
+        Some(Array(items)) =>
+          items.mapi((i, item) => {
+            parse_input_content(item, path.add_key("content").add_index(i))
+          })
+        _ => decode_error(path, "User message: missing content")
       }
       let timestamp = parse_timestamp(
         fields.get("timestamp"),
@@ -303,6 +341,12 @@ fn parse_agent_message(
         tool_call_id,
         tool_name,
         content,
+        details: fields.get("details"),
+        usage: match fields.get("usage") {
+          Some(usage_json) if usage_json is Object(_) =>
+            Some(parse_usage(usage_json, path.add_key("usage")))
+          _ => None
+        },
         is_error: fields.get("isError") is Some(True),
         timestamp,
       })
@@ -373,12 +417,17 @@ fn parse_assistant_content(
 }
 
 ///|
-/// Signatures are stored as strings in pi's format (legacy id strings or
-/// stringified JSON). Parse stringified JSON back; keep unparseable strings
-/// as plain JSON strings so the round trip stays lossless.
+/// Restore structured provider replay data while keeping opaque strings
+/// (including strings that happen to parse as JSON primitives) verbatim.
 fn parse_signature(json : Json?) -> Json {
   match json {
-    Some(String(s)) => @json.parse(s) catch { _ => Json::string(s) }
+    Some(String(text)) => {
+      let parsed = Some(@json.parse(text)) catch { _ => None }
+      match parsed {
+        Some(Object(fields)) if !fields.is_empty() => Json::object(fields)
+        _ => Json::string(text)
+      }
+    }
     Some(other) => other
     None => Json::empty_object()
   }
@@ -458,7 +507,6 @@ struct InMemorySessionJournal {
   journal : Array[SessionEntry]
   ids : Set[String]
   rand : @random.Rand
-  mut seq : Int
   mut leaf_id : String?
   now : () -> UInt64
 }
@@ -471,7 +519,6 @@ pub fn InMemorySessionJournal::InMemorySessionJournal(
     journal: [],
     ids: Set([]),
     rand: @random.Rand::new(),
-    seq: 0,
     leaf_id: None,
     now,
   }
@@ -491,10 +538,8 @@ pub impl SessionJournal for InMemorySessionJournal with fn append(
 ) {
   let stored = []
   for p in provisioned {
-    self.seq += 1
     let entry : SessionEntry = {
       id: p.id,
-      seq: self.seq,
       parent_id: self.leaf_id,
       timestamp: (self.now)(),
       content: p.content,

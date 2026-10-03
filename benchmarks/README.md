@@ -10,7 +10,7 @@ images need no node: the bun runtime is embedded in the binary.
 
 Session journals land in `/logs/agent/pim/sessions` inside the environment and
 are collected via `--agent-include-logs "pim/**"`, so every trial artifact
-includes the pi-v4 JSONL journal for analysis.
+includes the pi v3 JSONL journal for analysis.
 
 ### Cloud (GitHub Actions)
 

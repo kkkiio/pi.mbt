@@ -131,22 +131,21 @@ pub extend Usage with Debug::{to_repr}
 
 ///|
 pub impl ToJson for Usage with fn to_json(self : Usage) -> Json {
-  {
-    "input": self.input,
-    "output": self.output,
-    "cacheRead": self.cache_read,
-    "cacheWrite": self.cache_write,
-    "cacheWrite1h": match self.cache_write_1h {
-      Some(n) => n.to_json()
-      None => null
-    },
-    "reasoning": match self.reasoning {
-      Some(n) => n.to_json()
-      None => null
-    },
-    "totalTokens": self.total_tokens,
-    "cost": self.cost,
+  let obj : Map[String, Json] = {
+    "input": self.input.to_json(),
+    "output": self.output.to_json(),
+    "cacheRead": self.cache_read.to_json(),
+    "cacheWrite": self.cache_write.to_json(),
+    "totalTokens": self.total_tokens.to_json(),
+    "cost": self.cost.to_json(),
   }
+  if self.cache_write_1h is Some(n) {
+    obj["cacheWrite1h"] = n.to_json()
+  }
+  if self.reasoning is Some(n) {
+    obj["reasoning"] = n.to_json()
+  }
+  Json::object(obj)
 }
 
 ///|

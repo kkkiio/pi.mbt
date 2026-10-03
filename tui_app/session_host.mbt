@@ -221,7 +221,7 @@ fn session_stem(path : String) -> String {
 }
 
 ///|
-/// 把已落盘的历史按 seq 顺序投影回消息流。
+/// 把已落盘的当前分支历史投影回消息流。
 ///
 /// 只渲染会出现在消息流里的内容;`ModelChange` / `Compaction` / `Custom`
 /// 本期不渲染。

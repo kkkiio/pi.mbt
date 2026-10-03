@@ -136,6 +136,8 @@ pub async fn run_agent_loop(
               tool_call_id: tool_call.id,
               tool_name: tool_call.name,
               content: [InputMessageContent::Text("Operation aborted")],
+              details: None,
+              usage: None,
               is_error: true,
               timestamp: call_timestamp,
             }
@@ -145,6 +147,8 @@ pub async fn run_agent_loop(
               tool_call_id: tool_call.id,
               tool_name: tool_call.name,
               content: [],
+              details: None,
+              usage: None,
               is_error: true,
               timestamp: call_timestamp,
             }
@@ -177,6 +181,8 @@ pub async fn run_agent_loop(
                   tool_call_id: tool_call.id,
                   tool_name: tool_call.name,
                   content: [InputMessageContent::Text("Operation aborted")],
+                  details: None,
+                  usage: None,
                   is_error: true,
                   timestamp: call_timestamp,
                 }
@@ -187,6 +193,8 @@ pub async fn run_agent_loop(
                   tool_call_id: tool_call.id,
                   tool_name: tool_call.name,
                   content: result.content,
+                  details: Some(result.details),
+                  usage: result.usage,
                   is_error: result.is_error,
                   timestamp: call_timestamp,
                 }

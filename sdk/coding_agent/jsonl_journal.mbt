@@ -1,11 +1,8 @@
 ///|
 /// A JSON Lines session journal that implements `SessionJournal`.
 ///
-/// The on-disk format matches pi's v4 session journal: a `kind: "header"`
-/// line followed by one `kind: "entry"` mutation line per persisted
-/// `SessionEntry`. Entry payloads are flattened and carry storage-assigned
-/// `seq`/`parentId`/`timestamp`, so journals written by pim can be read by
-/// pi tooling and vice versa.
+/// The on-disk format is pi v3: a `type: "session"` header followed by
+/// direct entry objects.
 
 ///|
 pub struct JsonlSessionJournal[W] {
@@ -13,9 +10,9 @@ pub struct JsonlSessionJournal[W] {
   entries : Array[@agent_session.SessionEntry]
   ids : Set[String]
   rand : @random.Rand
-  lane : String
   cwd : String
-  mut seq : Int
+  header_id : String
+  created_at : UInt64
   mut leaf_id : String?
   /// 构造时已存在的条目数(已落盘)。flush 只写这个下标之后的条目。
   start_index : Int
@@ -41,27 +38,22 @@ pub fn[W] JsonlSessionJournal::JsonlSessionJournal(
   rand? : @random.Rand = @random.Rand::new(),
   cwd? : String = @env.current_dir().unwrap_or(""),
   now? : () -> UInt64 = @env.now,
-  lane? : String = "main",
   fresh? : Bool = true,
 ) -> JsonlSessionJournal[W] {
   let ids = Set([])
-  let mut seq = 0
   let mut leaf_id : String? = None
   for entry in entries {
     ids.add(entry.id)
-    if entry.seq > seq {
-      seq = entry.seq
-    }
     leaf_id = Some(entry.id)
   }
   {
     writer,
     entries,
     ids,
+    header_id: make_id(rand, ids),
+    created_at: now(),
     rand,
-    lane,
     cwd,
-    seq,
     leaf_id,
     start_index: entries.length(),
     flushed: !fresh,
@@ -97,10 +89,8 @@ pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
 ] with fn append(self, provisioned) {
   let stored = []
   for p in provisioned {
-    self.seq += 1
     let entry : @agent_session.SessionEntry = {
       id: p.id,
-      seq: self.seq,
       parent_id: self.leaf_id,
       timestamp: (self.now)(),
       content: p.content,
@@ -110,23 +100,21 @@ pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
     self.entries.push(entry)
     stored.push(entry)
     if self.flushed {
-      self.writer.write(entry_mutation_json(entry, self.lane).stringify())
+      self.writer.write(entry.to_json().stringify())
       self.writer.write("\n")
     } else if self.has_assistant() {
       let header : Json = {
-        "kind": "header",
-        "version": 4,
-        "id": make_id(self.rand, self.ids),
-        "createdAt": Json::number((self.now)().to_double()),
+        "type": "session",
+        "version": 3,
+        "id": self.header_id,
+        "timestamp": @agent_session.format_journal_timestamp(self.created_at),
         "cwd": self.cwd,
       }
       self.writer.write(header.stringify())
       self.writer.write("\n")
       // 只写本次新增的;构造时传入的条目已经在盘上了。
       for i in self.start_index..<self.entries.length() {
-        self.writer.write(
-          entry_mutation_json(self.entries[i], self.lane).stringify(),
-        )
+        self.writer.write(self.entries[i].to_json().stringify())
         self.writer.write("\n")
       }
       // 在批次内也要立刻置位,否则同一批的下一条会再 flush 一次。
@@ -147,24 +135,6 @@ fn[W] JsonlSessionJournal::has_assistant(self : JsonlSessionJournal[W]) -> Bool 
     }
   }
   false
-}
-
-///|
-fn entry_mutation_json(
-  entry : @agent_session.SessionEntry,
-  lane : String,
-) -> Json {
-  guard entry.to_json() is Object(fields) else {
-    abort("SessionEntry::to_json must produce an object")
-  }
-  // kind/lane first, matching pi's key order so journals diff cleanly.
-  let obj : Map[String, Json] = Map([])
-  obj["kind"] = "entry".to_json()
-  obj["lane"] = lane.to_json()
-  for key, value in fields {
-    obj[key] = value
-  }
-  Json::object(obj)
 }
 
 ///|
@@ -219,9 +189,7 @@ fn split_complete_lines(content : String) -> (String, Bool) {
 }
 
 ///|
-/// 读取 journal。崩溃时写了一半的尾行会被忽略,并从文件里去掉(pi 的 `openV4`
-/// 也这么做):留着的话,续写时新条目会接在残片后面,整行依旧非法,之后每次
-/// 恢复都会丢掉这一行之后的内容。
+/// Repair an interrupted final write before resuming append-only persistence.
 pub fn fetch_entries(
   path : String,
 ) -> Array[@agent_session.SessionEntry] raise Failure {
@@ -244,8 +212,18 @@ pub fn fetch_entries(
     return entries
   }
   let header = Some(@json.parse(lines[0])) catch { _ => None }
-  guard header is Some({ "kind": "header", "version": Number(version, ..), .. }) &&
-    version == 4 else {
+  guard header
+    is Some(
+      {
+        "type": "session",
+        "version": Number(version, ..),
+        "id": String(_),
+        "timestamp": String(_),
+        "cwd": String(_),
+        ..
+      }
+    ) &&
+    version == 3 else {
     fail("session journal at \{path} has an invalid or unsupported header")
   }
   for i = 1; i < lines.length(); i = i + 1 {
@@ -260,11 +238,6 @@ pub fn fetch_entries(
           fail("session journal has invalid JSON at line \{i + 1}")
         }
       Some(json) => {
-        // Skip non-entry mutations (record/lane/fact) so journals written by
-        // pi remain readable here.
-        if json is { "kind": String(kind), .. } && kind != "entry" {
-          continue
-        }
         let entry = @json.from_json(json) catch {
           err =>
             fail("session journal has invalid entry at line \{i + 1}: \{err}")
