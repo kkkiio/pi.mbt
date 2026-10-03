@@ -608,8 +608,7 @@ fn render_assistant(
   let theme = transcript.theme
   let lines : Array[String] = []
   for block_index, (text, thinking) in blocks {
-    let text = text.trim().to_owned()
-    if text.is_empty() {
+    if text.trim().is_empty() {
       continue
     }
     if !lines.is_empty() {
@@ -668,7 +667,7 @@ fn render_assistant_block(
   } else {
     transcript.cached_markdown(
       key,
-      text.trim().to_owned(),
+      text,
       width,
       body_role=if thinking { "thinkingText" } else { "text" },
       body_italic=thinking,

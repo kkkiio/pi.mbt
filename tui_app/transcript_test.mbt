@@ -630,3 +630,21 @@ async test "large generic arguments are bounded and cached calls refresh after r
   assert_true(narrow.length() <= 60)
   assert_eq(render_rows(transcript, 12), narrow)
 }
+
+///|
+async test "assistant and thinking retain indented Markdown code blocks" {
+  @tui_app.load_module()
+  for thinking in [false, true] {
+    let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+    transcript.start_assistant()
+    transcript.set_assistant_content([("    **literal**\n    next", thinking)])
+    transcript.set_expanded_thinking(true)
+    let rows = render_rows(transcript, 50).join("\n")
+    assert_true(rows.contains("**literal**"))
+    assert_true(rows.contains("next"))
+    transcript.set_assistant_content([("**prose**", thinking)])
+    let prose = render_rows(transcript, 50).join("\n")
+    assert_true(prose.contains("prose"))
+    assert_false(prose.contains("**prose**"))
+  }
+}
