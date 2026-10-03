@@ -33,12 +33,11 @@ async test "persists various entries in memory and as JSONL" {
   let writer = BufferWriter::BufferWriter()
   let preloaded : @agent_session.SessionEntry = {
     id: "e0",
-    seq: 1,
     parent_id: None,
     timestamp: 100,
     content: @agent_session.SessionEntryContent::Compaction(
       summary="earlier context",
-      retained_tail=[],
+      first_kept_entry_id="e0",
       tokens_before=42,
       details=None,
       usage=None,
@@ -76,6 +75,8 @@ async test "persists various entries in memory and as JSONL" {
       tool_call_id: "call_1",
       tool_name: "bash",
       content: [@agent_loop.InputMessageContent::Text("ok")],
+      details: None,
+      usage: None,
       is_error: false,
       timestamp: 1786903823973,
     },
@@ -102,22 +103,20 @@ async test "persists various entries in memory and as JSONL" {
     },
   ])
 
-  // The journal assigns seq/parentId/timestamp at append time.
+  // The journal assigns parentId/timestamp at append time.
   json_inspect(stored, content=[
     {
       "id": "e1",
-      "seq": 2,
       "parentId": "e0",
-      "timestamp": 1786903823973,
+      "timestamp": "2026-08-16T18:10:23.973Z",
       "type": "model_change",
       "provider": "deepseek",
       "modelId": "v4",
     },
     {
       "id": "e2",
-      "seq": 3,
       "parentId": "e1",
-      "timestamp": 1786903823973,
+      "timestamp": "2026-08-16T18:10:23.973Z",
       "type": "message",
       "message": {
         "role": "user",
@@ -127,9 +126,8 @@ async test "persists various entries in memory and as JSONL" {
     },
     {
       "id": "e3",
-      "seq": 4,
       "parentId": "e2",
-      "timestamp": 1786903823973,
+      "timestamp": "2026-08-16T18:10:23.973Z",
       "type": "message",
       "message": {
         "role": "assistant",
@@ -144,16 +142,27 @@ async test "persists various entries in memory and as JSONL" {
         "provider": "deepseek",
         "model": "deepseek-v4-flash",
         "stopReason": "stop",
-        "errorMessage": null,
-        "usage": null,
+        "usage": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 0,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0,
+          },
+        },
         "timestamp": 1786903823973,
       },
     },
     {
       "id": "e4",
-      "seq": 5,
       "parentId": "e3",
-      "timestamp": 1786903823973,
+      "timestamp": "2026-08-16T18:10:23.973Z",
       "type": "message",
       "message": {
         "role": "toolResult",
@@ -180,18 +189,16 @@ async test "persists various entries in memory and as JSONL" {
   json_inspect(fetched, content=[
     {
       "id": "e1",
-      "seq": 2,
       "parentId": "e0",
-      "timestamp": 1786903823973,
+      "timestamp": "2026-08-16T18:10:23.973Z",
       "type": "model_change",
       "provider": "deepseek",
       "modelId": "v4",
     },
     {
       "id": "e2",
-      "seq": 3,
       "parentId": "e1",
-      "timestamp": 1786903823973,
+      "timestamp": "2026-08-16T18:10:23.973Z",
       "type": "message",
       "message": {
         "role": "user",
@@ -201,9 +208,8 @@ async test "persists various entries in memory and as JSONL" {
     },
     {
       "id": "e3",
-      "seq": 4,
       "parentId": "e2",
-      "timestamp": 1786903823973,
+      "timestamp": "2026-08-16T18:10:23.973Z",
       "type": "message",
       "message": {
         "role": "assistant",
@@ -218,16 +224,27 @@ async test "persists various entries in memory and as JSONL" {
         "provider": "deepseek",
         "model": "deepseek-v4-flash",
         "stopReason": "stop",
-        "errorMessage": null,
-        "usage": null,
+        "usage": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 0,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0,
+          },
+        },
         "timestamp": 1786903823973,
       },
     },
     {
       "id": "e4",
-      "seq": 5,
       "parentId": "e3",
-      "timestamp": 1786903823973,
+      "timestamp": "2026-08-16T18:10:23.973Z",
       "type": "message",
       "message": {
         "role": "toolResult",
@@ -243,15 +260,15 @@ async test "persists various entries in memory and as JSONL" {
   @coding_agent.remove_file(path)
   @coding_agent.remove_dir(temp_dir)
 
-  // The writer received the pi v4 header plus one mutation line per entry.
+  // The writer received the pi v3 header plus one line per entry.
   inspect(
     writer_text(writer),
     content=(
-      #|{"kind":"header","version":4,"id":"13219109","createdAt":1786903823973,"cwd":"/workspaces/pi.mbt"}
-      #|{"kind":"entry","lane":"main","id":"e1","seq":2,"parentId":"e0","timestamp":1786903823973,"type":"model_change","provider":"deepseek","modelId":"v4"}
-      #|{"kind":"entry","lane":"main","id":"e2","seq":3,"parentId":"e1","timestamp":1786903823973,"type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}],"timestamp":1786903823973}}
-      #|{"kind":"entry","lane":"main","id":"e3","seq":4,"parentId":"e2","timestamp":1786903823973,"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"hi","textSignature":"{\"type\":\"message\",\"id\":\"msg_1\"}"}],"api":"openai-responses","provider":"deepseek","model":"deepseek-v4-flash","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":1786903823973}}
-      #|{"kind":"entry","lane":"main","id":"e4","seq":5,"parentId":"e3","timestamp":1786903823973,"type":"message","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"ok"}],"isError":false,"timestamp":1786903823973}}
+      #|{"type":"session","version":3,"id":"13219109","timestamp":"2026-08-16T18:10:23.973Z","cwd":"/workspaces/pi.mbt"}
+      #|{"id":"e1","parentId":"e0","timestamp":"2026-08-16T18:10:23.973Z","type":"model_change","provider":"deepseek","modelId":"v4"}
+      #|{"id":"e2","parentId":"e1","timestamp":"2026-08-16T18:10:23.973Z","type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}],"timestamp":1786903823973}}
+      #|{"id":"e3","parentId":"e2","timestamp":"2026-08-16T18:10:23.973Z","type":"message","message":{"role":"assistant","content":[{"type":"text","text":"hi","textSignature":"{\"type\":\"message\",\"id\":\"msg_1\"}"}],"api":"openai-responses","provider":"deepseek","model":"deepseek-v4-flash","stopReason":"stop","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":1786903823973}}
+      #|{"id":"e4","parentId":"e3","timestamp":"2026-08-16T18:10:23.973Z","type":"message","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"ok"}],"isError":false,"timestamp":1786903823973}}
       #|
     ),
   )
@@ -265,15 +282,15 @@ async test "resuming over a torn tail repairs the file before appending" {
   let temp_dir = @coding_agent.create_temp_dir("pim-jsonl-torn-tail-")
   let path = "\{temp_dir}/journal.jsonl"
   @coding_agent.write_bytes_file(
-    path, b"{\"kind\":\"header\",\"version\":4,\"id\":\"hdr\",\"createdAt\":1,\"cwd\":\"/tmp\"}\n{\"id\":\"kept\",\"kind\":\"entry\",\"seq\":1,\"parentId\":null,\"timestamp\":7,\"type\":\"custom\",\"customType\":\"kept\"}\n{\"kind\":\"entry\",\"seq\":2,\"paren",
+    path, b"{\"type\":\"session\",\"version\":3,\"id\":\"hdr\",\"timestamp\":\"1970-01-01T00:00:00.001Z\",\"cwd\":\"/tmp\"}\n{\"id\":\"kept\",\"parentId\":null,\"timestamp\":\"1970-01-01T00:00:00.007Z\",\"type\":\"custom\",\"customType\":\"kept\"}\n{\"id\":\"torn\",\"paren",
   )
   let entries = @coding_agent.fetch_entries(path)
   inspect(entries.length(), content="1")
   inspect(
     @utf8.decode_lossy(@coding_agent.read_bytes_file(path)),
     content=(
-      #|{"kind":"header","version":4,"id":"hdr","createdAt":1,"cwd":"/tmp"}
-      #|{"id":"kept","kind":"entry","seq":1,"parentId":null,"timestamp":7,"type":"custom","customType":"kept"}
+      #|{"type":"session","version":3,"id":"hdr","timestamp":"1970-01-01T00:00:00.001Z","cwd":"/tmp"}
+      #|{"id":"kept","parentId":null,"timestamp":"1970-01-01T00:00:00.007Z","type":"custom","customType":"kept"}
       #|
     ),
   )
@@ -310,7 +327,7 @@ async test "resuming follows the active parentId chain" {
   let temp_dir = @coding_agent.create_temp_dir("pim-jsonl-branch-")
   let path = "\{temp_dir}/journal.jsonl"
   @coding_agent.write_bytes_file(
-    path, b"{\"kind\":\"header\",\"version\":4,\"id\":\"hdr\",\"createdAt\":1,\"cwd\":\"/tmp\"}\n{\"id\":\"a1\",\"kind\":\"entry\",\"seq\":1,\"parentId\":null,\"timestamp\":1,\"type\":\"custom\",\"customType\":\"root\"}\n{\"id\":\"b1\",\"kind\":\"entry\",\"seq\":2,\"parentId\":\"a1\",\"timestamp\":2,\"type\":\"custom\",\"customType\":\"abandoned\"}\n{\"id\":\"c1\",\"kind\":\"entry\",\"seq\":3,\"parentId\":\"a1\",\"timestamp\":3,\"type\":\"custom\",\"customType\":\"active\"}\n",
+    path, b"{\"type\":\"session\",\"version\":3,\"id\":\"hdr\",\"timestamp\":\"1970-01-01T00:00:00.000Z\",\"cwd\":\"/tmp\"}\n{\"id\":\"a1\",\"parentId\":null,\"timestamp\":\"1970-01-01T00:00:00.001Z\",\"type\":\"custom\",\"customType\":\"root\"}\n{\"id\":\"b1\",\"parentId\":\"a1\",\"timestamp\":\"1970-01-01T00:00:00.002Z\",\"type\":\"custom\",\"customType\":\"abandoned\"}\n{\"id\":\"c1\",\"parentId\":\"a1\",\"timestamp\":\"1970-01-01T00:00:00.003Z\",\"type\":\"custom\",\"customType\":\"active\"}\n",
   )
   json_inspect(
     @coding_agent.fetch_active_entries(path).map(entry => entry.id),
@@ -318,6 +335,25 @@ async test "resuming follows the active parentId chain" {
   )
   @coding_agent.remove_file(path)
   @coding_agent.remove_dir(temp_dir)
+}
+
+///|
+/// An unsupported header fails rather than being treated as an empty session.
+async test "journal reader rejects a non-pi header without changing it" {
+  let dir = @coding_agent.create_temp_dir("pim-journal-header-")
+  let path = "\{dir}/journal.jsonl"
+  let original = b"{\"kind\":\"header\",\"version\":4,\"id\":\"hdr\",\"createdAt\":1,\"cwd\":\"/tmp\"}\n"
+  @coding_agent.write_bytes_file(path, original)
+  let failed = try {
+    ignore(@coding_agent.fetch_entries(path))
+    false
+  } catch {
+    _ => true
+  }
+  assert_true(failed)
+  assert_eq(@coding_agent.read_bytes_file(path), original)
+  @coding_agent.remove_file(path)
+  @coding_agent.remove_dir(dir)
 }
 
 ///|
@@ -330,7 +366,7 @@ async test "appending to an existing journal keeps its header" {
   let path = "\{temp_dir}/journal.jsonl"
   // 续写已有会话:header 已经在文件里了。
   @coding_agent.write_bytes_file(
-    path, b"{\"kind\":\"header\",\"version\":4,\"id\":\"hdr\",\"createdAt\":1,\"cwd\":\"/tmp\"}\n",
+    path, b"{\"type\":\"session\",\"version\":3,\"id\":\"hdr\",\"timestamp\":\"1970-01-01T00:00:00.001Z\",\"cwd\":\"/tmp\"}\n",
   )
   let file = @coding_agent.open_append_file(path)
   let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
@@ -355,9 +391,8 @@ async test "appending to an existing journal keeps its header" {
   inspect(entries.length(), content="1")
   json_inspect(entries[0], content={
     "id": "disk1",
-    "seq": 1,
     "parentId": null,
-    "timestamp": 7,
+    "timestamp": "1970-01-01T00:00:00.007Z",
     "type": "custom",
     "customType": "note",
   })
@@ -418,10 +453,68 @@ async test "a journal stays in memory until the first assistant message" {
   inspect(
     writer_text(writer),
     content=(
-      #|{"kind":"header","version":4,"id":"13219109","createdAt":1786903823973,"cwd":"/workspaces/pi.mbt"}
-      #|{"kind":"entry","lane":"main","id":"u1","seq":1,"parentId":null,"timestamp":1786903823973,"type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}],"timestamp":1786903823973}}
-      #|{"kind":"entry","lane":"main","id":"a1","seq":2,"parentId":"u1","timestamp":1786903823973,"type":"message","message":{"role":"assistant","content":[{"type":"text","text":"hi","textSignature":"{\"type\":\"message\",\"id\":\"msg_1\"}"}],"api":"openai-responses","provider":"deepseek","model":"deepseek-v4-flash","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":1786903823973}}
+      #|{"type":"session","version":3,"id":"13219109","timestamp":"2026-08-16T18:10:23.973Z","cwd":"/workspaces/pi.mbt"}
+      #|{"id":"u1","parentId":null,"timestamp":"2026-08-16T18:10:23.973Z","type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}],"timestamp":1786903823973}}
+      #|{"id":"a1","parentId":"u1","timestamp":"2026-08-16T18:10:23.973Z","type":"message","message":{"role":"assistant","content":[{"type":"text","text":"hi","textSignature":"{\"type\":\"message\",\"id\":\"msg_1\"}"}],"api":"openai-responses","provider":"deepseek","model":"deepseek-v4-flash","stopReason":"stop","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":1786903823973}}
       #|
     ),
   )
+}
+
+///|
+/// Opaque signatures must not acquire quotes or disappear just because their
+/// string happens to be valid JSON; absent signatures stay absent.
+test "pi signatures and optional message fields round trip" {
+  let entry_json : Json = {
+    "type": "message",
+    "id": "assistant",
+    "parentId": null,
+    "timestamp": "2024-03-01T00:00:00.000Z",
+    "message": {
+      "role": "assistant",
+      "api": "openai-responses",
+      "provider": "deepseek",
+      "model": "deepseek-v4-flash",
+      "stopReason": "stop",
+      "timestamp": 1,
+      "content": [
+        { "type": "text", "text": "plain" },
+        { "type": "text", "text": "legacy", "textSignature": "msg_123" },
+        { "type": "thinking", "thinking": "opaque", "thinkingSignature": "123" },
+        {
+          "type": "thinking",
+          "thinking": "empty object",
+          "thinkingSignature": "{}",
+        },
+        {
+          "type": "toolCall",
+          "id": "call",
+          "name": "bash",
+          "arguments": {},
+          "thoughtSignature": "opaque+/=",
+        },
+        {
+          "type": "text",
+          "text": "structured",
+          "textSignature": "{\"type\":\"message\",\"id\":\"msg_456\"}",
+        },
+      ],
+      "usage": {
+        "input": 4,
+        "output": 2,
+        "cacheRead": 1,
+        "cacheWrite": 0,
+        "totalTokens": 7,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0,
+        },
+      },
+    },
+  }
+  let entry : @agent_session.SessionEntry = @json.from_json(entry_json)
+  assert_eq(entry.to_json(), entry_json)
 }

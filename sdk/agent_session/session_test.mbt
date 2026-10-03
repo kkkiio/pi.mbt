@@ -211,11 +211,12 @@ async test "hydrating a compacted journal projects the summary and kept tail" {
     journal.append([
       { id: "u1", content: Message(User(user_message("compacted away"))), },
       { id: "a1", content: Message(Assistant(ok_message())), },
+      { id: "kept", content: Message(User(user_message("kept turn"))), },
       {
         id: "c1",
         content: Compaction(
           summary="the earlier exchange was a greeting",
-          retained_tail=[User(user_message("kept turn"))],
+          first_kept_entry_id="kept",
           tokens_before=4096,
           details=None,
           usage=None,
@@ -241,6 +242,59 @@ async test "hydrating a compacted journal projects the summary and kept tail" {
       #|user: after
     ),
   )
+}
+
+///|
+/// Only the latest summary contributes context, even if an older compaction's
+/// ID lies within the retained range. The boundary may also retain no history.
+async test "latest compaction omits older summaries within the kept range" {
+  for first_kept_entry_id in ["kept", "c2"] {
+    let journal = @agent_session.InMemorySessionJournal(now=() => 7)
+    ignore(
+      journal.append([
+        { id: "old", content: Message(User(user_message("summarized"))), },
+        { id: "kept", content: Message(User(user_message("kept turn"))), },
+        {
+          id: "c1",
+          content: Compaction(
+            summary="old summary",
+            first_kept_entry_id="kept",
+            tokens_before=100,
+            details=None,
+            usage=None,
+          ),
+        },
+        { id: "between", content: Message(User(user_message("between"))), },
+        {
+          id: "c2",
+          content: Compaction(
+            summary="latest summary",
+            first_kept_entry_id~,
+            tokens_before=200,
+            details=None,
+            usage=None,
+          ),
+        },
+        { id: "after", content: Message(User(user_message("after"))), },
+      ]),
+    )
+    let session = @agent_session.AgentSession(
+      StubLLM::{ },
+      system_prompt="",
+      journal~,
+    )
+    let expected_tail = if first_kept_entry_id == "kept" {
+      "\nuser: kept turn\nuser: between"
+    } else {
+      ""
+    }
+    assert_eq(
+      context_lines(session.message_buffer),
+      "user: The conversation history before this point was compacted into the following summary:\n\n<summary>\nlatest summary\n</summary>" +
+      expected_tail +
+      "\nuser: after",
+    )
+  }
 }
 
 ///|
@@ -834,31 +888,31 @@ async test "auto-retry window resets after each successful response" {
       #|{"type":"turn_start"}
       #|{"type":"message_start","message":{"role":"user","content":[{"type":"text","text":"go"}],"timestamp":1786903823973}}
       #|{"type":"message_end","message":{"role":"user","content":[{"type":"text","text":"go"}],"timestamp":1786903823973}}
-      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","errorMessage":null,"usage":null,"timestamp":0}}
-      #|{"type":"message_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","errorMessage":"overloaded_error","usage":null,"timestamp":0}}
-      #|{"type":"turn_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","errorMessage":"overloaded_error","usage":null,"timestamp":0},"toolCalls":[]}
+      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}
+      #|{"type":"message_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0,"errorMessage":"overloaded_error"}}
+      #|{"type":"turn_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0,"errorMessage":"overloaded_error"},"toolCalls":[]}
       #|{"type":"agent_end"}
       #|{"type":"auto_retry_start","attempt":1,"maxAttempts":2,"delayMs":500,"errorMessage":"overloaded_error"}
       #|{"type":"agent_start"}
       #|{"type":"turn_start"}
-      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","errorMessage":null,"usage":null,"timestamp":0}}
-      #|{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-probe","name":"probe","arguments":{},"thoughtSignature":"{}"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"toolUse","errorMessage":null,"usage":null,"timestamp":0}}
+      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}
+      #|{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-probe","name":"probe","arguments":{}}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"toolUse","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}
       #|{"type":"auto_retry_end","success":true,"attempt":1,"finalError":null}
       #|{"type":"tool_execution_start","toolName":"probe","args":{}}
       #|{"type":"tool_execution_end","toolName":"probe","content":[{"type":"text","text":"probe-ok"}],"isError":false}
-      #|{"type":"turn_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-probe","name":"probe","arguments":{},"thoughtSignature":"{}"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"toolUse","errorMessage":null,"usage":null,"timestamp":0},"toolCalls":["probe"]}
+      #|{"type":"turn_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-probe","name":"probe","arguments":{}}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"toolUse","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0},"toolCalls":["probe"]}
       #|{"type":"turn_start"}
-      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","errorMessage":null,"usage":null,"timestamp":0}}
-      #|{"type":"message_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","errorMessage":"rate limit exceeded","usage":null,"timestamp":0}}
-      #|{"type":"turn_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","errorMessage":"rate limit exceeded","usage":null,"timestamp":0},"toolCalls":[]}
+      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}
+      #|{"type":"message_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0,"errorMessage":"rate limit exceeded"}}
+      #|{"type":"turn_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0,"errorMessage":"rate limit exceeded"},"toolCalls":[]}
       #|{"type":"agent_end"}
       #|{"type":"auto_retry_start","attempt":1,"maxAttempts":2,"delayMs":500,"errorMessage":"rate limit exceeded"}
       #|{"type":"agent_start"}
       #|{"type":"turn_start"}
-      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","errorMessage":null,"usage":null,"timestamp":0}}
-      #|{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done","textSignature":"{}"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":0}}
+      #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}
+      #|{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"stop","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}
       #|{"type":"auto_retry_end","success":true,"attempt":1,"finalError":null}
-      #|{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"done","textSignature":"{}"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"stop","errorMessage":null,"usage":null,"timestamp":0},"toolCalls":[]}
+      #|{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"stop","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0},"toolCalls":[]}
       #|{"type":"agent_end"}
     ),
   )

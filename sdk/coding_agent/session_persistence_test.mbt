@@ -109,9 +109,238 @@ async test "a resumed session hydrates its journal into the next prompt" {
   let headers = @coding_agent.read_text_file(path)
     .split("\n")
     .to_array()
-    .filter(line => line.to_owned().contains("\"kind\":\"header\""))
+    .filter(line => {
+      let json = Some(@json.parse(line.to_owned())) catch { _ => None }
+      json is Some({ "type": "session", .. })
+    })
     .length()
   assert_eq(headers, 1)
+  @coding_agent.remove_file(path)
+  @coding_agent.remove_dir(dir)
+}
+
+///|
+/// Independently authored pi v3 entries exercise string user content,
+/// metadata in the parent chain, compaction, and append after a branch.
+async test "resuming a pi v3 journal reconstructs compacted branch context" {
+  let dir = @coding_agent.create_temp_dir("pim-pi-v3-resume-")
+  let path = "\{dir}/s1.jsonl"
+  let fixture =
+    #|{"type":"session","version":3,"id":"pi-session","timestamp":"2024-02-29T23:59:59.999Z","cwd":"/tmp"}
+    #|{"type":"message","id":"root","parentId":null,"timestamp":"2024-02-29T23:59:59.999Z","message":{"role":"user","content":"summarized","timestamp":1}}
+    #|{"type":"thinking_level_change","id":"level","parentId":"root","timestamp":"2024-03-01T00:00:00.000Z","thinkingLevel":"high"}
+    #|{"type":"message","id":"kept","parentId":"level","timestamp":"2024-03-01T00:00:00.001Z","message":{"role":"user","content":[{"type":"text","text":"kept turn"}],"timestamp":2}}
+    #|{"type":"compaction","id":"compact","parentId":"kept","timestamp":"2024-03-01T00:00:00.002Z","summary":"earlier greeting","firstKeptEntryId":"kept","tokensBefore":4096,"details":{"readFiles":["a.mbt"]}}
+    #|{"type":"message","id":"abandoned","parentId":"compact","timestamp":"2024-03-01T00:00:00.003Z","message":{"role":"user","content":"abandoned branch","timestamp":3}}
+    #|{"type":"message","id":"active","parentId":"compact","timestamp":"2024-03-01T00:00:00.004Z","message":{"role":"user","content":"active branch","timestamp":4}}
+    #|
+  @coding_agent.write_bytes_file(path, @utf8.encode(fixture))
+  let entries = @coding_agent.fetch_active_entries(path)
+  assert_eq(entries[0].timestamp, 1709251199999)
+  assert_eq(entries[1].timestamp, 1709251200000)
+  json_inspect(entries, content=[
+    {
+      "id": "root",
+      "parentId": null,
+      "timestamp": "2024-02-29T23:59:59.999Z",
+      "type": "message",
+      "message": {
+        "role": "user",
+        "content": [{ "type": "text", "text": "summarized" }],
+        "timestamp": 1,
+      },
+    },
+    {
+      "id": "level",
+      "parentId": "root",
+      "timestamp": "2024-03-01T00:00:00.000Z",
+      "type": "thinking_level_change",
+      "thinkingLevel": "high",
+    },
+    {
+      "id": "kept",
+      "parentId": "level",
+      "timestamp": "2024-03-01T00:00:00.001Z",
+      "type": "message",
+      "message": {
+        "role": "user",
+        "content": [{ "type": "text", "text": "kept turn" }],
+        "timestamp": 2,
+      },
+    },
+    {
+      "id": "compact",
+      "parentId": "kept",
+      "timestamp": "2024-03-01T00:00:00.002Z",
+      "type": "compaction",
+      "summary": "earlier greeting",
+      "firstKeptEntryId": "kept",
+      "tokensBefore": 4096,
+      "details": { "readFiles": ["a.mbt"] },
+    },
+    {
+      "id": "active",
+      "parentId": "compact",
+      "timestamp": "2024-03-01T00:00:00.004Z",
+      "type": "message",
+      "message": {
+        "role": "user",
+        "content": [{ "type": "text", "text": "active branch" }],
+        "timestamp": 4,
+      },
+    },
+  ])
+  let llm = ContextCapturingLLM::{ seen: [], }
+  let file = @coding_agent.open_append_file(path)
+  let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
+    file,
+    entries~,
+    fresh=false,
+    now=() => 1709251200005,
+  )
+  let session = @coding_agent.new_coding_session(llm, cwd=dir, journal~)
+  session.prompt([user_message("next turn")])
+  file.close()
+  let texts = llm.seen.map(message => {
+    match message {
+      User(user) =>
+        user.content
+        .map(content => {
+          match content {
+            Text(text) => text
+            _ => "<non-text>"
+          }
+        })
+        .join("")
+      _ => "<non-user>"
+    }
+  })
+  json_inspect(texts, content=[
+    "The conversation history before this point was compacted into the following summary:\n\n<summary>\nearlier greeting\n</summary>",
+    "kept turn", "active branch", "next turn",
+  ])
+  let all = @coding_agent.fetch_entries(path)
+  assert_eq(all.length(), 8)
+  assert_eq(all[6].parent_id, Some("active"))
+  assert_eq(all[7].parent_id, Some(all[6].id))
+  @coding_agent.remove_file(path)
+  @coding_agent.remove_dir(dir)
+}
+
+///|
+/// Tool metadata must survive execution, JSONL serialization, decoding, and
+/// hydration into the next generation call.
+async test "tool details and usage survive journal resume" {
+  let dir = @coding_agent.create_temp_dir("pim-tool-journal-")
+  let path = "\{dir}/s1.jsonl"
+  let usage : @agent_loop.Usage = {
+    input: 11,
+    output: 7,
+    cache_read: 3,
+    cache_write: 2,
+    cache_write_1h: Some(1),
+    reasoning: Some(0),
+    total_tokens: 23,
+    cost: { input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0, },
+  }
+  let details : Json = { "files": ["a.mbt"], "truncated": false }
+  let registry = @tools.ToolRegistry()
+  registry.register_tool({
+    name: "probe",
+    label: "probe",
+    prompt_guidelines: [],
+    callable_definition: Some({
+      description: "metadata probe",
+      parameters: {},
+      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+        strict=true,
+      ),
+      execute: (_, _, _) => {
+        content: [Text("tool output")],
+        details,
+        usage: Some(usage),
+        is_error: false,
+        terminate: true,
+      },
+    }),
+  })
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([
+    @faux.faux_message(
+      [@faux.faux_tool_call("probe", {}, id="call-metadata")],
+      stop_reason=@agent_loop.StopReason::ToolUse,
+    ),
+  ])
+  let file = @coding_agent.open_lazy_file(path)
+  let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
+    file,
+    now=() => 1709251200000,
+    cwd="/tmp",
+  )
+  let session = @agent_session.AgentSession(
+    llm,
+    system_prompt="",
+    journal~,
+    tool_registry=registry,
+    active_tools=["probe"],
+  )
+  session.prompt([user_message("run probe")])
+  file.close()
+  let entries = @coding_agent.fetch_active_entries(path)
+  let result = match entries[2].content {
+    Message(ToolResult(result)) => result
+    _ => fail("expected tool result in journal")
+  }
+  assert_eq(result.details, Some(details))
+  assert_eq(result.usage.map(usage => usage.to_json()), Some(usage.to_json()))
+  // Tool timestamps are runtime-assigned; snapshot all other message fields.
+  json_inspect(
+    @agent_loop.AgentMessage::ToolResult({ ..result, timestamp: 9, }),
+    content={
+      "role": "toolResult",
+      "toolCallId": "call-metadata",
+      "toolName": "probe",
+      "content": [{ "type": "text", "text": "tool output" }],
+      "isError": false,
+      "timestamp": 9,
+      "details": { "files": ["a.mbt"], "truncated": false },
+      "usage": {
+        "input": 11,
+        "output": 7,
+        "cacheRead": 3,
+        "cacheWrite": 2,
+        "totalTokens": 23,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0,
+        },
+        "cacheWrite1h": 1,
+        "reasoning": 0,
+      },
+    },
+  )
+  let second = ContextCapturingLLM::{ seen: [], }
+  let resumed_file = @coding_agent.open_append_file(path)
+  let resumed_journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(
+    resumed_file,
+    entries~,
+    fresh=false,
+  )
+  let resumed = @coding_agent.new_coding_session(
+    second,
+    cwd=dir,
+    journal=resumed_journal,
+  )
+  resumed.prompt([user_message("continue")])
+  resumed_file.close()
+  guard second.seen[2] is ToolResult(restored) else {
+    fail("expected hydrated tool result")
+  }
+  assert_eq(restored.details, Some(details))
+  assert_eq(restored.usage.map(usage => usage.to_json()), Some(usage.to_json()))
   @coding_agent.remove_file(path)
   @coding_agent.remove_dir(dir)
 }

@@ -15,10 +15,34 @@ fn project_messages(
   entries : ArrayView[SessionEntry],
 ) -> Array[@agent_loop.AgentMessage] {
   let messages : Array[@agent_loop.AgentMessage] = []
-  for entry in entries {
+  let mut compaction_index : Int? = None
+  for i, entry in entries {
+    if entry.content is Compaction(_) {
+      compaction_index = Some(i)
+    }
+  }
+  let selected = match compaction_index {
+    None => entries.to_owned()
+    Some(i) => {
+      guard entries[i].content is Compaction(first_kept_entry_id~, ..) else {
+        abort("expected compaction")
+      }
+      let selected = [entries[i]]
+      let mut keep = false
+      for j in 0..<i {
+        keep = keep || entries[j].id == first_kept_entry_id
+        if keep {
+          selected.push(entries[j])
+        }
+      }
+      selected.append(entries[i + 1:].to_owned())
+      selected
+    }
+  }
+  for i, entry in selected {
     match entry.content {
-      Compaction(summary~, retained_tail~, ..) => {
-        messages.clear()
+      Compaction(_) if i > 0 => ()
+      Compaction(summary~, ..) =>
         messages.push(
           @agent_loop.AgentMessage::User({
             content: [
@@ -29,8 +53,6 @@ fn project_messages(
             timestamp: entry.timestamp,
           }),
         )
-        messages.append(retained_tail)
-      }
       Message(Assistant(m)) if m.stop_reason is Error => ()
       Message(m) => messages.push(m)
       _ => ()

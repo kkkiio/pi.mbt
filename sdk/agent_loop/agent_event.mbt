@@ -33,15 +33,23 @@ pub impl ToJson for AgentMessage with fn to_json(self : AgentMessage) -> Json {
   match self {
     User(message) => ToJson::to_json(message)
     Assistant(message) => ToJson::to_json(message)
-    ToolResult(result) =>
-      {
-        "role": "toolResult",
-        "toolCallId": result.tool_call_id,
-        "toolName": result.tool_name,
-        "content": result.content,
-        "isError": result.is_error,
+    ToolResult(result) => {
+      let obj : Map[String, Json] = {
+        "role": "toolResult".to_json(),
+        "toolCallId": result.tool_call_id.to_json(),
+        "toolName": result.tool_name.to_json(),
+        "content": result.content.to_json(),
+        "isError": result.is_error.to_json(),
         "timestamp": Json::number(result.timestamp.to_double()),
       }
+      if result.details is Some(details) {
+        obj["details"] = details
+      }
+      if result.usage is Some(usage) {
+        obj["usage"] = usage.to_json()
+      }
+      Json::object(obj)
+    }
   }
 }
 
@@ -112,23 +120,37 @@ pub extend AssistantMessage with Debug::{to_repr}
 
 ///|
 pub impl ToJson for AssistantMessage with fn to_json(self : AssistantMessage) -> Json {
-  {
-    "role": "assistant",
-    "content": self.content,
-    "api": self.api,
-    "provider": self.provider,
-    "model": self.model,
-    "stopReason": self.stop_reason,
-    "errorMessage": match self.error_message {
-      Some(message) => message.to_json()
-      None => null
-    },
+  let obj : Map[String, Json] = {
+    "role": "assistant".to_json(),
+    "content": self.content.to_json(),
+    "api": self.api.to_json(),
+    "provider": self.provider.to_json(),
+    "model": self.model.to_json(),
+    "stopReason": self.stop_reason.to_json(),
     "usage": match self.usage {
       Some(usage) => usage.to_json()
-      None => null
+      None =>
+        {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 0,
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "total": 0,
+          },
+        }
     },
     "timestamp": Json::number(self.timestamp.to_double()),
   }
+  if self.error_message is Some(message) {
+    obj["errorMessage"] = message.to_json()
+  }
+  Json::object(obj)
 }
 
 ///|
@@ -146,39 +168,49 @@ pub(all) enum AssistantMessageContent {
 pub extend AssistantMessageContent with Debug::{to_repr}
 
 ///|
-/// Signatures serialize as stringified JSON, matching pi's `textSignature` /
-/// `thinkingSignature` / `thoughtSignature` string fields.
+/// Provider signatures are opaque strings or serialized JSON. Empty objects
+/// represent an absent signature in the current provider APIs.
 pub impl ToJson for AssistantMessageContent with fn to_json(
   self : AssistantMessageContent,
 ) -> Json {
-  match self {
+  let (obj, key, signature) : (Map[String, Json], String, Json) = match self {
     Text(text, signature~) =>
-      Json::object({
-        "type": "text".to_json(),
-        "text": text.to_json(),
-        "textSignature": signature.stringify().to_json(),
-      })
+      (
+        { "type": "text".to_json(), "text": text.to_json() },
+        "textSignature",
+        signature,
+      )
     Thinking(text, signature~) =>
-      Json::object({
-        "type": "thinking".to_json(),
-        "thinking": text.to_json(),
-        "thinkingSignature": signature.stringify().to_json(),
-      })
+      (
+        { "type": "thinking".to_json(), "thinking": text.to_json() },
+        "thinkingSignature",
+        signature,
+      )
     ToolCall(tool_call, signature~) =>
-      Json::object({
-        "type": "toolCall".to_json(),
-        "id": tool_call.id.to_json(),
-        "name": tool_call.name.to_json(),
-        "arguments": tool_call.arguments,
-        "thoughtSignature": signature.stringify().to_json(),
-      })
+      (
+        {
+          "type": "toolCall".to_json(),
+          "id": tool_call.id.to_json(),
+          "name": tool_call.name.to_json(),
+          "arguments": tool_call.arguments,
+        },
+        "thoughtSignature",
+        signature,
+      )
     HostedToolCall(tool, signature~) =>
-      Json::object({
-        "type": "hostedToolCall".to_json(),
-        "tool": tool.to_json(),
-        "signature": signature.stringify().to_json(),
-      })
+      (
+        { "type": "hostedToolCall".to_json(), "tool": tool.to_json() },
+        "signature",
+        signature,
+      )
   }
+  match signature {
+    Null => ()
+    Object(fields) if fields.is_empty() => ()
+    String(_) => obj[key] = signature
+    _ => obj[key] = signature.stringify().to_json()
+  }
+  Json::object(obj)
 }
 
 ///|
@@ -259,6 +291,8 @@ pub(all) struct ToolResultMessage {
   tool_call_id : String
   tool_name : String
   content : Array[InputMessageContent]
+  details : Json?
+  usage : Usage?
   is_error : Bool
   timestamp : UInt64
 }
