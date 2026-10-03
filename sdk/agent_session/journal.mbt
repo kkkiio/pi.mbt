@@ -178,6 +178,29 @@ pub impl FromJson for SessionEntry with fn from_json(json, path) {
 pub extend SessionEntry with @json.FromJson::{from_json}
 
 ///|
+priv struct JournalUsage(@agent_loop.Usage)
+
+///|
+impl @json.FromJson for JournalUsage with fn from_json(json, path) {
+  JournalUsage(parse_usage(json, path))
+}
+
+///|
+/// Billable usage persisted outside messages, including Pi cache-warming entries.
+pub fn SessionEntry::auxiliary_usage(self : SessionEntry) -> @agent_loop.Usage? {
+  match self.content {
+    Compaction(usage~, ..) => usage
+    Metadata({ "type": "usage", "usage": usage, .. }) => {
+      let parsed : JournalUsage? = Some(@json.from_json(usage)) catch {
+        _ => None
+      }
+      parsed.map(value => value.0)
+    }
+    _ => None
+  }
+}
+
+///|
 /// Shared by the session header and entries, matching Date.toISOString().
 pub fn format_journal_timestamp(timestamp : UInt64) -> String {
   let millis = timestamp.reinterpret_as_int64()

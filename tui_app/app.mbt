@@ -479,6 +479,7 @@ pub fn TuiApp::set_session_name(self : TuiApp, name : String?) -> Unit {
     Some((_, base)) => base.to_owned()
     None => cwd
   }
+  let base = sanitize_label(base)
   let label = name.map(sanitize_label).unwrap_or("")
   self.terminal.set_title(
     if label.is_empty() {

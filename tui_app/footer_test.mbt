@@ -104,7 +104,7 @@ async test "footer rounds boundaries, truncates right without ellipsis, and sani
 }
 
 ///|
-async test "session replay includes compaction usage without replacing assistant cache rate" {
+async test "session replay includes compaction and standalone usage without replacing assistant cache rate" {
   let dir = @coding_agent.create_temp_dir("pim-footer-replay-")
   defer @coding_agent.remove_dir(dir)
   let assistant = @faux.faux_message([@faux.faux_text("done")])
@@ -131,6 +131,31 @@ async test "session replay includes compaction usage without replacing assistant
         usage=Some(usage(111, 3, 7, 0)),
       ),
     },
+    {
+      id: "u",
+      parent_id: Some("c"),
+      timestamp: 2,
+      content: Metadata({
+        "type": "usage",
+        "kind": "cache_warm",
+        "provider": "test",
+        "model": "model",
+        "usage": {
+          "input": 200,
+          "output": 4,
+          "cacheRead": 0,
+          "cacheWrite": 9,
+          "totalTokens": 213,
+          "cost": {
+            "input": 0.02,
+            "output": 0.01,
+            "cacheRead": 0,
+            "cacheWrite": 0.01,
+            "total": 0.04,
+          },
+        },
+      }),
+    },
   ]
   let header : Json = {
     "type": "session",
@@ -153,7 +178,21 @@ async test "session replay includes compaction usage without replacing assistant
   }
   let _ = capture_screen(80, fn() { app.start() })
   host.load_session(path, app)
-  assert_true(screen(app, 80).contains("↑1.1k ↓5 R1.0k CH50.0%"))
+  assert_true(screen(app, 80).contains("↑1.3k ↓9 R1.0k W9 CH50.0% $0.040"))
   host.load_session(path, app)
-  assert_true(screen(app, 80).contains("↑1.1k ↓5 R1.0k CH50.0%"))
+  assert_true(screen(app, 80).contains("↑1.3k ↓9 R1.0k W9 CH50.0% $0.040"))
+}
+
+///|
+async test "terminal title sanitizes directory and session labels" {
+  let app = @tui_app.TuiApp::load("model", "/tmp/dir\u{07}\u{1b}tail", "high")
+  defer {
+    let _ = capture_screen(80, fn() { app.stop() })
+  }
+  let output = capture_screen(80, fn() {
+    app.set_session_name(Some("name\nnext"))
+  })
+  assert_true(output.contains("pim - name next - dir tail"))
+  assert_false(output.contains("dir\u{07}"))
+  assert_false(output.contains("\u{1b}tail"))
 }

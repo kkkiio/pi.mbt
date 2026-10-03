@@ -216,6 +216,9 @@ fn session_stem(path : String) -> String {
 /// 本期不渲染。
 fn replay(entries : Array[@agent_session.SessionEntry], app : TuiApp) -> Unit {
   for entry in entries {
+    if entry.auxiliary_usage() is Some(usage) {
+      app.set_usage(usage, update_cache_hit=false)
+    }
     match entry.content {
       Message(User(message)) =>
         for block in message.content {
@@ -237,8 +240,6 @@ fn replay(entries : Array[@agent_session.SessionEntry], app : TuiApp) -> Unit {
           app.set_usage(usage, update_cache_hit=false)
         }
       }
-      Compaction(usage=Some(usage), ..) =>
-        app.set_usage(usage, update_cache_hit=false)
       Metadata(Object(fields)) =>
         if fields.get("type") is Some(String("session_info")) {
           if fields.get("name") is Some(String(name)) {
