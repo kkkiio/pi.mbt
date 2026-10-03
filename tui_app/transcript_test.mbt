@@ -502,16 +502,47 @@ async test "bash truncation distinguishes byte limits and preserves untruncated 
 ///|
 async test "bash preview and expansion retain whitespace-sensitive output" {
   @tui_app.load_module()
-  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
-  transcript.push_tool_call("bash", { "command": "printf indented" }, id="call")
-  transcript.push_tool_result("bash", "  value\n\n", false, id="call")
-  for expanded in [false, true] {
-    transcript.set_expanded_tool_output(expanded)
-    let rows = render_rows(transcript, 30)
-    assert_eq(rows.length(), 7)
-    assert_eq(rows[3], "   value" + " ".repeat(22))
-    assert_eq(rows[4], " ".repeat(30))
-    assert_eq(rows[5], " ".repeat(30))
+  for truncated in [false, true] {
+    let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+    transcript.push_tool_call(
+      "bash",
+      { "command": "printf indented" },
+      id="call",
+    )
+    let text = "  value\n\n" +
+      (if truncated {
+        "\n\n[Showing lines 4-6 of 6. Full output: /tmp/full]"
+      } else {
+        ""
+      })
+    transcript.push_tool_result(
+      "bash",
+      text,
+      false,
+      id="call",
+      details=if truncated {
+        Some({
+          "fullOutputPath": "/tmp/full",
+          "truncation": {
+            "truncated": true,
+            "truncatedBy": "lines",
+            "outputLines": 3,
+            "totalLines": 6,
+          },
+        })
+      } else {
+        None
+      },
+    )
+    for expanded in [false, true] {
+      transcript.set_expanded_tool_output(expanded)
+      let rows = render_rows(transcript, 80)
+      assert_eq(rows.length(), if truncated { 9 } else { 7 })
+      assert_eq(rows[3], "   value" + " ".repeat(72))
+      assert_eq(rows[4], " ".repeat(80))
+      assert_eq(rows[5], " ".repeat(80))
+      assert_false(rows.join("\n").contains("Showing lines"))
+    }
   }
 }
 

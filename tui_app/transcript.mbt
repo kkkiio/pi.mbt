@@ -1008,7 +1008,7 @@ fn bash_output(text : String, details : Json?) -> String {
 
 ///|
 extern "js" fn strip_bash_footer(text : String, path : String) -> String =
-  #| (text, path) => { const index = text.lastIndexOf('\n\n['); return path && text.trimEnd().endsWith(']') && index >= 0 && text.slice(index).includes(path) ? text.slice(0,index).trimEnd() : text; }
+  #| (text, path) => { const index = text.lastIndexOf('\n\n['); return path && text.endsWith(']') && index >= 0 && text.slice(index).includes(path) ? text.slice(0,index) : text; }
 
 ///|
 extern "js" fn format_output_size(bytes : Double) -> String =
