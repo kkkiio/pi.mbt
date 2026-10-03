@@ -275,7 +275,11 @@ fn replay_assistant(
     message.error_message,
   )
   if message.usage is Some(usage) {
-    app.set_usage(usage)
+    // Pi serialization fills absent usage with zeroes; it has no measured prompt rate.
+    app.set_usage(
+      usage,
+      update_cache_hit=usage.input + usage.cache_read + usage.cache_write > 0,
+    )
   }
   for call in calls {
     app.tool_call(call.name, call.arguments, id=call.id)

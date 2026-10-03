@@ -156,6 +156,19 @@ async test "session replay includes compaction and standalone usage without repl
         },
       }),
     },
+    {
+      id: "failed",
+      parent_id: Some("u"),
+      timestamp: 3,
+      content: Message(
+        Assistant({
+          ..assistant,
+          usage: None,
+          stop_reason: Error,
+          error_message: Some("provider failed"),
+        }),
+      ),
+    },
   ]
   let header : Json = {
     "type": "session",
