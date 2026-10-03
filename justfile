@@ -20,6 +20,10 @@ test:
 package:
     bash scripts/pack-npm.sh
 
+# Replay the offline fixture and regenerate the README TUI image.
+screenshot:
+    python3 scripts/screenshot/capture.py
+
 cram:
     moon build
     moon cram test --work-directory . tests/cram
