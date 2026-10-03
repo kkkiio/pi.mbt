@@ -921,7 +921,17 @@ fn render_bash(
       truncation.get("truncated") is Some(True) {
       if truncation.get("outputLines") is Some(Number(shown, ..)) &&
         truncation.get("totalLines") is Some(Number(total, ..)) {
-        if truncation.get("truncatedBy") is Some(String("lines")) {
+        if truncation.get("lastLinePartial") is Some(True) &&
+          truncation.get("outputBytes") is Some(Number(output_bytes, ..)) &&
+          truncation.get("totalBytes") is Some(Number(total_bytes, ..)) {
+          warnings.push(
+            "Truncated: showing last " +
+            format_output_size(output_bytes) +
+            " of " +
+            format_output_size(total_bytes) +
+            " (partial line)",
+          )
+        } else if truncation.get("truncatedBy") is Some(String("lines")) {
           warnings.push("Truncated: showing \{shown} of \{total} lines")
         } else {
           let max_bytes = match truncation.get("maxBytes") {

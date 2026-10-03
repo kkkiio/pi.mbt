@@ -648,3 +648,34 @@ async test "assistant and thinking retain indented Markdown code blocks" {
     assert_false(prose.contains("**prose**"))
   }
 }
+
+///|
+async test "bash partial line warning reports retained and total bytes" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_tool_call("bash", { "command": "run" }, id="call")
+  transcript.push_tool_result(
+    "bash",
+    "tail",
+    false,
+    id="call",
+    details=Some({
+      "truncation": {
+        "truncated": true,
+        "truncatedBy": "bytes",
+        "lastLinePartial": true,
+        "outputLines": 1,
+        "totalLines": 1,
+        "outputBytes": 2048,
+        "totalBytes": 8192,
+        "maxBytes": 2048,
+      },
+    }),
+  )
+  for expanded in [false, true] {
+    transcript.set_expanded_tool_output(expanded)
+    let rows = render_rows(transcript, 80).join("\n")
+    assert_true(rows.contains("showing last 2.0KB of 8.0KB (partial line)"))
+    assert_false(rows.contains("1 lines shown"))
+  }
+}
