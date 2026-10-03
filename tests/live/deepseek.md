@@ -26,7 +26,7 @@ Paris
 ```mooncram
 $ moon run cmd/pim -- --mode json -p "Use the bash tool to run exactly: echo pim-cram. Then respond with only the command output." 2>/dev/null \
 >   | moon run --target native -e 'import {
->   "bobzhang/jsonl@0.2.0",
+>   "moonbitlang/jsonl@0.2.1",
 >   "moonbitlang/async",
 > }
 >
