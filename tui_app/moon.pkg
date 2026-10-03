@@ -13,6 +13,7 @@ import {
 
 import {
   "KKKIIO/pi/sdk/providers/faux",
+  "moonbitlang/core/encoding/utf8",
 } for "test"
 
 supported_targets = "+js"

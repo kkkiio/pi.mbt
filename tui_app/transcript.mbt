@@ -33,6 +33,7 @@ pub struct Transcript {
   thinking_overrides : Map[String, Bool]
   /// One latest render per message block; streaming replaces entries instead of growing the cache.
   markdown_cache : Map[String, (String, Int, Bool, String, Array[String])]
+  generic_tool_cache : Map[Int, (Int, Bool, Bool, Array[String])]
 }
 
 ///|
@@ -66,6 +67,7 @@ pub fn Transcript::new(theme : Theme) -> Transcript {
     tool_overrides: Map([]),
     thinking_overrides: Map([]),
     markdown_cache: Map([]),
+    generic_tool_cache: Map([]),
   }
 }
 
@@ -233,6 +235,7 @@ pub fn Transcript::push_tool_result(
           started.map(_ => now_ms()),
           id~,
         )
+        self.generic_tool_cache.remove(index) |> ignore
         return
       }
       _ => ()
@@ -357,6 +360,9 @@ pub fn Transcript::click(self : Transcript, row : Int, width : Int) -> Bool {
     if row >= top && row < top + rendered.length() {
       match item {
         TranscriptItem::Tool(name, args, Some(_), error, _, _, _, ..) => {
+          let expanded = self.tool_overrides
+            .get(index)
+            .unwrap_or(self.expanded_tool_output)
           let header = render_tool(
             self,
             name,
@@ -367,12 +373,10 @@ pub fn Transcript::click(self : Transcript, row : Int, width : Int) -> Bool {
             None,
             None,
             width,
-            expanded=false,
+            expanded~,
           )
           if row - top >= header.length() - 1 {
-            self.tool_overrides[index] = !self.tool_overrides
-              .get(index)
-              .unwrap_or(self.expanded_tool_output)
+            self.tool_overrides[index] = !expanded
             return true
           }
         }
@@ -418,6 +422,7 @@ fn Transcript::push_item(self : Transcript, item : TranscriptItem) -> Unit {
     self.tool_overrides.clear()
     self.thinking_overrides.clear()
     self.markdown_cache.clear()
+    self.generic_tool_cache.clear()
     self.items.push(TranscriptItem::Note("… earlier messages omitted"))
   }
   self.items.push(item)
@@ -503,8 +508,20 @@ fn render_item(
       started,
       ended,
       ..
-    ) =>
-      render_tool(
+    ) => {
+      let expanded = transcript.tool_overrides
+        .get(index)
+        .unwrap_or(transcript.expanded_tool_output)
+      let true_color = terminal_true_color()
+      if name != "bash" &&
+        transcript.generic_tool_cache.get(index)
+        is Some((cached_width, cached_expanded, cached_color, rows)) &&
+        cached_width == width &&
+        cached_expanded == expanded &&
+        cached_color == true_color {
+        return rows
+      }
+      let rows = render_tool(
         transcript,
         name,
         arguments,
@@ -514,10 +531,15 @@ fn render_item(
         started,
         ended,
         width,
-        expanded=transcript.tool_overrides
-          .get(index)
-          .unwrap_or(transcript.expanded_tool_output),
+        expanded~,
       )
+      if name != "bash" {
+        transcript.generic_tool_cache[index] = (
+          width, expanded, true_color, rows,
+        )
+      }
+      rows
+    }
   }
 }
 
@@ -775,10 +797,34 @@ fn render_tool_generic(
   }
   if !is_read {
     lines.push(bg_blank(bg, width))
+    let limit = if expanded { 50 } else { 10 }
+    let mut shown = 0
+    let mut omitted = false
     for row in physical_lines(pretty_arguments(arguments)) {
       for wrapped in wrap_text(row, content_width) {
+        if shown >= limit {
+          omitted = true
+          break
+        }
         lines.push(bg_line(bg, " " + wrapped, width))
+        shown += 1
       }
+      if omitted {
+        break
+      }
+    }
+    if omitted {
+      lines.push(
+        bg_line(
+          bg,
+          " " +
+          truncate_to_width(
+            theme.f_muted("... (arguments truncated)"),
+            content_width,
+          ),
+          width,
+        ),
+      )
     }
   }
   let show_result = !is_read || expanded || is_error
@@ -971,7 +1017,7 @@ fn pretty_arguments(arguments : Json) -> String {
 
 ///|
 extern "js" fn js_pretty_arguments(arguments : String) -> String =
-  #| (value) => JSON.stringify(JSON.parse(value), null, 2)
+  #| (value) => { const formatted = JSON.stringify(JSON.parse(value), null, 2); return formatted.length > 65536 ? formatted.slice(0,65536) + '\n... (arguments truncated)' : formatted; }
 
 ///|
 fn read_range(theme : Theme, arguments : Json) -> String {

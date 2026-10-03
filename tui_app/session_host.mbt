@@ -237,6 +237,8 @@ fn replay(entries : Array[@agent_session.SessionEntry], app : TuiApp) -> Unit {
           app.set_usage(usage, update_cache_hit=false)
         }
       }
+      Compaction(usage=Some(usage), ..) =>
+        app.set_usage(usage, update_cache_hit=false)
       Metadata(Object(fields)) =>
         if fields.get("type") is Some(String("session_info")) {
           if fields.get("name") is Some(String(name)) {

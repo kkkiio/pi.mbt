@@ -102,3 +102,58 @@ async test "footer rounds boundaries, truncates right without ellipsis, and sani
   assert_false(narrow.contains("..."))
   assert_true(narrow.contains("long-"))
 }
+
+///|
+async test "session replay includes compaction usage without replacing assistant cache rate" {
+  let dir = @coding_agent.create_temp_dir("pim-footer-replay-")
+  defer @coding_agent.remove_dir(dir)
+  let assistant = @faux.faux_message([@faux.faux_text("done")])
+  let message : @agent_loop.AssistantMessage = {
+    ..assistant,
+    usage: Some(usage(1000, 2, 1000, 0)),
+  }
+  let entries : Array[@agent_session.SessionEntry] = [
+    {
+      id: "a",
+      parent_id: None,
+      timestamp: 0,
+      content: Message(Assistant(message)),
+    },
+    {
+      id: "c",
+      parent_id: Some("a"),
+      timestamp: 1,
+      content: Compaction(
+        summary="summary",
+        first_kept_entry_id="a",
+        tokens_before=2000,
+        details=None,
+        usage=Some(usage(111, 3, 7, 0)),
+      ),
+    },
+  ]
+  let header : Json = {
+    "type": "session",
+    "version": 3,
+    "id": "replay",
+    "timestamp": "1970-01-01T00:00:00.000Z",
+    "cwd": dir,
+  }
+  let journal = header.stringify() +
+    "\n" +
+    entries.map(entry => entry.to_json().stringify()).join("\n") +
+    "\n"
+  let path = "\{dir}/session.jsonl"
+  @coding_agent.write_bytes_file(path, @utf8.encode(journal))
+  let host = @tui_app.SessionHost::new(@faux.FauxLLM(), dir, Some(dir))
+  defer host.close()
+  let app = @tui_app.TuiApp::load("model", dir, "high")
+  defer {
+    let _ = capture_screen(80, fn() { app.stop() })
+  }
+  let _ = capture_screen(80, fn() { app.start() })
+  host.load_session(path, app)
+  assert_true(screen(app, 80).contains("↑1.1k ↓5 R1.0k CH50.0%"))
+  host.load_session(path, app)
+  assert_true(screen(app, 80).contains("↑1.1k ↓5 R1.0k CH50.0%"))
+}

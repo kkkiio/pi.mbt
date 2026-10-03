@@ -595,3 +595,38 @@ async test "cached markdown follows content, width, and thinking changes" {
   assert_true(narrow.length() > render_rows(transcript, 50).length())
   assert_eq(render_rows(transcript, 12), narrow)
 }
+
+///|
+async test "large generic arguments are bounded and cached calls refresh after results" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_tool_call(
+    "write",
+    { "content": "large payload ".repeat(20000) },
+    id="write",
+  )
+  let pending = render_rows(transcript, 40)
+  assert_true(pending.length() <= 15)
+  assert_true(pending.join("\n").contains("arguments truncated"))
+  assert_eq(render_rows(transcript, 40), pending)
+  transcript.push_tool_result("write", "saved", false, id="write")
+  assert_true(render_rows(transcript, 40).join("\n").contains("saved"))
+  transcript.set_expanded_tool_output(true)
+  let expanded = render_rows(transcript, 40)
+  assert_true(expanded.length() > pending.length())
+  assert_true(expanded.length() <= 60)
+  assert_true(expanded.join("\n").contains("saved"))
+  assert_false(transcript.click(20, 40))
+  let mut result_row = -1
+  for index, row in expanded {
+    if row.contains("saved") {
+      result_row = index
+    }
+  }
+  assert_true(transcript.click(result_row, 40))
+  assert_true(render_rows(transcript, 40).length() < expanded.length())
+  transcript.set_expanded_tool_output(true)
+  let narrow = render_rows(transcript, 12)
+  assert_true(narrow.length() <= 60)
+  assert_eq(render_rows(transcript, 12), narrow)
+}
