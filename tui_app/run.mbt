@@ -54,7 +54,7 @@ pub async fn run(
             host.new_session()
             host.attach(app)
             app.reset()
-            app.flash("new session")
+            app.push_note("Started new session")
           }
           "/resume" => host.resume_session("", app)
           command if command.has_prefix("/resume ") => {

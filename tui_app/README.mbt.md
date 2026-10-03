@@ -132,7 +132,7 @@ assistant text                                  markdown: fenced code + inline `
 
 **状态与视觉反馈:**
 
-- **空闲** — 上边框是纯横线;footer 保留上次用量
+- **空闲** — 上边框是纯横线,按 thinking 档位着色;footer 保留会话累计用量
 - **工作中** — 上边框换成 `-- * thinking (Esc to interrupt) --`;终端进度指示(OSC 9;4)开启
 - **工具执行** — 工具块背景 pending -> success / error
 - **完成** — 回落空闲;footer 用量刷新
@@ -143,15 +143,16 @@ assistant text                                  markdown: fenced code + inline `
 ```
 TranscriptItem
 +-- User(text)          whole block gets userMessageBg, one padding row above/below, no ">" prefix
-+-- Note(text)          dim: startup help, retry notices, "... earlier messages omitted"
++-- Startup            accent title + dim keys / muted descriptions; ctrl+o expands help
++-- Note(text)          dim: status notices, "... earlier messages omitted"
 +-- Error(text)         error color
-+-- Assistant(text, thinking, stop_reason, error_message)
++-- Assistant(blocks, stop_reason, error_message)
 |   +-- thinking        expanded by default: italic gray markdown; ctrl+t collapses to the label
-|   \-- text            simplified markdown: fenced code + inline `code` / bold
+|   \-- text            pi-tui Markdown, preserving text/thinking order; syntax highlight TODO
 \-- Tool(name, args, result, is_error)
-    +-- bash            green frame + "$ command" + last 20 lines + "... (N more lines, ctrl+o to expand)"
-    +-- read            "read <path>"; result hidden while collapsed (same as pi)
-    \-- other           bold name + arg summary; 10-line preview, ctrl+o expands
+    +-- bash            status background + "$ command" + last 5 lines; earlier-lines hint above output
+    +-- read            "read <path>:<range>"; success hidden while collapsed, errors visible
+    \-- other           bold name + formatted JSON arguments; 10-line preview, ctrl+o expands
 ```
 
 ## 会话与命令
@@ -165,4 +166,8 @@ TUI 内:
 
 `TuiApp` 统一维护提交队列与排队展示,消费一条提交时撤掉对应展示行;
 `run` 只负责顺序执行提示词和会话切换。工具结果在渲染时按内容列宽换行后截取
-预览,bash 显示最后 20 个可见行,其余工具显示前 10 个;展开后保留全部输出。
+预览,bash 显示最后 5 个可见行,其余工具显示前 10 个;展开后保留全部输出。
+点击工具结果或思考段可单独展开/折叠;全局快捷键会清除单块显示设置。
+工具输出使用 `toolOutput` 色,截断路径/警告来自结果 details,实时 bash 显示耗时。
+恢复会话时重算累计用量与最近一次模型缓存命中率,并读取 session_info 会话名。
+上下文窗口尚无模型元数据源,因此不显示估算占用或自动压缩标记。

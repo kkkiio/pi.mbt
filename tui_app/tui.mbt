@@ -57,6 +57,7 @@ pub fn Unlisten::unlisten(self : Unlisten) -> Unit {
 ///|
 pub async fn tui_new(
   terminal : Terminal,
+  theme? : Theme? = None,
   show_hardware_cursor? : Bool = true,
   mouse? : Bool = true,
   wheel_scroll_lines? : Int = 1,
@@ -68,10 +69,37 @@ pub async fn tui_new(
   options["mouse"] = mouse
   options["wheelScrollLines"] = wheel_scroll_lines
   options["copyOnSelect"] = copy_on_select
+  match theme {
+    Some(theme) => {
+      options["searchMatchStyle"] = js_callback_text(fn(text) {
+        underline(theme.bg("searchMatchBg", theme.fg("searchMatchText", text)))
+      })
+      options["searchCurrentMatchStyle"] = js_callback_text(fn(text) {
+        bold(
+          inverse(theme.bg("searchMatchBg", theme.fg("searchMatchText", text))),
+        )
+      })
+      options["searchNavigationButtonStyle"] = js_hover_style(
+        js_callback_text(fn(text) { text }),
+        js_callback_text(fn(text) { underline(text) }),
+      )
+    }
+    None => ()
+  }
   match scroll_to_end_indicator {
     Some(render) =>
       options["scrollToEndIndicator"] = js_callback_string_fn(render)
-    None => ()
+    None =>
+      match theme {
+        Some(theme) =>
+          options["scrollToEndIndicator"] = js_callback_string_fn(fn() {
+            theme.bg(
+              "selectedBg",
+              theme.fg("text", " ↓ Jump to latest message · End "),
+            )
+          })
+        None => ()
+      }
   }
   let args : Array[Value] = [
     terminal.handle,
@@ -81,6 +109,9 @@ pub async fn tui_new(
   ]
   Tui::{ handle: ns_get("TuiAltScreen").new(args), }
 }
+
+///|
+extern "js" fn js_hover_style(normal : Value, hover : Value) -> Value = "(normal, hover) => (text, hovered) => (hovered ? hover : normal)(text)"
 
 ///|
 pub fn Tui::start(self : Tui) -> Unit {

@@ -3,8 +3,8 @@
 //   行1:`~/cwd (branch) • session`(全 dim)
 //   行2:`↑in ↓out Rcache Wcache CH% $cost` + 右对齐 `model • thinking`
 //
-// 目前 pim 只从 Usage 拿得到 token/费用;git 分支、会话名、上下文窗口还没有数据源,
-// 字段先留空,待接线后自动出现。
+// 用量累计整个会话,git 分支与会话名由 app/session_host 接线。
+// 上下文窗口还没有模型元数据源,未知时不显示。
 
 ///|
 /// HOME 目录(把 footer 里的绝对路径缩成 `~`)。
@@ -19,6 +19,16 @@ extern "js" fn format_cost(value : Float) -> String = "(value) => value.toFixed(
 extern "js" fn format_percent(value : Float) -> String = "(value) => value.toFixed(1)"
 
 ///|
+/// Footer labels must not be able to inject terminal rows or control sequences.
+extern "js" fn sanitize_label(value : String) -> String =
+  #|(value) => value.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/ +/g, ' ').trim()
+
+///|
+/// Compact count formatting uses pi's rounding (not integer truncation).
+extern "js" fn format_footer_count(value : Int) -> String =
+  #|(value) => value < 1000 ? String(value) : value < 10000 ? `${(value / 1000).toFixed(1)}k` : value < 1000000 ? `${Math.round(value / 1000)}k` : value < 10000000 ? `${(value / 1000000).toFixed(1)}M` : `${Math.round(value / 1000000)}M`
+
+///|
 /// 底部模型、目录与用量信息栏。
 pub struct Footer {
   theme : Theme
@@ -26,9 +36,9 @@ pub struct Footer {
   cwd : String
   thinking : String
   /// git 分支(pi 显示 ` (branch)`);None 时不显示。
-  branch : String?
+  mut branch : String?
   /// 会话名(pi 显示 ` • session`);None 时不显示。
-  session_name : String?
+  mut session_name : String?
   mut usage_set : Bool
   mut input_tokens : Int
   mut output_tokens : Int
@@ -67,7 +77,7 @@ pub fn Footer::new(
     cache_hit_rate: None,
     context_percent: None,
     context_window: None,
-    auto_compact: true,
+    auto_compact: false,
   }
 }
 
@@ -90,20 +100,48 @@ pub fn Footer::thinking(self : Footer) -> String {
 }
 
 ///|
-/// 更新最近一次模型调用的用量。
-pub fn Footer::set_usage(self : Footer, usage : @agent_loop.Usage) -> Unit {
+/// 累计用量;最近一次模型调用同时更新缓存命中率。
+pub fn Footer::set_usage(
+  self : Footer,
+  usage : @agent_loop.Usage,
+  update_cache_hit? : Bool = true,
+) -> Unit {
   self.usage_set = true
-  self.input_tokens = usage.input
-  self.output_tokens = usage.output
-  self.cache_read = usage.cache_read
-  self.cache_write = usage.cache_write
-  self.total_cost = usage.cost.total
-  let prompt = usage.input + usage.cache_read + usage.cache_write
-  self.cache_hit_rate = if prompt > 0 {
-    Some(Float::from_int(usage.cache_read) / Float::from_int(prompt) * 100.0)
-  } else {
-    None
+  self.input_tokens += usage.input
+  self.output_tokens += usage.output
+  self.cache_read += usage.cache_read
+  self.cache_write += usage.cache_write
+  self.total_cost += usage.cost.total
+  if update_cache_hit {
+    let prompt = usage.input + usage.cache_read + usage.cache_write
+    self.cache_hit_rate = if prompt > 0 {
+      Some(Float::from_int(usage.cache_read) / Float::from_int(prompt) * 100.0)
+    } else {
+      None
+    }
   }
+}
+
+///|
+/// Clear accumulated usage before replaying a different session.
+pub fn Footer::reset_usage(self : Footer) -> Unit {
+  self.usage_set = false
+  self.input_tokens = 0
+  self.output_tokens = 0
+  self.cache_read = 0
+  self.cache_write = 0
+  self.total_cost = 0.0
+  self.cache_hit_rate = None
+}
+
+///|
+pub fn Footer::set_branch(self : Footer, branch : String?) -> Unit {
+  self.branch = branch.map(sanitize_label)
+}
+
+///|
+pub fn Footer::set_session_name(self : Footer, name : String?) -> Unit {
+  self.session_name = name.map(sanitize_label)
 }
 
 ///|
@@ -114,6 +152,13 @@ pub fn Footer::set_context(
   window : Int,
 ) -> Unit {
   self.context_percent = Some(percent)
+  self.context_window = Some(window)
+}
+
+///|
+/// Set a known context window while its current occupancy is unknown.
+pub fn Footer::set_context_unknown(self : Footer, window : Int) -> Unit {
+  self.context_percent = None
   self.context_window = Some(window)
 }
 
@@ -158,19 +203,22 @@ fn Footer::path_line(self : Footer) -> String {
 fn Footer::stats_prefix(self : Footer) -> String {
   let parts : Array[String] = []
   if self.input_tokens > 0 {
-    parts.push("↑\{format_count(self.input_tokens)}")
+    parts.push("↑\{format_footer_count(self.input_tokens)}")
   }
   if self.output_tokens > 0 {
-    parts.push("↓\{format_count(self.output_tokens)}")
+    parts.push("↓\{format_footer_count(self.output_tokens)}")
   }
   if self.cache_read > 0 {
-    parts.push("R\{format_count(self.cache_read)}")
+    parts.push("R\{format_footer_count(self.cache_read)}")
   }
   if self.cache_write > 0 {
-    parts.push("W\{format_count(self.cache_write)}")
+    parts.push("W\{format_footer_count(self.cache_write)}")
   }
   match self.cache_hit_rate {
-    Some(rate) => parts.push("CH\{format_percent(rate)}%")
+    Some(rate) =>
+      if self.cache_read > 0 || self.cache_write > 0 {
+        parts.push("CH\{format_percent(rate)}%")
+      }
     None => ()
   }
   if self.total_cost > 0.0 {
@@ -185,13 +233,17 @@ fn Footer::context_text(self : Footer) -> String? {
   match self.context_percent {
     Some(percent) => {
       let window = match self.context_window {
-        Some(value) => format_count(value)
+        Some(value) => format_footer_count(value)
         None => "?"
       }
       let suffix = if self.auto_compact { " (auto)" } else { "" }
       Some("\{format_percent(percent)}%/\{window}\{suffix}")
     }
-    None => None
+    None =>
+      match self.context_window {
+        Some(window) => Some("?/\{format_footer_count(window)}")
+        None => None
+      }
   }
 }
 
@@ -250,7 +302,11 @@ fn align_line(left : String, right : String, width : Int) -> String {
   }
   let available = width - left_width - 2
   if available > 0 {
-    let truncated = truncate_to_width(right, available)
+    let truncated : String = ns_get("truncateToWidth").apply([
+      Value::cast_from(right),
+      Value::cast_from(available),
+      Value::cast_from(""),
+    ])
     let pad = width - left_width - visible_width(truncated)
     left + " ".repeat(if pad > 0 { pad } else { 0 }) + truncated
   } else {
@@ -260,7 +316,7 @@ fn align_line(left : String, right : String, width : Int) -> String {
 
 ///|
 /// 渲染底栏两行(全 dim,上下文段按阈值着色)。
-impl Widget for Footer with fn render(self, width) {
+pub impl Widget for Footer with fn render(self, width) {
   if width <= 0 {
     return [self.theme.f_dim("")]
   }
@@ -271,3 +327,6 @@ impl Widget for Footer with fn render(self, width) {
   )
   [path_line, stats_line]
 }
+
+///|
+pub extend Footer with Widget::{render, invalidate}
