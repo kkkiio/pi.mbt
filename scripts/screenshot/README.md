@@ -14,4 +14,6 @@ just screenshot
 
 脚本等待恢复状态和编辑器输入实际出现，捕获带 ANSI 颜色的画面，把临时目录显示替换为 `~/projects/pi.mbt`，使用固定的 `freeze.json` 生成 `docs/assets/tui-session.png`。重生成后检查图片和 Git diff，再提交。更换示例内容时修改 `session.jsonl`；渲染外观由 `freeze.json` 控制。截图流程参考 [pi-workmap](https://github.com/kkkiio/pi-workmap/tree/main/test/visual)。
 
+tmux 的 ANSI 样式状态会跨行保留，而 Freeze 0.2.2 会在换行时结束背景、忽略部分样式复位。`freeze_ansi` 将捕获中的持续状态转换为每段文字显式指定的完整样式，防止用户消息和工具输出脱离背景块。Freeze 0.2.2 本身不显示 ANSI 粗体，截图仍有这一限制。
+
 `TMUX_BIN` 和 `FREEZE_BIN` 可指定工具路径。不同 tmux/Freeze 版本可能影响像素；需稳定输出时保持上述版本和终端尺寸。
