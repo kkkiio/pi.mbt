@@ -45,6 +45,22 @@ pub fn component_of(render : (Int) -> Array[String]) -> Component {
 }
 
 ///|
+/// Attach a left-click handler; pi-tui supplies document-local coordinates.
+pub fn Component::on_click(
+  self : Component,
+  click : (Int, Int) -> Bool,
+) -> Unit {
+  js_component_click(self.handle, click)
+}
+
+///|
+extern "js" fn js_component_click(
+  handle : Value,
+  click : (Int, Int) -> Bool,
+) -> Unit =
+  #| (component, click) => { component.handleMouse = event => event.type === 'click' && event.button === 'left' && click(event.y, event.width) ? {handled:true} : undefined; }
+
+///|
 /// 把 MoonBit 组件注册成 pi-tui 的 `Component`。
 pub fn[W : Widget] mount(widget : W) -> Component {
   Component::{
@@ -82,19 +98,85 @@ pub fn text(
 }
 
 ///|
-/// Markdown 块(pi-tui `Markdown`,由 marked 解析)。
-pub fn markdown(
+/// Render markdown synchronously with pi-tui's renderer and pim's semantic theme.
+/// The preserve flags are useful for user-authored messages where source markers matter.
+pub fn render_markdown_themed(
+  theme : Theme,
   content : String,
+  width : Int,
   padding_x? : Int = 1,
   padding_y? : Int = 0,
-) -> Component {
-  let args : Array[Value] = [
-    Value::cast_from(content),
-    Value::cast_from(padding_x),
-    Value::cast_from(padding_y),
-  ]
-  Component::{ handle: ns_get("Markdown").new(args), }
+  body_role? : String = "text",
+  body_italic? : Bool = false,
+  preserve_ordered_markers? : Bool = false,
+  preserve_backslash_escapes? : Bool = false,
+) -> Array[String] {
+  let lines : FixedArray[String] = js_render_markdown(
+    ns_get("Markdown"),
+    content,
+    width,
+    padding_x,
+    padding_y,
+    js_callback_text(fn(text) { theme.fg(body_role, text) }),
+    body_italic,
+    preserve_ordered_markers,
+    preserve_backslash_escapes,
+    js_callback_text(fn(text) { theme.fg("mdHeading", text) }),
+    js_callback_text(fn(text) { theme.fg("mdLink", text) }),
+    js_callback_text(fn(text) { theme.fg("mdLinkUrl", text) }),
+    js_callback_text(fn(text) { theme.fg("mdCode", text) }),
+    js_callback_text(fn(text) { theme.fg("mdCodeBlock", text) }),
+    js_callback_text(fn(text) { theme.fg("mdCodeBlockBorder", text) }),
+    js_callback_text(fn(text) { theme.fg("mdQuote", text) }),
+    js_callback_text(fn(text) { theme.fg("mdQuoteBorder", text) }),
+    js_callback_text(fn(text) { theme.fg("mdHr", text) }),
+    js_callback_text(fn(text) { theme.fg("mdListBullet", text) }),
+    js_callback_highlight(fn(code, _language) {
+      // TODO: 对齐 pi 的代码块语法高亮;目前统一使用 mdCodeBlock 颜色。
+      FixedArray::from_array(
+        physical_lines(code).map(fn(line) { theme.fg("mdCodeBlock", line) }),
+      )
+    }),
+  )
+  Array::makei(lines.length(), index => lines[index])
 }
+
+///|
+extern "js" fn js_render_markdown(
+  markdown_class : Value,
+  content : String,
+  width : Int,
+  padding_x : Int,
+  padding_y : Int,
+  body : Value,
+  body_italic : Bool,
+  preserve_ordered : Bool,
+  preserve_escapes : Bool,
+  heading : Value,
+  link : Value,
+  link_url : Value,
+  code : Value,
+  code_block : Value,
+  code_border : Value,
+  quote : Value,
+  quote_border : Value,
+  hr : Value,
+  bullet : Value,
+  highlight : Value,
+) -> FixedArray[String] =
+  #| (Markdown, content, width, px, py, body, bodyItalic, preserveOrdered, preserveEscapes, heading, link, linkUrl, code, codeBlock, codeBlockBorder, quote, quoteBorder, hr, listBullet, highlightCode) => {
+  #|   const close = (open, end) => text => `\u001b[${open}m${text}\u001b[${end}m`;
+  #|   const mdTheme = { heading, link, linkUrl, code, codeBlock, codeBlockBorder,
+  #|     quote, quoteBorder, hr, listBullet, bold: close(1,22), italic: close(3,23),
+  #|     underline: close(4,24), strikethrough: close(9,29), highlightCode };
+  #|   return new Markdown(content, px, py, mdTheme, { color: body, italic: bodyItalic },
+  #|     { preserveOrderedListMarkers: preserveOrdered, preserveBackslashEscapes: preserveEscapes }).render(width);
+  #| }
+
+///|
+extern "js" fn js_callback_highlight(
+  callback : (String, String) -> FixedArray[String],
+) -> Value = "(callback) => (code, language) => callback(code, language || '')"
 
 ///|
 /// 空行。
@@ -179,12 +261,22 @@ pub fn scroll_view(
   primary? : Bool = true,
   overscroll? : String = "chain",
   scrollbar? : String = "auto",
+  scrollbar_track_style? : ((String) -> String)? = None,
+  scrollbar_thumb_style? : ((String) -> String)? = None,
 ) -> ScrollView {
   let options = Object::new()
   options["follow"] = if follow_end { "end" } else { "none" }
   options["primary"] = primary
   options["overscroll"] = overscroll
   options["scrollbar"] = scrollbar
+  match scrollbar_track_style {
+    Some(style) => options["scrollbarTrackStyle"] = js_callback_text(style)
+    None => ()
+  }
+  match scrollbar_thumb_style {
+    Some(style) => options["scrollbarThumbStyle"] = js_callback_text(style)
+    None => ()
+  }
   ScrollView::{
     handle: ns_get("ScrollView").new([child.handle, options.to_value()]),
   }
@@ -235,13 +327,14 @@ pub fn editor_new(
   tui : Tui,
   on_submit : (String) -> Unit,
   theme : Theme,
+  thinking? : String = "off",
 ) -> Editor {
   Editor::{
     handle: js_editor_new(
       ns_get("Editor"),
       tui.handle,
       on_submit,
-      js_callback_text(fn(text) { theme.f_border_muted(text) }),
+      js_callback_text(fn(text) { theme.fg(thinking_role(thinking), text) }),
       js_callback_text(fn(text) { theme.f_accent(text) }),
       js_callback_text(fn(text) { theme.f_muted(text) }),
     ),
@@ -249,10 +342,23 @@ pub fn editor_new(
 }
 
 ///|
+fn thinking_role(level : String) -> String {
+  match level {
+    "minimal" => "thinkingMinimal"
+    "low" => "thinkingLow"
+    "medium" => "thinkingMedium"
+    "high" => "thinkingHigh"
+    "xhigh" => "thinkingXhigh"
+    "max" => "thinkingMax"
+    _ => "thinkingOff"
+  }
+}
+
+///|
 /// 设置顶部边框渲染:`render(width)` 返回整行;返回空串则用默认边框。
 pub fn Editor::set_border_provider(
   self : Editor,
-  render : (Int) -> String,
+  render : (Int, Int) -> String,
 ) -> Unit {
   js_editor_border_provider(self.handle, render)
 }
@@ -288,7 +394,7 @@ extern "js" fn js_callback_text(callback : (String) -> String) -> Value = "(call
 /// 绑定顶部边框渲染函数。
 extern "js" fn js_editor_border_provider(
   handle : Value,
-  render : (Int) -> String,
+  render : (Int, Int) -> String,
 ) -> Unit = "(editor, render) => { editor.borderProvider = render; }"
 
 ///|
@@ -309,7 +415,7 @@ extern "js" fn js_editor_new(
   #|     }
   #|     renderTopBorder(width, hiddenLineCount) {
   #|       if (this.borderProvider && width > 0) {
-  #|         const line = this.borderProvider(width);
+  #|         const line = this.borderProvider(width, hiddenLineCount);
   #|         if (line) return line;
   #|       }
   #|       return super.renderTopBorder(width, hiddenLineCount);

@@ -14,8 +14,7 @@
 ///|
 /// 解析后的语义色:字段名即角色名,值都是 `#rrggbb`。
 ///
-/// 字段齐全由构造处的 struct literal 在**编译期**保证(等价于 TS 的
-/// `Record<ThemeColor, string>`),所以取色是 total 的,没有 `Option`/`abort`。
+/// 必需角色用字段表示,构造器逐个校验 JSON;缺字段在载入期报错。
 pub struct ThemeColors {
   text : String
   muted : String
@@ -37,6 +36,27 @@ pub struct ThemeColors {
   tool_success_bg : String
   tool_error_bg : String
   bash_mode : String
+  selected_bg : String
+  scrollbar_track : String
+  scrollbar_thumb : String
+  search_match_bg : String
+  search_match_text : String
+  user_message_text : String
+  tool_title : String
+  tool_output : String
+  md_heading : String
+  md_link_url : String
+  md_quote : String
+  md_quote_border : String
+  md_hr : String
+  md_list_bullet : String
+  thinking_off : String
+  thinking_minimal : String
+  thinking_low : String
+  thinking_medium : String
+  thinking_high : String
+  thinking_xhigh : String
+  thinking_max : String
 }
 
 ///|
@@ -106,7 +126,6 @@ pub fn Theme::load(name : String) -> Theme raise Failure {
       resolved[role] = resolve_color(vars, text)
     }
   }
-  // 这个 literal 就是「必需角色齐全」的编译期检查:漏一个字段编译不过。
   let colors = ThemeColors::{
     text: require_color(resolved, name, "text"),
     muted: require_color(resolved, name, "muted"),
@@ -128,8 +147,78 @@ pub fn Theme::load(name : String) -> Theme raise Failure {
     tool_success_bg: require_color(resolved, name, "toolSuccessBg"),
     tool_error_bg: require_color(resolved, name, "toolErrorBg"),
     bash_mode: require_color(resolved, name, "bashMode"),
+    selected_bg: require_color(resolved, name, "selectedBg"),
+    scrollbar_track: require_color(resolved, name, "scrollbarTrack"),
+    scrollbar_thumb: require_color(resolved, name, "scrollbarThumb"),
+    search_match_bg: require_color(resolved, name, "searchMatchBg"),
+    search_match_text: require_color(resolved, name, "searchMatchText"),
+    user_message_text: require_color(resolved, name, "userMessageText"),
+    tool_title: require_color(resolved, name, "toolTitle"),
+    tool_output: require_color(resolved, name, "toolOutput"),
+    md_heading: require_color(resolved, name, "mdHeading"),
+    md_link_url: require_color(resolved, name, "mdLinkUrl"),
+    md_quote: require_color(resolved, name, "mdQuote"),
+    md_quote_border: require_color(resolved, name, "mdQuoteBorder"),
+    md_hr: require_color(resolved, name, "mdHr"),
+    md_list_bullet: require_color(resolved, name, "mdListBullet"),
+    thinking_off: require_color(resolved, name, "thinkingOff"),
+    thinking_minimal: require_color(resolved, name, "thinkingMinimal"),
+    thinking_low: require_color(resolved, name, "thinkingLow"),
+    thinking_medium: require_color(resolved, name, "thinkingMedium"),
+    thinking_high: require_color(resolved, name, "thinkingHigh"),
+    thinking_xhigh: require_color(resolved, name, "thinkingXhigh"),
+    thinking_max: require_color(resolved, name, "thinkingMax"),
   }
   Theme::{ name, colors, }
+}
+
+///|
+/// Return a resolved semantic color. Unknown roles are programmer errors.
+pub fn Theme::color(self : Theme, role : String) -> String {
+  match role {
+    "text" => self.colors.text
+    "muted" => self.colors.muted
+    "dim" => self.colors.dim
+    "accent" => self.colors.accent
+    "border" => self.colors.border
+    "borderMuted" => self.colors.border_muted
+    "success" => self.colors.success
+    "error" => self.colors.error
+    "warning" => self.colors.warning
+    "thinkingText" => self.colors.thinking_text
+    "customMessageLabel" => self.colors.custom_message_label
+    "mdLink" => self.colors.md_link
+    "mdCode" => self.colors.md_code
+    "mdCodeBlock" => self.colors.md_code_block
+    "mdCodeBlockBorder" => self.colors.md_code_block_border
+    "userMessageBg" => self.colors.user_message_bg
+    "toolPendingBg" => self.colors.tool_pending_bg
+    "toolSuccessBg" => self.colors.tool_success_bg
+    "toolErrorBg" => self.colors.tool_error_bg
+    "bashMode" => self.colors.bash_mode
+    "selectedBg" => self.colors.selected_bg
+    "scrollbarTrack" => self.colors.scrollbar_track
+    "scrollbarThumb" => self.colors.scrollbar_thumb
+    "searchMatchBg" => self.colors.search_match_bg
+    "searchMatchText" => self.colors.search_match_text
+    "userMessageText" => self.colors.user_message_text
+    "toolTitle" => self.colors.tool_title
+    "toolOutput" => self.colors.tool_output
+    "mdHeading" => self.colors.md_heading
+    "mdLinkUrl" => self.colors.md_link_url
+    "mdQuote" => self.colors.md_quote
+    "mdQuoteBorder" => self.colors.md_quote_border
+    "mdHr" => self.colors.md_hr
+    "mdListBullet" => self.colors.md_list_bullet
+    "thinkingOff" => self.colors.thinking_off
+    "thinkingMinimal" => self.colors.thinking_minimal
+    "thinkingLow" => self.colors.thinking_low
+    "thinkingMedium" => self.colors.thinking_medium
+    "thinkingHigh" => self.colors.thinking_high
+    "thinkingXhigh" => self.colors.thinking_xhigh
+    "thinkingMax" => self.colors.thinking_max
+    _ => abort("unknown theme color role: \{role}")
+  }
 }
 
 ///|

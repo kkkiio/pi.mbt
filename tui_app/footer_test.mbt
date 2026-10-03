@@ -1,0 +1,211 @@
+///|
+extern "js" fn plain(value : String) -> String =
+  #|(value) => value.replace(/\x1b\[[0-?]*[ -\/]*[@-~]/g, '')
+
+///|
+/// Capture the public TuiApp terminal output, without exposing Footer's renderer.
+extern "js" fn capture_screen(width : Int, draw : () -> Unit) -> String =
+  #| (width, draw) => {
+  #|   const stdout = process.stdout, write = stdout.write;
+  #|   const columns = Object.getOwnPropertyDescriptor(stdout, 'columns');
+  #|   const rows = Object.getOwnPropertyDescriptor(stdout, 'rows');
+  #|   let output = '';
+  #|   try {
+  #|     Object.defineProperty(stdout, 'columns', {value:width, configurable:true});
+  #|     Object.defineProperty(stdout, 'rows', {value:24, configurable:true});
+  #|     stdout.write = chunk => { output += String(chunk); return true; };
+  #|     draw();
+  #|     return output;
+  #|   } finally {
+  #|     stdout.write = write;
+  #|     if (columns) Object.defineProperty(stdout, 'columns', columns); else delete stdout.columns;
+  #|     if (rows) Object.defineProperty(stdout, 'rows', rows); else delete stdout.rows;
+  #|   }
+  #| }
+
+///|
+fn screen(app : @tui_app.TuiApp, width : Int) -> String {
+  plain(capture_screen(width, fn() { app.tui.render_now(force=true) }))
+}
+
+///|
+fn usage(
+  input : Int,
+  output : Int,
+  read : Int,
+  write : Int,
+) -> @agent_loop.Usage {
+  @agent_loop.Usage::{
+    input,
+    output,
+    cache_read: read,
+    cache_write: write,
+    cache_write_1h: None,
+    reasoning: None,
+    total_tokens: input + output + read + write,
+    cost: @agent_loop.UsageCost::{
+      input: 0.0,
+      output: 0.0,
+      cache_read: 0.0,
+      cache_write: 0.0,
+      total: 0.0,
+    },
+  }
+}
+
+///|
+async test "footer accumulates usage and preserves assistant cache rate across tool usage" {
+  let app = @tui_app.TuiApp::load("model", "/tmp", "high")
+  defer {
+    let _ = capture_screen(80, fn() { app.stop() })
+  }
+  let _ = capture_screen(80, fn() { app.start() })
+  app.set_usage(usage(1000, 2, 1000, 0))
+  app.set_usage(usage(999, 3, 0, 1), update_cache_hit=false)
+  assert_true(screen(app, 80).contains("↑2.0k ↓5 R1.0k W1 CH50.0%"))
+}
+
+///|
+async test "footer hides cache hit without cache totals and reset is instance-local" {
+  let first = @tui_app.TuiApp::load("m", "/tmp", "high")
+  defer {
+    let _ = capture_screen(40, fn() { first.stop() })
+  }
+  let _ = capture_screen(40, fn() { first.start() })
+  first.set_usage(usage(10, 0, 0, 0))
+  assert_false(screen(first, 40).contains("CH"))
+  first.reset_transcript()
+  assert_false(screen(first, 40).contains("↑"))
+  let second = @tui_app.TuiApp::load("m", "/tmp", "high")
+  defer {
+    let _ = capture_screen(40, fn() { second.stop() })
+  }
+  let _ = capture_screen(40, fn() { second.start() })
+  assert_false(screen(second, 40).contains("↑"))
+}
+
+///|
+async test "footer rounds boundaries, truncates right without ellipsis, and sanitizes labels" {
+  let app = @tui_app.TuiApp::load("long-model-name", "/tmp", "high")
+  defer {
+    let _ = capture_screen(80, fn() { app.stop() })
+  }
+  let _ = capture_screen(80, fn() { app.start() })
+  app.set_session_name(Some(" session\tname "))
+  app.set_usage(usage(1999, 0, 0, 0))
+  let wide = screen(app, 80)
+  assert_true(wide.contains("/tmp • session name"))
+  assert_true(wide.contains("↑2.0k"))
+  app.reset_transcript()
+  app.set_usage(usage(1999, 0, 0, 0))
+  let narrow = screen(app, 12)
+  assert_false(narrow.contains("..."))
+  assert_true(narrow.contains("long-"))
+}
+
+///|
+async test "session replay includes compaction and standalone usage without replacing assistant cache rate" {
+  let dir = @coding_agent.create_temp_dir("pim-footer-replay-")
+  defer @coding_agent.remove_dir(dir)
+  let assistant = @faux.faux_message([@faux.faux_text("done")])
+  let message : @agent_loop.AssistantMessage = {
+    ..assistant,
+    usage: Some(usage(1000, 2, 1000, 0)),
+  }
+  let entries : Array[@agent_session.SessionEntry] = [
+    {
+      id: "a",
+      parent_id: None,
+      timestamp: 0,
+      content: Message(Assistant(message)),
+    },
+    {
+      id: "c",
+      parent_id: Some("a"),
+      timestamp: 1,
+      content: Compaction(
+        summary="summary",
+        first_kept_entry_id="a",
+        tokens_before=2000,
+        details=None,
+        usage=Some(usage(111, 3, 7, 0)),
+      ),
+    },
+    {
+      id: "u",
+      parent_id: Some("c"),
+      timestamp: 2,
+      content: Metadata({
+        "type": "usage",
+        "kind": "cache_warm",
+        "provider": "test",
+        "model": "model",
+        "usage": {
+          "input": 200,
+          "output": 4,
+          "cacheRead": 0,
+          "cacheWrite": 9,
+          "totalTokens": 213,
+          "cost": {
+            "input": 0.02,
+            "output": 0.01,
+            "cacheRead": 0,
+            "cacheWrite": 0.01,
+            "total": 0.04,
+          },
+        },
+      }),
+    },
+    {
+      id: "failed",
+      parent_id: Some("u"),
+      timestamp: 3,
+      content: Message(
+        Assistant({
+          ..assistant,
+          usage: None,
+          stop_reason: Error,
+          error_message: Some("provider failed"),
+        }),
+      ),
+    },
+  ]
+  let header : Json = {
+    "type": "session",
+    "version": 3,
+    "id": "replay",
+    "timestamp": "1970-01-01T00:00:00.000Z",
+    "cwd": dir,
+  }
+  let journal = header.stringify() +
+    "\n" +
+    entries.map(entry => entry.to_json().stringify()).join("\n") +
+    "\n"
+  let path = "\{dir}/session.jsonl"
+  @coding_agent.write_bytes_file(path, @utf8.encode(journal))
+  let host = @tui_app.SessionHost::new(@faux.FauxLLM(), dir, Some(dir))
+  defer host.close()
+  let app = @tui_app.TuiApp::load("model", dir, "high")
+  defer {
+    let _ = capture_screen(80, fn() { app.stop() })
+  }
+  let _ = capture_screen(80, fn() { app.start() })
+  host.load_session(path, app)
+  assert_true(screen(app, 80).contains("↑1.3k ↓9 R1.0k W9 CH50.0% $0.040"))
+  host.load_session(path, app)
+  assert_true(screen(app, 80).contains("↑1.3k ↓9 R1.0k W9 CH50.0% $0.040"))
+}
+
+///|
+async test "terminal title sanitizes directory and session labels" {
+  let app = @tui_app.TuiApp::load("model", "/tmp/dir\u{07}\u{1b}tail", "high")
+  defer {
+    let _ = capture_screen(80, fn() { app.stop() })
+  }
+  let output = capture_screen(80, fn() {
+    app.set_session_name(Some("name\nnext"))
+  })
+  assert_true(output.contains("pim - name next - dir tail"))
+  assert_false(output.contains("dir\u{07}"))
+  assert_false(output.contains("\u{1b}tail"))
+}

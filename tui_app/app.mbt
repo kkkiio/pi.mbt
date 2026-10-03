@@ -80,14 +80,14 @@ pub async fn TuiApp::load(
   // terminal 与 Tui 绑定:pi-tui 的 `TuiAltScreen` 构造时只是拿引用,
   // 真正的 raw mode/副屏切换在 `Tui::start`。
   let terminal = terminal_new()
-  let tui = tui_new(terminal)
-  let editor = prompt_editor_new(tui, theme)
+  let tui = tui_new(terminal, theme=Some(theme))
+  let editor = prompt_editor_new(tui, theme, thinking~)
   let app = TuiApp::{
     tui,
     terminal,
     theme,
     transcript: Transcript::new(theme),
-    status: StatusLine::new(theme),
+    status: StatusLine::new(theme, thinking~),
     footer: Footer::new(theme, model, cwd, thinking),
     editor,
     pending: Ref(PendingList::new(theme)),
@@ -98,13 +98,11 @@ pub async fn TuiApp::load(
     interrupt_handler: fn() { () },
     last_ctrl_c_ms: 0.0,
   }
-  app.transcript.push_note(STARTUP_HELP)
+  let branch = current_branch(cwd)
+  app.footer.set_branch(if branch.is_empty() { None } else { Some(branch) })
+  app.transcript.push_startup()
   app
 }
-
-///|
-/// 启动帮助行(只列 pim 实际支持的键位)。
-const STARTUP_HELP : String = "Esc interrupt · Ctrl+C clear · Ctrl+D exit · Ctrl+O tools · Ctrl+T thinking · / commands"
 
 ///|
 /// 把提交回调接到外部处理器(避免构造顺序上的循环依赖)。
@@ -134,6 +132,9 @@ pub fn TuiApp::start(self : TuiApp) -> Unit {
   let transcript_component = component_of(fn(width) {
     Widget::render(self.transcript, width)
   })
+  transcript_component.on_click(fn(row, width) {
+    self.transcript.click(row, width)
+  })
   let pending_component = component_of(fn(width) {
     Widget::render(self.pending.val, width)
   })
@@ -142,8 +143,8 @@ pub fn TuiApp::start(self : TuiApp) -> Unit {
   })
   let editor_component = self.editor.component()
   // 运行状态嵌在输入框上边框:每帧按当前状态渲染整行。
-  self.editor.set_border_provider(fn(width) {
-    match self.status.render_border(width) {
+  self.editor.set_border_provider(fn(width, hidden) {
+    match self.status.render_border(width, hidden_lines=hidden) {
       Some(line) => line
       None => ""
     }
@@ -154,10 +155,11 @@ pub fn TuiApp::start(self : TuiApp) -> Unit {
     pending=pending_component,
     editor=editor_component,
     footer=footer_component,
+    theme=Some(self.theme),
   )
   self.tui.set_layout_root(viewport.root())
   self.tui.set_focus(editor_component)
-  self.terminal.set_title("pim")
+  self.set_session_name(None)
   let _unlisten = self.tui.add_input_listener(fn(data) { self.on_input(data) })
   self.tui.start()
 }
@@ -213,12 +215,24 @@ fn TuiApp::on_input(self : TuiApp, data : String) -> Bool {
   // app.tools.expand == ctrl+o:展开/折叠工具输出。
   if matches_key(data, "ctrl+o") {
     self.transcript.toggle_expanded_tool_output()
+    self.push_note(
+      "Tool output: " +
+      (if self.transcript.expanded_tool_output {
+        "expanded"
+      } else {
+        "collapsed"
+      }),
+    )
     self.tui.request_render()
     return true
   }
   // app.thinking.expand == ctrl+t:展开/折叠思考内容。
   if matches_key(data, "ctrl+t") {
     self.transcript.toggle_expanded_thinking()
+    self.push_note(
+      "Thinking blocks: " +
+      (if self.transcript.expanded_thinking { "visible" } else { "hidden" }),
+    )
     self.tui.request_render()
     return true
   }
@@ -357,8 +371,9 @@ pub fn TuiApp::tool_call(
   name : String,
   arguments : Json,
   id~ : String,
+  timed? : Bool = false,
 ) -> Unit {
-  self.transcript.push_tool_call(name, arguments, id~)
+  self.transcript.push_tool_call(name, arguments, id~, timed~)
   self.tui.request_render()
 }
 
@@ -369,14 +384,19 @@ pub fn TuiApp::tool_result(
   text : String,
   is_error : Bool,
   id~ : String,
+  details? : Json? = None,
 ) -> Unit {
-  self.transcript.push_tool_result(name, text, is_error, id~)
+  self.transcript.push_tool_result(name, text, is_error, id~, details~)
   self.tui.request_render()
 }
 
 ///|
-pub fn TuiApp::set_usage(self : TuiApp, usage : @agent_loop.Usage) -> Unit {
-  self.footer.set_usage(usage)
+pub fn TuiApp::set_usage(
+  self : TuiApp,
+  usage : @agent_loop.Usage,
+  update_cache_hit? : Bool = true,
+) -> Unit {
+  self.footer.set_usage(usage, update_cache_hit~)
   self.tui.request_render()
 }
 
@@ -405,6 +425,8 @@ fn TuiApp::remove_pending_head(self : TuiApp) -> Unit {
 pub fn TuiApp::set_idle(self : TuiApp) -> Unit {
   self.running = false
   self.status.set_idle()
+  let branch = current_branch(self.footer.cwd())
+  self.footer.set_branch(if branch.is_empty() { None } else { Some(branch) })
   self.terminal.set_progress(false)
   self.tui.request_render()
 }
@@ -418,10 +440,12 @@ pub fn TuiApp::tick(self : TuiApp) -> Unit {
 }
 
 ///|
-/// 清空消息流与排队区(`/resume` 回放前调用),保留 footer 用量。
+/// 清空消息流、排队区与用量(`/resume` 回放前调用)。
 pub fn TuiApp::reset_transcript(self : TuiApp) -> Unit {
   self.transcript = Transcript::new(self.theme)
   self.pending.val.lines = []
+  self.footer.reset_usage()
+  self.set_session_name(None)
   self.tui.request_render()
 }
 
@@ -442,8 +466,46 @@ pub fn TuiApp::reset(self : TuiApp) -> Unit {
     self.footer.cwd(),
     self.footer.thinking(),
   )
+  let branch = current_branch(self.footer.cwd())
+  self.footer.set_branch(if branch.is_empty() { None } else { Some(branch) })
   self.set_idle()
 }
+
+///|
+pub fn TuiApp::set_session_name(self : TuiApp, name : String?) -> Unit {
+  self.footer.set_session_name(name)
+  let cwd = self.footer.cwd()
+  let base = match cwd.rev_split_once("/") {
+    Some((_, base)) => base.to_owned()
+    None => cwd
+  }
+  let base = sanitize_label(base)
+  let label = name.map(sanitize_label).unwrap_or("")
+  self.terminal.set_title(
+    if label.is_empty() {
+      "pim - " + base
+    } else {
+      "pim - " + label + " - " + base
+    },
+  )
+}
+
+///|
+pub fn TuiApp::begin_retry(
+  self : TuiApp,
+  attempt : Int,
+  max_attempts : Int,
+  delay_ms : Int,
+) -> Unit {
+  self.running = true
+  self.status.set_retry(attempt, max_attempts, delay_ms)
+  self.terminal.set_progress(true)
+  self.tui.request_render()
+}
+
+///|
+extern "js" fn current_branch(cwd : String) -> String =
+  #| cwd => { try { const cp = process.getBuiltinModule('child_process'); return cp.execFileSync('git', ['branch','--show-current'], {cwd, encoding:'utf8', stdio:['ignore','pipe','ignore']}).trim(); } catch { return ''; } }
 
 ///|
 /// 短暂的 toast 提示。

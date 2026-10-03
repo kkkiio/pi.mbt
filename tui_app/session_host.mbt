@@ -14,9 +14,6 @@ pub struct SessionHost {
   mut close_journal : () -> Unit
   /// 当前会话的 journal 文件路径;内存 journal 时为 `None`。
   mut session_path : String?
-  /// 当前 assistant 消息已消费的文本/思考长度(满量内容 → 增量)。
-  mut text_len : Int
-  mut thinking_len : Int
 }
 
 ///|
@@ -34,8 +31,6 @@ pub fn SessionHost::new(
     session: @coding_agent.new_coding_session(llm, cwd~, journal~),
     close_journal,
     session_path,
-    text_len: 0,
-    thinking_len: 0,
   }
 }
 
@@ -87,8 +82,6 @@ pub fn SessionHost::new_session(
     journal~,
     active_tools~,
   )
-  self.text_len = 0
-  self.thinking_len = 0
 }
 
 ///|
@@ -106,8 +99,6 @@ pub fn SessionHost::interrupt(self : SessionHost) -> Unit {
 ///|
 /// 订阅当前会话的事件并投影到视图。
 pub fn SessionHost::attach(self : SessionHost, app : TuiApp) -> Unit {
-  self.text_len = 0
-  self.thinking_len = 0
   self.session.subscribe(event => self.on_event(event, app))
 }
 
@@ -199,12 +190,10 @@ pub fn SessionHost::load_session(
     journal~,
     active_tools~,
   )
-  self.text_len = 0
-  self.thinking_len = 0
   app.reset_transcript()
   replay(entries, app)
   self.attach(app)
-  app.flash("resumed \{session_stem(path)}")
+  app.push_note("Resumed session")
 }
 
 ///|
@@ -227,6 +216,9 @@ fn session_stem(path : String) -> String {
 /// 本期不渲染。
 fn replay(entries : Array[@agent_session.SessionEntry], app : TuiApp) -> Unit {
   for entry in entries {
+    if entry.auxiliary_usage() is Some(usage) {
+      app.set_usage(usage, update_cache_hit=false)
+    }
     match entry.content {
       Message(User(message)) =>
         for block in message.content {
@@ -236,13 +228,24 @@ fn replay(entries : Array[@agent_session.SessionEntry], app : TuiApp) -> Unit {
           }
         }
       Message(Assistant(message)) => replay_assistant(message, app)
-      Message(ToolResult(result)) =>
+      Message(ToolResult(result)) => {
         app.tool_result(
           result.tool_name,
           tool_result_text(result),
           result.is_error,
           id=result.tool_call_id,
+          details=result.details,
         )
+        if result.usage is Some(usage) {
+          app.set_usage(usage, update_cache_hit=false)
+        }
+      }
+      Metadata(Object(fields)) =>
+        if fields.get("type") is Some(String("session_info")) {
+          if fields.get("name") is Some(String(name)) {
+            app.set_session_name(Some(name))
+          }
+        }
       _ => ()
     }
   }
@@ -255,57 +258,52 @@ fn replay_assistant(
   message : @agent_loop.AssistantMessage,
   app : TuiApp,
 ) -> Unit {
-  let mut text = ""
-  let mut thinking = ""
   let calls : Array[@agent_loop.ToolCall] = []
+  let content : Array[(String, Bool)] = []
+  app.assistant_start()
   for block in message.content {
     match block {
-      Text(content, ..) => text = text + content
-      Thinking(content, ..) => thinking = thinking + content
+      Text(text, ..) => content.push((text, false))
+      Thinking(text, ..) => content.push((text, true))
       ToolCall(call, ..) => calls.push(call)
       _ => ()
     }
   }
-  app.assistant_start()
-  if !thinking.is_empty() {
-    app.assistant_delta(thinking, true)
-  }
-  if !text.is_empty() {
-    app.assistant_delta(text, false)
-  }
+  app.transcript.set_assistant_content(content)
   app.assistant_end(
     stop_reason_name(message.stop_reason),
     message.error_message,
   )
+  if message.usage is Some(usage) {
+    // Pi serialization fills absent usage with zeroes; it has no measured prompt rate.
+    app.set_usage(
+      usage,
+      update_cache_hit=usage.input + usage.cache_read + usage.cache_write > 0,
+    )
+  }
   for call in calls {
     app.tool_call(call.name, call.arguments, id=call.id)
   }
 }
 
 ///|
-/// 结束会话的当前 assistant 增量(换会话/换消息时重置游标)。
+/// Replace the current assistant snapshot, retaining text/thinking order.
 fn SessionHost::sync_assistant(
   self : SessionHost,
   message : @agent_loop.AssistantMessage,
   app : TuiApp,
 ) -> Unit {
-  let mut text = ""
-  let mut thinking = ""
+  let content : Array[(String, Bool)] = []
   for block in message.content {
     match block {
-      Text(content, ..) => text = text + content
-      Thinking(content, ..) => thinking = thinking + content
+      Text(text, ..) => content.push((text, false))
+      Thinking(text, ..) => content.push((text, true))
       _ => ()
     }
   }
-  if text.length() > self.text_len {
-    app.assistant_delta(text[self.text_len:].to_owned(), false)
-    self.text_len = text.length()
-  }
-  if thinking.length() > self.thinking_len {
-    app.assistant_delta(thinking[self.thinking_len:].to_owned(), true)
-    self.thinking_len = thinking.length()
-  }
+  let _ = self
+  app.transcript.set_assistant_content(content)
+  app.render()
 }
 
 ///|
@@ -344,7 +342,7 @@ fn SessionHost::on_event(
       app.push_note(
         "retrying (\{attempt}/\{max_attempts}) in \{delay_ms}ms: \{error_message}",
       )
-      app.begin_work("retrying")
+      app.begin_retry(attempt, max_attempts, delay_ms)
     }
     AutoRetryEnd(attempt~, success~, final_error~) =>
       if success {
@@ -361,11 +359,7 @@ fn SessionHost::on_event(
       match loop_event {
         AgentStart => app.begin_work("thinking")
         TurnStart => ()
-        MessageStart(Assistant(_)) => {
-          self.text_len = 0
-          self.thinking_len = 0
-          app.assistant_start()
-        }
+        MessageStart(Assistant(_)) => app.assistant_start()
         MessageStart(_) => ()
         MessageUpdate(Assistant(message)) => self.sync_assistant(message, app)
         MessageUpdate(_) => ()
@@ -386,15 +380,20 @@ fn SessionHost::on_event(
         MessageEnd(_) => ()
         ToolExecutionStart(call) => {
           app.begin_work(call.name)
-          app.tool_call(call.name, call.arguments, id=call.id)
+          app.tool_call(call.name, call.arguments, id=call.id, timed=true)
         }
-        ToolExecutionEnd(result) =>
+        ToolExecutionEnd(result) => {
           app.tool_result(
             result.tool_name,
             tool_result_text(result),
             result.is_error,
             id=result.tool_call_id,
+            details=result.details,
           )
+          if result.usage is Some(usage) {
+            app.set_usage(usage, update_cache_hit=false)
+          }
+        }
         TurnEnd(_, _) => ()
         AgentEnd(_) => app.set_idle()
       }
@@ -408,8 +407,6 @@ pub async fn SessionHost::prompt(
   text : String,
   app : TuiApp,
 ) -> Unit {
-  self.text_len = 0
-  self.thinking_len = 0
   app.begin_work("thinking")
   let input : Array[@agent_loop.UserMessage] = [
     @agent_loop.UserMessage::{

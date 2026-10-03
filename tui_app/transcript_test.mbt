@@ -61,11 +61,11 @@ async test "multi-line bash command renders one row per element" {
       #| run the snippet                        
       #|                                        
       #|
-      #|────────────────────────────────────────
-      #| $ python3 - <<'PY'
-      #| print("greeting")
-      #| PY
-      #|────────────────────────────────────────
+      #|                                        
+      #| $ python3 - <<'PY'                     
+      #| print("greeting")                      
+      #| PY                                     
+      #|                                        
     ),
   )
 }
@@ -75,9 +75,9 @@ async test "multi-line bash command renders one row per element" {
 /// keeps the tail (the final diagnostic); generic tools keep the beginning.
 async test "tool previews count visual rows and preserve expanded output" {
   @tui_app.load_module()
-  for (name, limit) in [("bash", 20), ("grep", 10)] {
+  for (name, limit) in [("bash", 5), ("grep", 10)] {
     let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
-    let output = "0123456789".repeat(limit + 2)
+    let output = "012345678".repeat(limit + 2)
     transcript.push_tool_call(
       name,
       { "command": "run", "pattern": "match" },
@@ -90,29 +90,39 @@ async test "tool previews count visual rows and preserve expanded output" {
       id=name,
     )
     let collapsed = render_rows(transcript, 11)
+    let rows = collapsed.map(row => row.trim().to_owned())
     assert_eq(
-      collapsed[2],
+      rows.filter(row => row == "012345678").length(),
       if name == "bash" {
-        " 0123456789"
+        4
       } else {
-        " HEAD      "
+        9
       },
     )
-    if name == "bash" {
-      assert_eq(collapsed[limit + 1], " TAIL")
+    assert_eq(rows.contains("HEAD"), name != "bash")
+    assert_eq(rows.contains("TAIL"), name == "bash")
+    let theme = @tui_app.Theme::load("light")
+    let foreground = theme
+      .fg("toolOutput", "")
+      .strip_suffix("\u{1b}[39m")
+      .unwrap()
+      .to_owned()
+    for line in @tui_app.Widget::render(transcript, 11) {
+      if strip_ansi(line).contains("012345678") {
+        assert_true(line.contains(foreground))
+      }
     }
     transcript.set_expanded_tool_output(true)
     let expanded = render_rows(transcript, 11)
-    // Framing/header = 2 rows, output = limit + 4 rows, final frame = 1 row.
-    assert_eq(expanded.length(), limit + 7)
-    for row in 3..<(limit + 5) {
-      assert_eq(expanded[row].trim().to_owned(), "0123456789")
-    }
-    assert_eq(expanded[2].trim().to_owned(), "HEAD")
-    assert_eq(expanded[limit + 5].trim().to_owned(), "TAIL")
+    let rows = expanded.map(row => row.trim().to_owned())
+    assert_eq(rows.filter(row => row == "012345678").length(), limit + 2)
+    assert_true(rows.contains("HEAD"))
+    assert_true(rows.contains("TAIL"))
     // A resize must rewrap the raw text, not a cached preview.
-    let wider = render_rows(transcript, 21)
-    assert_eq(wider[3].trim().to_owned(), "01234567890123456789")
+    let wider = render_rows(transcript, 20)
+    assert_true(
+      wider.map(row => row.trim().to_owned()).contains("012345678012345678"),
+    )
   }
 }
 
@@ -155,7 +165,11 @@ async test "multi-line tool summary renders one row per element" {
     render_rows(transcript, 40).join("\n"),
     content=(
       #|                                        
-      #| grep first...                          
+      #| grep                                   
+      #|                                        
+      #| {                                      
+      #|   "pattern": "first\nsecond"           
+      #| }                                      
       #|                                        
     ),
   )
@@ -178,19 +192,18 @@ async test "multi-line user message and CRLF tool result render one row per elem
       #| line two                               
       #|                                        
       #|
-      #|────────────────────────────────────────
-      #| $ printf a
-      #| a
-      #| b
-      #|────────────────────────────────────────
+      #|                                        
+      #| $ printf a                             
+      #|                                        
+      #| a                                      
+      #| b                                      
+      #|                                        
     ),
   )
 }
 
 ///|
-/// bash 的结果文本已经写了真实原因(`exit 2` / 超时 / 中断),所以块尾只标一个不
-/// 谎报的失败记号;pi 的 `bash-execution.ts` 同样只在拿得到真实退出码时才写
-/// `(exit N)`。
+/// 错误背景保留工具提供的真实退出原因。
 async test "a failed bash result marks failure without inventing an exit code" {
   @tui_app.load_module()
   let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
@@ -204,11 +217,11 @@ async test "a failed bash result marks failure without inventing an exit code" {
   inspect(
     render_rows(transcript, 40).join("\n"),
     content=(
-      #|────────────────────────────────────────
-      #| $ exit 2
-      #| Command exited with code 2
-      #| (failed)
-      #|────────────────────────────────────────
+      #|                                        
+      #| $ exit 2                               
+      #|                                        
+      #| Command exited with code 2             
+      #|                                        
     ),
   )
 }
@@ -238,13 +251,20 @@ async test "resumed same-name tool calls retain their live output pairing" {
   host.attach(app)
   app.submit("go")
   host.prompt(app.take_submission(), app)
-  let live = render_rows(app.transcript, 60).join("\n")
-  assert_true(live.contains("$ printf ALPHA\n ALPHA"))
-  assert_true(live.contains("$ printf OMEGA\n OMEGA"))
+  let live = render_rows(app.transcript, 60)
+    .map(row => row.trim().to_owned())
+    .filter(row => !row.is_empty() && !row.has_prefix("Took "))
+  assert_eq(
+    live.join("\n"),
+    "go\n$ printf ALPHA\nALPHA\n$ printf OMEGA\nOMEGA\nDONE",
+  )
   let sessions = @coding_agent.list_sessions(dir)
   assert_eq(sessions.length(), 1)
   host.load_session("\{dir}/\{sessions[0]}.jsonl", app)
-  assert_eq(render_rows(app.transcript, 60).join("\n"), live)
+  let replayed = render_rows(app.transcript, 60)
+    .map(row => row.trim().to_owned())
+    .filter(row => !row.is_empty() && row != "Resumed session")
+  assert_eq(replayed, live)
 }
 
 ///|
@@ -271,9 +291,391 @@ async test "same-name tool results match call IDs in either result order" {
     for (id, text) in results {
       transcript.push_tool_result("bash", text, false, id~)
     }
-    let rendered = render_rows(transcript, 60).join("\n")
+    let rendered = render_rows(transcript, 60)
+      .map(row => row.trim().to_owned())
+      .filter(row => !row.is_empty())
+      .join("\n")
     assert_eq(transcript.item_count(), 2)
-    assert_true(rendered.contains("$ printf ALPHA\n ALPHA"))
-    assert_true(rendered.contains("$ printf OMEGA\n OMEGA"))
+    assert_eq(rendered, "$ printf ALPHA\nALPHA\n$ printf OMEGA\nOMEGA")
+  }
+}
+
+///|
+async test "tool status backgrounds survive bold and embedded ANSI reset" {
+  @tui_app.load_module()
+  let theme = @tui_app.Theme::load("light")
+  let transcript = @tui_app.Transcript::new(theme)
+  transcript.push_tool_call("bash", { "command": "echo OK" }, id="call")
+  let pending = @tui_app.Widget::render(transcript, 40)
+  assert_eq(pending[0], theme.bg("toolPendingBg", " ".repeat(40)))
+  assert_false(pending[1].contains("\u{1b}[0m"))
+  transcript.push_tool_result(
+    "bash",
+    "\u{1b}[31mOK\u{1b}[0m END",
+    false,
+    id="call",
+  )
+  let success = @tui_app.Widget::render(transcript, 40)
+  assert_eq(success[0], theme.bg("toolSuccessBg", " ".repeat(40)))
+  let open = theme
+    .bg("toolSuccessBg", "")
+    .strip_suffix("\u{1b}[49m")
+    .unwrap()
+    .to_owned()
+  assert_true(success[3].contains("\u{1b}[0m" + open))
+  let failed = @tui_app.Transcript::new(theme)
+  failed.push_tool_call("bash", { "command": "exit 7" }, id="failure")
+  failed.push_tool_result(
+    "bash",
+    "Command exited with code 7",
+    true,
+    id="failure",
+  )
+  assert_eq(
+    @tui_app.Widget::render(failed, 40)[0],
+    theme.bg("toolErrorBg", " ".repeat(40)),
+  )
+}
+
+///|
+async test "assistant preserves alternating content and termination notices" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.start_assistant()
+  transcript.set_assistant_content([
+    ("First", false),
+    ("Reason", true),
+    ("Last", false),
+  ])
+  transcript.finish_assistant("length", None)
+  inspect(
+    render_rows(transcript, 60).join("\n"),
+    content=(
+      #| First                                                      
+      #|
+      #| Reason                                                     
+      #|
+      #| Last                                                       
+      #|
+      #| Response was truncated before completion.
+    ),
+  )
+  transcript.set_expanded_thinking(false)
+  transcript.finish_assistant("aborted", Some("Request was aborted"))
+  inspect(
+    render_rows(transcript, 60).join("\n"),
+    content=(
+      #| First                                                      
+      #|
+      #| Thinking...
+      #|
+      #| Last                                                       
+      #|
+      #| Operation aborted
+    ),
+  )
+}
+
+///|
+async test "read errors remain visible when collapsed and ranges retain offset" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_tool_call(
+    "read",
+    { "path": "src/main.ts", "offset": 7, "limit": 3 },
+    id="read",
+  )
+  transcript.push_tool_result("read", "ENOENT: src/main.ts", true, id="read")
+  inspect(
+    render_rows(transcript, 50).join("\n"),
+    content=(
+      #|                                                  
+      #| read src/main.ts:7-9                             
+      #|                                                  
+      #| ENOENT: src/main.ts                              
+      #|                                                  
+    ),
+  )
+}
+
+///|
+async test "status retains spinner and editor overflow at narrow widths" {
+  @tui_app.load_module()
+  let status = @tui_app.StatusLine::new(
+    @tui_app.Theme::load("light"),
+    thinking="high",
+  )
+  status.set_working("thinking")
+  let line = status.render_border(40, hidden_lines=7).unwrap()
+  assert_true(strip_ansi(line).contains("⠋"))
+  assert_true(strip_ansi(line).contains("↑ 7 more"))
+  for width in [0, 1, 2, 8, 40] {
+    assert_eq(
+      @tui_app.visible_width(status.render_border(width).unwrap()),
+      width,
+    )
+  }
+  status.set_retry(2, 3, 3000)
+  assert_true(
+    strip_ansi(status.render_border(80).unwrap()).contains(
+      "Retrying (2/3) in 3s",
+    ),
+  )
+}
+
+///|
+async test "individual clicks preserve other blocks and global toggles reset overrides" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.start_assistant()
+  transcript.set_assistant_content([
+    ("Reason A", true),
+    ("Reason B", true),
+    ("Text", false),
+    ("Reason C", true),
+  ])
+  assert_true(transcript.click(0, 60))
+  let collapsed = render_rows(transcript, 60).join("\n")
+  assert_false(collapsed.contains("Reason A"))
+  assert_false(collapsed.contains("Reason B"))
+  assert_true(collapsed.contains("Reason C"))
+  transcript.set_expanded_thinking(true)
+  assert_true(render_rows(transcript, 60).join("\n").contains("Reason B"))
+  let tools = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  for id in ["first", "second"] {
+    tools.push_tool_call("bash", { "command": id }, id~)
+    tools.push_tool_result(
+      "bash",
+      "HEAD \{id}\n2\n3\n4\n5\nTAIL \{id}",
+      false,
+      id~,
+    )
+  }
+  assert_false(tools.click(1, 60)) // command is not the result click target
+  assert_true(tools.click(3, 60))
+  let expanded = render_rows(tools, 60).join("\n")
+  assert_true(expanded.contains("HEAD first"))
+  assert_false(expanded.contains("HEAD second"))
+  tools.set_expanded_tool_output(false)
+  assert_false(render_rows(tools, 60).join("\n").contains("HEAD first"))
+  // Reflow before clicking the second result; do not use the old wide-row position.
+  let narrow = render_rows(tools, 16)
+  let mut tail_row = -1
+  for index, row in narrow {
+    if row.contains("TAIL second") {
+      tail_row = index
+    }
+  }
+  assert_true(tools.click(tail_row, 16))
+  assert_true(render_rows(tools, 60).join("\n").contains("HEAD second"))
+}
+
+///|
+async test "bash truncation distinguishes byte limits and preserves untruncated footers" {
+  @tui_app.load_module()
+  for truncated in [true, false] {
+    let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+    transcript.push_tool_call("bash", { "command": "run" }, id="call")
+    transcript.push_tool_result(
+      "bash",
+      "output\n\n[Original /tmp/output]",
+      false,
+      id="call",
+      details=Some({
+        "fullOutputPath": "/tmp/output",
+        "truncation": {
+          "truncated": truncated,
+          "truncatedBy": "bytes",
+          "outputLines": 3,
+          "totalLines": 7,
+          "maxBytes": 2048,
+        },
+      }),
+    )
+    let rows = render_rows(transcript, 80).join("\n")
+    assert_eq(rows.contains("Original"), !truncated)
+    assert_eq(rows.contains("3 lines shown (2.0KB limit)"), truncated)
+    assert_false(rows.contains("showing 3 of 7 lines"))
+  }
+}
+
+///|
+async test "bash preview and expansion retain whitespace-sensitive output" {
+  @tui_app.load_module()
+  for truncated in [false, true] {
+    let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+    transcript.push_tool_call(
+      "bash",
+      { "command": "printf indented" },
+      id="call",
+    )
+    let text = "  value\n\n" +
+      (if truncated {
+        "\n\n[Showing lines 4-6 of 6. Full output: /tmp/full]"
+      } else {
+        ""
+      })
+    transcript.push_tool_result(
+      "bash",
+      text,
+      false,
+      id="call",
+      details=if truncated {
+        Some({
+          "fullOutputPath": "/tmp/full",
+          "truncation": {
+            "truncated": true,
+            "truncatedBy": "lines",
+            "outputLines": 3,
+            "totalLines": 6,
+          },
+        })
+      } else {
+        None
+      },
+    )
+    for expanded in [false, true] {
+      transcript.set_expanded_tool_output(expanded)
+      let rows = render_rows(transcript, 80)
+      assert_eq(rows.length(), if truncated { 9 } else { 7 })
+      assert_eq(rows[3], "   value" + " ".repeat(72))
+      assert_eq(rows[4], " ".repeat(80))
+      assert_eq(rows[5], " ".repeat(80))
+      assert_false(rows.join("\n").contains("Showing lines"))
+    }
+  }
+}
+
+///|
+async test "card backgrounds restore shorthand and combined resets without mistaking RGB zeroes" {
+  @tui_app.load_module()
+  let theme = @tui_app.Theme::load("light")
+  let open = theme
+    .bg("toolSuccessBg", "")
+    .strip_suffix("\u{1b}[49m")
+    .unwrap()
+    .to_owned()
+  for reset in ["\u{1b}[m", "\u{1b}[0;32m", "\u{1b}[1;49m", "\u{1b}[;32m"] {
+    assert_true(
+      theme
+      .bg("toolSuccessBg", "before" + reset + "after")
+      .contains(reset + open),
+    )
+  }
+  for
+    color in [
+      "\u{1b}[38;2;0;49;0m", "\u{1b}[48;2;0;49;0m", "\u{1b}[38:2::0:49:0m",
+    ] {
+    assert_false(
+      theme.bg("toolSuccessBg", color + "text").contains(color + open),
+    )
+  }
+}
+
+///|
+async test "cached markdown follows content, width, and thinking changes" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_user("A user **message**")
+  transcript.start_assistant()
+  transcript.set_assistant_content([("Alpha **bold** omega", false)])
+  let first = @tui_app.Widget::render(transcript, 50)
+  assert_eq(@tui_app.Widget::render(transcript, 50), first)
+  transcript.set_assistant_content([("Replacement", false)])
+  let replacement = render_rows(transcript, 50).join("\n")
+  assert_true(replacement.contains("Replacement"))
+  assert_false(replacement.contains("Alpha"))
+  let text = @tui_app.Widget::render(transcript, 50)
+  transcript.set_assistant_content([("Replacement", true)])
+  assert_true(@tui_app.Widget::render(transcript, 50) != text)
+  transcript.set_expanded_thinking(false)
+  assert_true(render_rows(transcript, 50).join("\n").contains("Thinking..."))
+  transcript.set_expanded_thinking(true)
+  let narrow = render_rows(transcript, 12)
+  assert_true(narrow.length() > render_rows(transcript, 50).length())
+  assert_eq(render_rows(transcript, 12), narrow)
+}
+
+///|
+async test "large generic arguments are bounded and cached calls refresh after results" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_tool_call(
+    "write",
+    { "content": "large payload ".repeat(20000) },
+    id="write",
+  )
+  let pending = render_rows(transcript, 40)
+  assert_true(pending.length() <= 15)
+  assert_true(pending.join("\n").contains("arguments truncated"))
+  assert_eq(render_rows(transcript, 40), pending)
+  transcript.push_tool_result("write", "saved", false, id="write")
+  assert_true(render_rows(transcript, 40).join("\n").contains("saved"))
+  transcript.set_expanded_tool_output(true)
+  let expanded = render_rows(transcript, 40)
+  assert_true(expanded.length() > pending.length())
+  assert_true(expanded.length() <= 60)
+  assert_true(expanded.join("\n").contains("saved"))
+  assert_false(transcript.click(20, 40))
+  let mut result_row = -1
+  for index, row in expanded {
+    if row.contains("saved") {
+      result_row = index
+    }
+  }
+  assert_true(transcript.click(result_row, 40))
+  assert_true(render_rows(transcript, 40).length() < expanded.length())
+  transcript.set_expanded_tool_output(true)
+  let narrow = render_rows(transcript, 12)
+  assert_true(narrow.length() <= 60)
+  assert_eq(render_rows(transcript, 12), narrow)
+}
+
+///|
+async test "assistant and thinking retain indented Markdown code blocks" {
+  @tui_app.load_module()
+  for thinking in [false, true] {
+    let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+    transcript.start_assistant()
+    transcript.set_assistant_content([("    **literal**\n    next", thinking)])
+    transcript.set_expanded_thinking(true)
+    let rows = render_rows(transcript, 50).join("\n")
+    assert_true(rows.contains("**literal**"))
+    assert_true(rows.contains("next"))
+    transcript.set_assistant_content([("**prose**", thinking)])
+    let prose = render_rows(transcript, 50).join("\n")
+    assert_true(prose.contains("prose"))
+    assert_false(prose.contains("**prose**"))
+  }
+}
+
+///|
+async test "bash partial line warning reports retained and total bytes" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_tool_call("bash", { "command": "run" }, id="call")
+  transcript.push_tool_result(
+    "bash",
+    "tail",
+    false,
+    id="call",
+    details=Some({
+      "truncation": {
+        "truncated": true,
+        "truncatedBy": "bytes",
+        "lastLinePartial": true,
+        "outputLines": 1,
+        "totalLines": 1,
+        "outputBytes": 2048,
+        "totalBytes": 8192,
+        "maxBytes": 2048,
+      },
+    }),
+  )
+  for expanded in [false, true] {
+    transcript.set_expanded_tool_output(expanded)
+    let rows = render_rows(transcript, 80).join("\n")
+    assert_true(rows.contains("showing last 2.0KB of 8.0KB (partial line)"))
+    assert_false(rows.contains("1 lines shown"))
   }
 }

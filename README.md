@@ -4,6 +4,8 @@
 
 用 MoonBit 重新实现的 [pi](https://github.com/earendil-works/pi) coding agent 子集。
 
+![pim 全屏 TUI：示例对话、思考过程、bash 工具输出与输入框](docs/assets/tui-session.png)
+
 ## Install
 
 ```bash
@@ -12,6 +14,14 @@ npm install -g .      # symlink 到全局
 ```
 
 ## Usage
+
+在终端中直接运行 `pim` 进入全屏 TUI:
+
+```bash
+pim
+```
+
+`Ctrl+O` 展开工具输出,`Ctrl+T` 切换思考显示,`Esc` 中断当前回合。
 
 `-p/--print` 单轮、非交互模式:
 

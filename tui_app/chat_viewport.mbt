@@ -23,8 +23,18 @@ pub fn chat_viewport_new(
   editor~ : Component,
   footer~ : Component,
   scrollbar? : String = "auto",
+  theme? : Theme? = None,
 ) -> ChatViewport {
-  let transcript = scroll_view(document, scrollbar~)
+  let transcript = match theme {
+    Some(theme) =>
+      scroll_view(
+        document,
+        scrollbar~,
+        scrollbar_track_style=Some(fn(text) { theme.fg("scrollbarTrack", text) }),
+        scrollbar_thumb_style=Some(fn(text) { theme.fg("scrollbarThumb", text) }),
+      )
+    None => scroll_view(document, scrollbar~)
+  }
   let dock = vstack([
     stack_child(pending, min_size=0),
     stack_child(editor, min_size=3),

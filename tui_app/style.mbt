@@ -11,125 +11,168 @@ const ESC : String = "\u{1B}"
 
 ///|
 /// 包裹前景色(24-bit),结束时只重置前景。
-extern "js" fn fg_hex(hex : String, text : String) -> String =
-  #| (hex, text) => {
+extern "js" fn fg_hex(hex : String, text : String, true_color : Bool) -> String =
+  #| (hex, text, trueColor) => {
   #|   const r = parseInt(hex.slice(1, 3), 16);
   #|   const g = parseInt(hex.slice(3, 5), 16);
   #|   const b = parseInt(hex.slice(5, 7), 16);
-  #|   return "\u001b[38;2;" + r + ";" + g + ";" + b + "m" + text + "\u001b[39m";
+  #|   const cube = [0,95,135,175,215,255];
+  #|   const q = v => cube.reduce((a,x,i) => Math.abs(x-v)<Math.abs(cube[a]-v)?i:a, 0);
+  #|   const distance = (x,y,z) => .299*(r-x)**2+.587*(g-y)**2+.114*(b-z)**2;
+  #|   const gray = Math.round(.299*r+.587*g+.114*b);
+  #|   const gi = Math.max(0,Math.min(23,Math.ceil((gray-8)/10-.5))), gv = 8+10*gi;
+  #|   const index = Math.max(r,g,b)-Math.min(r,g,b)<10 && distance(gv,gv,gv)<distance(cube[q(r)],cube[q(g)],cube[q(b)]) ? 232+gi : 16+36*q(r)+6*q(g)+q(b);
+  #|   const open = trueColor ? `\u001b[38;2;${r};${g};${b}m` : `\u001b[38;5;${index}m`;
+  #|   return open + text + "\u001b[39m";
   #| }
 
 ///|
 /// 包裹背景色(24-bit),结束时只重置背景。
-extern "js" fn bg_hex(hex : String, text : String) -> String =
-  #| (hex, text) => {
+extern "js" fn bg_hex(hex : String, text : String, true_color : Bool) -> String =
+  #| (hex, text, trueColor) => {
   #|   const r = parseInt(hex.slice(1, 3), 16);
   #|   const g = parseInt(hex.slice(3, 5), 16);
   #|   const b = parseInt(hex.slice(5, 7), 16);
-  #|   return "\u001b[48;2;" + r + ";" + g + ";" + b + "m" + text + "\u001b[49m";
+  #|   const cube = [0,95,135,175,215,255];
+  #|   const q = v => cube.reduce((a,x,i) => Math.abs(x-v)<Math.abs(cube[a]-v)?i:a, 0);
+  #|   const distance = (x,y,z) => .299*(r-x)**2+.587*(g-y)**2+.114*(b-z)**2;
+  #|   const gray = Math.round(.299*r+.587*g+.114*b);
+  #|   const gi = Math.max(0,Math.min(23,Math.ceil((gray-8)/10-.5))), gv = 8+10*gi;
+  #|   const index = Math.max(r,g,b)-Math.min(r,g,b)<10 && distance(gv,gv,gv)<distance(cube[q(r)],cube[q(g)],cube[q(b)]) ? 232+gi : 16+36*q(r)+6*q(g)+q(b);
+  #|   const open = trueColor ? `\u001b[48;2;${r};${g};${b}m` : `\u001b[48;5;${index}m`;
+  #|   return open + text.replace(/\u001b\[([\d;:]*)m/g, (sequence, parameters) => {
+  #|     const codes = parameters.split(';');
+  #|     for (let i = 0; i < codes.length; i++) {
+  #|       const code = Number(codes[i].split(':')[0]);
+  #|       if (code === 0 || code === 49) return sequence + open;
+  #|       // Extended color payloads may contain zeroes, which are not SGR resets.
+  #|       if ((code === 38 || code === 48 || code === 58) && !codes[i].includes(':')) {
+  #|         i += codes[i+1] === '2' ? 4 : codes[i+1] === '5' ? 2 : 0;
+  #|       }
+  #|     }
+  #|     return sequence;
+  #|   }) + "\u001b[49m";
   #| }
+
+///|
+fn terminal_true_color() -> Bool {
+  let capabilities : Value = ns_get("getCapabilities").apply(no_args())
+  get(capabilities, "trueColor")
+}
+
+///|
+/// Apply any foreground semantic role.
+pub fn Theme::fg(self : Theme, role : String, text : String) -> String {
+  fg_hex(self.color(role), text, terminal_true_color())
+}
+
+///|
+/// Apply any background semantic role.
+pub fn Theme::bg(self : Theme, role : String, text : String) -> String {
+  bg_hex(self.color(role), text, terminal_true_color())
+}
 
 // ---- 语义色(方法挂在 `Theme` 上,对齐 pi 的 `theme.fg(...)`/`theme.bg(...)`) ----
 
 ///|
 pub fn Theme::f_text(self : Theme, text : String) -> String {
-  fg_hex(self.colors.text, text)
+  self.fg("text", text)
 }
 
 ///|
 pub fn Theme::f_muted(self : Theme, text : String) -> String {
-  fg_hex(self.colors.muted, text)
+  self.fg("muted", text)
 }
 
 ///|
 pub fn Theme::f_dim(self : Theme, text : String) -> String {
-  fg_hex(self.colors.dim, text)
+  self.fg("dim", text)
 }
 
 ///|
 pub fn Theme::f_accent(self : Theme, text : String) -> String {
-  fg_hex(self.colors.accent, text)
+  self.fg("accent", text)
 }
 
 ///|
 pub fn Theme::f_border(self : Theme, text : String) -> String {
-  fg_hex(self.colors.border, text)
+  self.fg("border", text)
 }
 
 ///|
 pub fn Theme::f_border_muted(self : Theme, text : String) -> String {
-  fg_hex(self.colors.border_muted, text)
+  self.fg("borderMuted", text)
 }
 
 ///|
 pub fn Theme::f_success(self : Theme, text : String) -> String {
-  fg_hex(self.colors.success, text)
+  self.fg("success", text)
 }
 
 ///|
 pub fn Theme::f_error(self : Theme, text : String) -> String {
-  fg_hex(self.colors.error, text)
+  self.fg("error", text)
 }
 
 ///|
 pub fn Theme::f_warning(self : Theme, text : String) -> String {
-  fg_hex(self.colors.warning, text)
+  self.fg("warning", text)
 }
 
 ///|
 pub fn Theme::f_thinking(self : Theme, text : String) -> String {
-  fg_hex(self.colors.thinking_text, text)
+  self.fg("thinkingText", text)
 }
 
 ///|
 pub fn Theme::f_custom_label(self : Theme, text : String) -> String {
-  fg_hex(self.colors.custom_message_label, text)
+  self.fg("customMessageLabel", text)
 }
 
 ///|
 pub fn Theme::f_md_link(self : Theme, text : String) -> String {
-  fg_hex(self.colors.md_link, text)
+  self.fg("mdLink", text)
 }
 
 ///|
 pub fn Theme::f_md_code(self : Theme, text : String) -> String {
-  fg_hex(self.colors.md_code, text)
+  self.fg("mdCode", text)
 }
 
 ///|
 pub fn Theme::f_md_code_block(self : Theme, text : String) -> String {
-  fg_hex(self.colors.md_code_block, text)
+  self.fg("mdCodeBlock", text)
 }
 
 ///|
 pub fn Theme::f_md_border(self : Theme, text : String) -> String {
-  fg_hex(self.colors.md_code_block_border, text)
+  self.fg("mdCodeBlockBorder", text)
 }
 
 ///|
 /// bash 模式(命令头 + 边框)。
 pub fn Theme::f_bash(self : Theme, text : String) -> String {
-  fg_hex(self.colors.bash_mode, text)
+  self.fg("bashMode", text)
 }
 
 ///|
 pub fn Theme::bg_user(self : Theme, text : String) -> String {
-  bg_hex(self.colors.user_message_bg, text)
+  self.bg("userMessageBg", text)
 }
 
 ///|
 pub fn Theme::bg_tool_pending(self : Theme, text : String) -> String {
-  bg_hex(self.colors.tool_pending_bg, text)
+  self.bg("toolPendingBg", text)
 }
 
 ///|
 pub fn Theme::bg_tool_success(self : Theme, text : String) -> String {
-  bg_hex(self.colors.tool_success_bg, text)
+  self.bg("toolSuccessBg", text)
 }
 
 ///|
 pub fn Theme::bg_tool_error(self : Theme, text : String) -> String {
-  bg_hex(self.colors.tool_error_bg, text)
+  self.bg("toolErrorBg", text)
 }
 
 ///|
@@ -154,28 +197,33 @@ pub fn Theme::tool_bg(
 // ---- 文本属性 ----
 
 ///|
-fn wrap_sgr(code : String, text : String) -> String {
-  "\{ESC}[\{code}m\{text}\{ESC}[0m"
+fn wrap_sgr(code : String, close : String, text : String) -> String {
+  "\{ESC}[\{code}m\{text}\{ESC}[\{close}m"
 }
 
 ///|
 pub fn bold(text : String) -> String {
-  wrap_sgr("1", text)
+  wrap_sgr("1", "22", text)
 }
 
 ///|
 pub fn italic(text : String) -> String {
-  wrap_sgr("3", text)
+  wrap_sgr("3", "23", text)
 }
 
 ///|
 pub fn underline(text : String) -> String {
-  wrap_sgr("4", text)
+  wrap_sgr("4", "24", text)
 }
 
 ///|
 pub fn inverse(text : String) -> String {
-  wrap_sgr("7", text)
+  wrap_sgr("7", "27", text)
+}
+
+///|
+pub fn strikethrough(text : String) -> String {
+  wrap_sgr("9", "29", text)
 }
 
 // ---- 对齐小工具 ----
