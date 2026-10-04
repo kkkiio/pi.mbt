@@ -1,0 +1,97 @@
+<!doctype html>
+<meta charset="utf-8">
+<link rel="stylesheet" href="/xterm.css">
+<style>
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("/regular.woff2") format("woff2");
+  }
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("/bold.woff2") format("woff2");
+    font-weight: 700;
+  }
+  @font-face {
+    font-family: "JetBrains Mono";
+    src: url("/italic.woff2") format("woff2");
+    font-style: italic;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 48px 56px 64px; background: #eef2f5; }
+  .window {
+    display: inline-block;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 12px;
+    box-shadow: 0 14px 35px #18253626;
+    overflow: hidden;
+  }
+  .bar {
+    height: 42px;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    border-bottom: 1px solid #e8ecf0;
+    background: #fafbfc;
+    position: relative;
+  }
+  .dot { width: 11px; height: 11px; border-radius: 50%; margin-right: 8px; }
+  .title {
+    position: absolute;
+    left: 0;
+    right: 0;
+    text-align: center;
+    font: 12px "JetBrains Mono";
+    color: #6e7781;
+  }
+  #terminal { padding: 20px 28px 24px; }
+</style>
+<div class="window" id="window">
+  <div class="bar">
+    <i class="dot" style="background: #ff5f57"></i>
+    <i class="dot" style="background: #febc2e"></i>
+    <i class="dot" style="background: #28c840"></i>
+    <span class="title">pim — Project tour</span>
+  </div>
+  <div id="terminal"></div>
+</div>
+<script type="module">
+  import { Terminal } from '/xterm.mjs';
+
+  window.render = async (capture) => {
+    for (const style of ['14px', 'bold 14px', 'italic 14px']) {
+      const fonts = await document.fonts.load(`${style} "JetBrains Mono"`);
+      if (!fonts.length) throw new Error('JetBrains Mono did not load');
+    }
+    await document.fonts.ready;
+    const terminal = new Terminal({
+      cols: 100,
+      rows: 32,
+      fontFamily: 'JetBrains Mono',
+      fontSize: 14,
+      lineHeight: 1,
+      fontWeight: '400',
+      fontWeightBold: '700',
+      theme: { background: '#ffffff', foreground: '#1f2328' },
+      // tmux exports LF-separated screen rows, rather than PTY CRLF output.
+      convertEol: true,
+      cursorBlink: false,
+      cursorInactiveStyle: 'none',
+      disableStdin: true,
+      scrollback: 0,
+      minimumContrastRatio: 1,
+    });
+    terminal.open(document.getElementById('terminal'));
+    // Drop only the capture terminator; preserve blank rows and all SGR styles.
+    const input = capture.replace(/\n$/, '');
+    // Hide xterm's own cursor. pim's inverse-video editor cursor is in the input.
+    await new Promise(resolve => terminal.write(input + '\x1b[?25l', resolve));
+    const rendered = Array.from({ length: 32 }, (_, row) =>
+      terminal.buffer.active.getLine(row).translateToString(true).trimEnd()).join('\n');
+    const expected = input.replace(/\x1b\[[0-9;]*m/g, '')
+      .split('\n').map(line => line.trimEnd()).join('\n');
+    if (rendered !== expected) throw new Error('Rendered screen differs from tmux capture');
+    // write's callback completes parsing; wait for the renderer before capture.
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  };
+</script>
