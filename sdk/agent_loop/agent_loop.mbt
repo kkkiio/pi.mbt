@@ -1,4 +1,15 @@
 ///|
+/// Optional resource bounds for one loop run. No limit is imposed by default.
+pub(all) struct Limits {
+  max_turns : Int
+  max_tool_calls : Int
+  max_output_chars : Int
+}
+
+///|
+priv suberror OutputLimitReached
+
+///|
 /// Runs the agent loop, which generates messages from the LLM and executes tools as needed.
 pub async fn run_agent_loop(
   llm : &LLM,
@@ -11,6 +22,7 @@ pub async fn run_agent_loop(
   /// 只读的中断令牌:已置位时不再开新回合、不再执行工具;正在流式的请求由 provider 收尾
   /// (产出 `stop_reason: Aborted` 的部分消息)。
   abort? : AbortSignal = AbortSignal::never(),
+  limits? : Limits? = None,
   // TODO: support follow-up channel
   event_sink? : async (AgentEvent) -> Unit = fn(_) { () },
 ) -> LoopStopReason {
@@ -19,11 +31,19 @@ pub async fn run_agent_loop(
   if steer_channel() is ([_, ..] as steer_messages) {
     pending_prompts += steer_messages
   }
+  let mut turns = 0
+  let mut calls = 0
+  let mut output_chars = 0
+  let mut output_limited = false
   let reason : LoopStopReason = for ;; {
     // 上一回合被中断:不再开新回合(此时 provider 已产出 Aborted 消息)。
     if abort.is_aborted() {
       break Aborted
     }
+    if limits is Some(bounds) && turns >= bounds.max_turns {
+      break TurnLimit
+    }
+    turns += 1
     event_sink(AgentEvent::TurnStart)
     for prompt in pending_prompts {
       let msg = AgentMessage::User(prompt)
@@ -37,6 +57,14 @@ pub async fn run_agent_loop(
     let assistant_message = llm.generate(
       { system_prompt, messages, tools, },
       sink=event => {
+        if event is TextDelta(delta~, ..) {
+          if limits is Some(bounds) &&
+            output_chars + delta.length() > bounds.max_output_chars {
+            output_limited = true
+            raise OutputLimitReached
+          }
+          output_chars += delta.length()
+        }
         match event {
           Start(partial~) => {
             message_started = true
@@ -119,6 +147,7 @@ pub async fn run_agent_loop(
     // `terminate` (AgentToolResult.terminate). The hint is transient loop
     // control and is not persisted on ToolResultMessage.
     let mut batch_terminate = true
+    let mut tools_limited = false
     match assistant_message.stop_reason {
       Pending => fail("generate returned a message with pending stop_reason")
       Aborted | Error => ()
@@ -152,7 +181,20 @@ pub async fn run_agent_loop(
               is_error: true,
               timestamp: call_timestamp,
             }
+          } else if limits is Some(bounds) && calls >= bounds.max_tool_calls {
+            tools_limited = true
+            batch_terminate = false
+            ToolResultMessage::{
+              tool_call_id: tool_call.id,
+              tool_name: tool_call.name,
+              content: [InputMessageContent::Text("Tool call limit reached")],
+              details: None,
+              usage: None,
+              is_error: true,
+              timestamp: call_timestamp,
+            }
           } else {
+            calls += 1
             let update_sink = (_, _) => () // TODO: support progress update
             // 子协程里跑工具,watcher 盯中断:置位即结束 group 并取消工具协程。
             let raced = @async.with_task_group() <| group => {
@@ -208,10 +250,17 @@ pub async fn run_agent_loop(
     }
 
     event_sink(AgentEvent::TurnEnd(assistant_message, tool_results))
+    if output_limited {
+      break OutputLimit
+    }
+    if tools_limited {
+      break ToolCallLimit
+    }
     match assistant_message.stop_reason {
       Pending => fail("generate returned a message with pending stop_reason")
       Aborted => break Aborted
       Error => break Error
+      Length => break OutputLimit
       _ => ()
     }
     if !batch_terminate {
@@ -228,11 +277,14 @@ pub async fn run_agent_loop(
 }
 
 ///|
-pub enum LoopStopReason {
+pub(all) enum LoopStopReason {
   Stop
   /// The model was aborted by the user or system.
   Aborted
   Error
+  TurnLimit
+  ToolCallLimit
+  OutputLimit
 }
 
 ///|

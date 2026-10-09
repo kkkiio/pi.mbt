@@ -1,0 +1,9 @@
+import {
+  "KKKIIO/pi/sdk/providers",
+  "KKKIIO/pi/sdk/agent_loop",
+  "moonbitlang/async",
+  "moonbitlang/async/http",
+  "moonbitlang/async/socket",
+} for "test"
+
+supported_targets = "native"

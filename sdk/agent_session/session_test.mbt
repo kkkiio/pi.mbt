@@ -1064,3 +1064,103 @@ async test "a completed retry reports success and releases its abort watcher" {
   assert_eq(llm.pending_responses(), 0)
   assert_eq(ends, [(1, true, None)])
 }
+
+///|
+async test "session can disable automatic retries" {
+  let llm = @faux.FauxLLM()
+  llm.set_responses([error_message("429 rate limit"), ok_message()])
+  let session = @agent_session.AgentSession(
+    llm,
+    system_prompt="",
+    max_retries=0,
+  )
+  assert_true(session.last_stop_reason() is None)
+  session.prompt([user_message("go")])
+  assert_true(session.last_stop_reason() is Some(Error))
+  assert_eq(llm.pending_responses(), 1)
+}
+
+///|
+async test "session bounds turns and tool batches without unmatched calls" {
+  for bounds in [(1, 2), (3, 1)] {
+    let (max_turns, max_calls) = bounds
+    let log : Array[String] = []
+    let journal = @agent_session.InMemorySessionJournal()
+    let llm = @faux.FauxLLM()
+    llm.set_responses([
+      @faux.faux_message(
+        [
+          @faux.faux_tool_call("probe", {}, id="a"),
+          @faux.faux_tool_call("probe", {}, id="b"),
+        ],
+        stop_reason=@agent_loop.ToolUse,
+      ),
+      ok_message(),
+    ])
+    let session = @agent_session.AgentSession(
+      llm,
+      system_prompt="",
+      journal~,
+      tool_registry=probe_tools(log),
+      active_tools=["probe"],
+      max_retries=0,
+      limits=Some({
+        max_turns,
+        max_tool_calls: max_calls,
+        max_output_chars: 100,
+      }),
+    )
+    session.prompt([user_message("go")])
+    if max_turns == 1 {
+      assert_true(session.last_stop_reason() is Some(TurnLimit))
+      assert_eq(log, ["probe", "probe"])
+    } else {
+      assert_true(session.last_stop_reason() is Some(ToolCallLimit))
+      assert_eq(log, ["probe"])
+    }
+    assert_eq(llm.pending_responses(), 1)
+    let results = journal
+      .get_entries()
+      .filter_map(entry => {
+        match entry.content {
+          Message(ToolResult(result)) => Some(result)
+          _ => None
+        }
+      })
+    assert_eq(results.length(), 2)
+    assert_eq(results[0].tool_call_id, "a")
+    assert_eq(results[1].tool_call_id, "b")
+    assert_eq(results[1].is_error, max_calls == 1)
+  }
+}
+
+///|
+async test "streaming output bound and provider length stop the session" {
+  for length in [false, true] {
+    let llm = @faux.FauxLLM(chunk_size=2)
+    llm.set_responses([
+      @faux.faux_message(
+        [@faux.faux_text("abcdef")],
+        stop_reason=if length { @agent_loop.Length } else { @agent_loop.Stop },
+      ),
+      ok_message(),
+    ])
+    let session = @agent_session.AgentSession(
+      llm,
+      system_prompt="",
+      max_retries=0,
+      limits=Some({
+        max_turns: 3,
+        max_tool_calls: 0,
+        max_output_chars: if length {
+          100
+        } else {
+          3
+        },
+      }),
+    )
+    session.prompt([user_message("go")])
+    assert_true(session.last_stop_reason() is Some(OutputLimit))
+    assert_eq(llm.pending_responses(), 1)
+  }
+}

@@ -67,8 +67,12 @@ pub extend DeepSeekProvider with LLMProvider::{new_llm}
 struct DeepSeekResponsesAPILLM {
   api_key : String
   model_id : String
-  /// DeepSeek thinking effort: low / high / max.
+  /// DeepSeek thinking effort: none / low / high / max.
   thinking : String
+  base_url : String
+  max_retries : Int
+  max_output_tokens : Int?
+  max_input_chars : Int?
 }
 
 ///|
@@ -76,8 +80,21 @@ pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(
   api_key : String,
   model_id? : String = "deepseek-v4-flash",
   thinking? : String = "high",
+  base_url? : String = BASE_URL,
+  /// Zero disables provider-level HTTP retries, including failures before SSE.
+  max_retries? : Int = RETRY_ATTEMPTS - 1,
+  max_output_tokens? : Int? = None,
+  max_input_chars? : Int? = None,
 ) -> DeepSeekResponsesAPILLM {
-  { api_key, model_id, thinking, }
+  {
+    api_key,
+    model_id,
+    thinking,
+    base_url,
+    max_retries: max_retries.max(0),
+    max_output_tokens,
+    max_input_chars,
+  }
 }
 
 ///|
@@ -135,6 +152,14 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
     "tool_choice": "auto",
     "input": input,
   }
+  if self.max_output_tokens is Some(tokens) {
+    guard tokens > 0 else { fail("max_output_tokens must be positive") }
+    guard body is Object(fields) else { fail("request body") }
+    fields["max_output_tokens"] = tokens.to_json()
+  }
+  if self.max_input_chars is Some(chars) && body.stringify().length() > chars {
+    fail("DeepSeek input exceeds configured limit")
+  }
   // `bail` semantics: the retry window covers connection through the first
   // SSE event. Once any event has streamed, the completion is live and billed;
   // a retry would duplicate content downstream, so failures past that point
@@ -190,7 +215,7 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
         factor=2.0,
         maximum=MAX_BACKOFF_MS,
       ),
-      max_retry=RETRY_ATTEMPTS - 1,
+      max_retry=self.max_retries,
       // Transport-shaped errors and `RetryableApiError` are retried within
       // the budget; anything else is a final verdict that must not be
       // replayed: plain failures (4xx, malformed payloads, truncated
@@ -200,7 +225,7 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
       fatal_error=error => produced || error is Failure::Failure(_),
       () => {
         // Each attempt is a fresh request and a fresh SSE stream.
-        let client = @http.post_stream("\{BASE_URL}/v1/responses", headers={
+        let client = @http.post_stream("\{self.base_url}/v1/responses", headers={
           "Content-Type": "application/json",
           "Authorization": "Bearer \{self.api_key}",
           "Accept-Encoding": "identity", // disable gzip for streaming

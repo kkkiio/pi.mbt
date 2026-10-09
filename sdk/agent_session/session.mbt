@@ -70,6 +70,9 @@ pub struct AgentSession {
   fanout : FanOutListener
   message_buffer : Array[@agent_loop.AgentMessage]
   system_prompt : String
+  max_retries : Int
+  limits : @agent_loop.Limits?
+  mut last_stop_reason : @agent_loop.LoopStopReason?
   /// 当前运行的中断控制器(每次 prompt 新建,结束后清空)。只有它能置位。
   mut active_run_abort_controller : @agent_loop.AbortController?
 }
@@ -81,6 +84,9 @@ pub fn AgentSession::AgentSession(
   journal? : &SessionJournal = InMemorySessionJournal(),
   tool_registry? : @tools.ToolRegistry = @tools.ToolRegistry(),
   active_tools? : ArrayView[String] = [],
+  /// Zero disables session-level retries. Provider retries are configured separately.
+  max_retries? : Int = MAX_AUTO_RETRIES,
+  limits? : @agent_loop.Limits? = None,
 ) -> AgentSession {
   AgentSession::{
     tool_registry,
@@ -89,6 +95,9 @@ pub fn AgentSession::AgentSession(
     fanout: FanOutListener::FanOutListener(),
     llm,
     system_prompt,
+    max_retries: max_retries.max(0),
+    limits,
+    last_stop_reason: None,
     active_run_abort_controller: None,
     message_buffer: project_messages(journal.get_entries()),
   }
@@ -136,6 +145,7 @@ pub async fn AgentSession::prompt(
   })
   let abort_controller = @agent_loop.AbortController::new()
   self.active_run_abort_controller = Some(abort_controller)
+  self.last_stop_reason = None
   defer {
     self.active_run_abort_controller = None
   }
@@ -163,6 +173,7 @@ pub async fn AgentSession::prompt(
       pending_prompts,
       tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
       abort=abort_controller.signal(),
+      limits=self.limits,
       event_sink=event => {
         // Persist complete messages at their terminal events. User and
         // assistant messages are complete at MessageEnd (assistant streaming
@@ -199,17 +210,18 @@ pub async fn AgentSession::prompt(
         }
       },
     )
+    self.last_stop_reason = Some(reason)
     if reason is @agent_loop.LoopStopReason::Error {
       let error_message = self.last_error_message()
       if error_message is Some(message) &&
         is_retryable_error_message(message) &&
-        retry_attempt < MAX_AUTO_RETRIES {
+        retry_attempt < self.max_retries {
         retry_attempt = retry_attempt + 1
         let delay_ms = auto_retry_delay_ms(retry_attempt)
         self.fanout.on_event(
           AgentSessionEvent::AutoRetryStart(
             attempt=retry_attempt,
-            max_attempts=MAX_AUTO_RETRIES,
+            max_attempts=self.max_retries,
             delay_ms~,
             error_message=message,
           ),
@@ -222,6 +234,7 @@ pub async fn AgentSession::prompt(
         if wait_backoff(delay_ms, abort_controller.signal()) is Aborted {
           // 退避窗口里被中断:这一轮不再发起。
           settle_retry(false, Some("Retry cancelled"))
+          self.last_stop_reason = Some(@agent_loop.LoopStopReason::Aborted)
           break
         }
         pending_prompts = []
@@ -294,6 +307,14 @@ pub fn AgentSession::active_tool_names(
 }
 
 ///|
+/// Terminal result of the last prompt, or None before a prompt has completed.
+pub fn AgentSession::last_stop_reason(
+  self : AgentSession,
+) -> @agent_loop.LoopStopReason? {
+  self.last_stop_reason
+}
+
+///|
 /// 中断当前运行(如果没有正在跑的,则无效果)。
 pub fn AgentSession::abort(self : AgentSession) -> Unit {
   guard self.active_run_abort_controller is Some(controller) else { return }
@@ -317,6 +338,9 @@ const AUTO_RETRY_MAX_DELAY_MS : Int = 60_000
 ///|
 /// pi's `retryDelayMs`: exponential backoff from the base delay, capped per attempt.
 fn auto_retry_delay_ms(attempt : Int) -> Int {
+  if attempt >= 8 {
+    return AUTO_RETRY_MAX_DELAY_MS
+  }
   let delay = AUTO_RETRY_BASE_DELAY_MS << (attempt - 1)
   if delay > AUTO_RETRY_MAX_DELAY_MS {
     AUTO_RETRY_MAX_DELAY_MS
