@@ -13,9 +13,9 @@ name = "KKKIIO/pi"
 
 version = "0.1.0"
 
-readme = "README.mbt.md"
+readme = "README.md"
 
-repository = ""
+repository = "https://github.com/kkkiio/pi.mbt"
 
 license = "Apache-2.0"
 
@@ -23,7 +23,7 @@ keywords = [ ]
 
 preferred_target = "js"
 
-description = ""
+description = "MoonBit agent SDK and pim coding agent CLI"
 
 import {
   "moonbitlang/async@0.22.2",

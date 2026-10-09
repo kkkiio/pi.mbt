@@ -1,0 +1,143 @@
+name: Release packages
+
+# npm/OIDC: earendil-works/pi, .github/workflows/build-binaries.yml
+# Mooncakes: moonbitlang/async, .github/workflows/publish.yml
+on:
+  release:
+    types: [published]
+  # Manual runs validate and pack only; they never publish.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.release.tag_name || github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    if: github.event_name != 'release' || !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      commit: ${{ steps.version.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || github.ref }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check release version
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version=$(jq -r .version package.json)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(sed -n 's/^version = "\(.*\)"/\1/p' moon.mod)" = "$version"
+          jq -e --arg version "$version" \
+            '.version == $version and .packages[""].version == $version' package-lock.json
+          if [ -n "$RELEASE_TAG" ]; then
+            test "$RELEASE_TAG" = "v$version"
+          fi
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: ./.github/actions/setup
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Check and test SDK and CLI
+        run: |
+          moon fmt --check
+          moon check --target js --deny-warn
+          moon check --target native --deny-warn
+          moon test --target js
+          moon test --target native
+          moon build --target js
+          moon cram test --work-directory . tests/cram
+
+      - name: Inspect Mooncakes package contents
+        run: moon package --frozen --list
+
+      - name: Build and smoke-test the npm tarball
+        run: |
+          bash scripts/pack-npm.sh
+          mkdir -p "$RUNNER_TEMP/npm-package"
+          npm pack --pack-destination "$RUNNER_TEMP/npm-package"
+          consumer=$(mktemp -d)
+          trap 'rm -rf "$consumer"' EXIT
+          npm install --prefix "$consumer" --ignore-scripts --no-audit --no-fund \
+            "$RUNNER_TEMP"/npm-package/*.tgz
+          "$consumer/node_modules/.bin/pim" --help
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/npm-package/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-npm:
+    if: github.event_name == 'release'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Upgrade npm for trusted publishing
+        run: npm install --global npm@11.16.0 --ignore-scripts
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/npm-package
+
+      - name: Publish to npm with OIDC
+        run: npm publish "$RUNNER_TEMP"/npm-package/*.tgz --access public --provenance
+
+  publish-mooncakes:
+    if: github.event_name == 'release'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: mooncakes-publish
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup
+
+      - name: Publish to Mooncakes
+        env:
+          MOONCAKES_CREDENTIALS: ${{ secrets.MOONCAKES_CREDENTIALS }}
+        run: |
+          : "${MOONCAKES_CREDENTIALS:?Missing MOONCAKES_CREDENTIALS secret}"
+          umask 077
+          trap 'rm -f "$HOME/.moon/credentials.json"' EXIT
+          printf '%s' "$MOONCAKES_CREDENTIALS" > "$HOME/.moon/credentials.json"
+          moon publish
