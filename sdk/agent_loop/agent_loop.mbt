@@ -8,22 +8,17 @@ pub async fn run_agent_loop(
   prompts : ArrayView[UserMessage],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
   steer_channel? : () -> ArrayView[UserMessage] = fn() { [] },
-  /// 只读的中断令牌:已置位时不再开新回合、不再执行工具;正在流式的请求由 provider 收尾
-  /// (产出 `stop_reason: Aborted` 的部分消息)。
   abort? : AbortSignal = AbortSignal::never(),
   // TODO: support follow-up channel
-  event_sink? : async (AgentEvent) -> Unit = fn(_) { () },
-) -> LoopStopReason {
+  event_sink? : async (AgentEvent) -> Unit = _ => (),
+  finish_turn_hook? : FinishTurnHook = (_, _, _) => None,
+) -> Unit {
   event_sink(AgentEvent::AgentStart)
   let mut pending_prompts = prompts
   if steer_channel() is ([_, ..] as steer_messages) {
     pending_prompts += steer_messages
   }
-  let reason : LoopStopReason = for ;; {
-    // 上一回合被中断:不再开新回合(此时 provider 已产出 Aborted 消息)。
-    if abort.is_aborted() {
-      break Aborted
-    }
+  for ;; {
     event_sink(AgentEvent::TurnStart)
     for prompt in pending_prompts {
       let msg = AgentMessage::User(prompt)
@@ -115,14 +110,12 @@ pub async fn run_agent_loop(
     event_sink(AgentEvent::MessageEnd(final_msg))
 
     let tool_results = []
-    // pi: a batch stops the loop only when every finalized result sets
-    // `terminate` (AgentToolResult.terminate). The hint is transient loop
-    // control and is not persisted on ToolResultMessage.
-    let mut batch_terminate = true
-    match assistant_message.stop_reason {
+    let hard_exit = match assistant_message.stop_reason {
       Pending => fail("generate returned a message with pending stop_reason")
-      Aborted | Error => ()
-      _ =>
+      Aborted => true
+      Error => true
+      (Length with model_error = true)
+      | (Stop | ToolUse with model_error = false) => {
         for content in assistant_message.content {
           guard content is AssistantMessageContent::ToolCall(tool_call, ..) else {
             continue
@@ -131,7 +124,6 @@ pub async fn run_agent_loop(
           let call_timestamp = @env.now()
           let tool_result = if abort.is_aborted() {
             // pi: 未执行的工具补一个 "Operation aborted" 结果,保证每个调用都有结果。
-            batch_terminate = false
             ToolResultMessage::{
               tool_call_id: tool_call.id,
               tool_name: tool_call.name,
@@ -141,8 +133,7 @@ pub async fn run_agent_loop(
               is_error: true,
               timestamp: call_timestamp,
             }
-          } else if assistant_message.stop_reason is Length {
-            batch_terminate = false
+          } else if model_error {
             ToolResultMessage::{
               tool_call_id: tool_call.id,
               tool_name: tool_call.name,
@@ -167,7 +158,6 @@ pub async fn run_agent_loop(
                       content: [InputMessageContent::Text(err.to_string())],
                       details: {},
                       is_error: true,
-                      terminate: false,
                       usage: None,
                     }
                 },
@@ -175,8 +165,7 @@ pub async fn run_agent_loop(
             }
             match raced {
               // 运行中被中断:与未执行的调用一致,补一条 aborted 结果。
-              None => {
-                batch_terminate = false
+              None =>
                 ToolResultMessage::{
                   tool_call_id: tool_call.id,
                   tool_name: tool_call.name,
@@ -186,9 +175,7 @@ pub async fn run_agent_loop(
                   is_error: true,
                   timestamp: call_timestamp,
                 }
-              }
-              Some(result) => {
-                batch_terminate = batch_terminate && result.terminate
+              Some(result) =>
                 ToolResultMessage::{
                   tool_call_id: tool_call.id,
                   tool_name: tool_call.name,
@@ -198,41 +185,73 @@ pub async fn run_agent_loop(
                   is_error: result.is_error,
                   timestamp: call_timestamp,
                 }
-              }
             }
           }
           event_sink(AgentEvent::ToolExecutionEnd(tool_result))
           tool_results.push(tool_result)
           messages.push(AgentMessage::ToolResult(tool_result))
         }
+        false
+      }
     }
-
+    let finish_turn_decision = finish_turn_hook(messages, tool_results, abort)
     event_sink(AgentEvent::TurnEnd(assistant_message, tool_results))
-    match assistant_message.stop_reason {
-      Pending => fail("generate returned a message with pending stop_reason")
-      Aborted => break Aborted
-      Error => break Error
-      _ => ()
+    if hard_exit {
+      break
     }
-    if !batch_terminate {
+    match finish_turn_decision {
+      Some(End) => break
+      None => ()
+    }
+    if tool_results.length() > 0 {
       continue
     }
     pending_prompts = steer_channel()
     if pending_prompts.length() > 0 {
       continue
     }
-    break Stop
+    break
   }
   event_sink(AgentEvent::AgentEnd(messages))
-  reason
 }
 
 ///|
-pub enum LoopStopReason {
-  Stop
-  /// The model was aborted by the user or system.
-  Aborted
-  Error
+/// Continue the loop from the current transcript, appending no prompt.
+///
+/// The transcript must end with something the model can answer: a user message
+/// or a tool result. pi's `runAgentLoopContinue` rejects the other cases, and
+/// this mirrors it.
+pub async fn run_agent_loop_continue(
+  llm : &LLM,
+  system_prompt : String,
+  messages : Array[AgentMessage],
+  tools : ArrayView[ToolDefinition],
+  tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
+  steer_channel? : () -> ArrayView[UserMessage] = fn() { [] },
+  abort? : AbortSignal = AbortSignal::never(),
+  event_sink? : async (AgentEvent) -> Unit = _ => (),
+  finish_turn_hook? : FinishTurnHook = (_, _, _) => None,
+) -> Unit {
+  guard messages.length() > 0 else {
+    fail("Cannot continue: no messages in context")
+  }
+  match messages[messages.length() - 1] {
+    Assistant(_) => fail("Cannot continue from message role: assistant")
+    _ => ()
+  }
+  let no_prompts : Array[UserMessage] = []
+  run_agent_loop(
+    llm,
+    system_prompt,
+    messages,
+    tools,
+    no_prompts,
+    tool_executor~,
+    steer_channel~,
+    abort~,
+    event_sink~,
+    finish_turn_hook~,
+  )
 }
 
 ///|
@@ -240,8 +259,6 @@ pub(all) struct ToolResult {
   content : Array[InputMessageContent]
   details : ToolResultDetail
   is_error : Bool
-  /// Whether the tool wants to exit the agent loop, like yielding control back to the user or system. For example, a ui tool may want to exit the loop and wait for user input before continuing.
-  terminate : Bool
   /// Usage if the tool use LLM internally.
   usage : Usage?
 }
@@ -257,7 +274,6 @@ pub impl ToJson for ToolResult with fn to_json(self : ToolResult) -> Json {
     "content": self.content,
     "details": self.details,
     "isError": self.is_error,
-    "terminate": self.terminate,
     "usage": match self.usage {
       Some(usage) => usage.to_json()
       None => null
@@ -270,3 +286,17 @@ pub extend ToolResult with ToJson::{to_json}
 
 ///|
 pub type ToolExecUpdateCallback = (Array[InputMessageContent], ToolResultDetail) -> Unit
+
+///|
+/// Called after a completed assistant turn and all of its tool-result messages, but before `turn_end`.
+/// Error and aborted responses remain hard exits.
+pub type FinishTurnHook = async (
+  ArrayView[AgentMessage],
+  ArrayView[ToolResultMessage],
+  AbortSignal,
+) -> AgentTurnDecision?
+
+///|
+pub(all) enum AgentTurnDecision {
+  End
+}

@@ -101,6 +101,10 @@ async test "persists various entries in memory and as JSONL" {
       id: "e4",
       content: @agent_session.SessionEntryContent::Message(tool_result),
     },
+    {
+      id: "e5",
+      content: @agent_session.SessionEntryContent::ContextEdit(target_id="e3"),
+    },
   ])
 
   // The journal assigns parentId/timestamp at append time.
@@ -173,10 +177,18 @@ async test "persists various entries in memory and as JSONL" {
         "timestamp": 1786903823973,
       },
     },
+    {
+      "id": "e5",
+      "parentId": "e4",
+      "timestamp": "2026-08-16T18:10:23.973Z",
+      "type": "context_edit",
+      "targetId": "e3",
+      "replacement": null,
+    },
   ])
 
-  // In-memory entries include the preloaded one plus the four appended ones.
-  inspect(journal.get_entries().length(), content="5")
+  // In-memory entries include the preloaded one plus the five appended ones.
+  inspect(journal.get_entries().length(), content="6")
 
   // Round-trip: entries written to disk parse back into the same values.
   let temp_dir = @coding_agent.create_temp_dir("pim-jsonl-roundtrip-")
@@ -255,6 +267,14 @@ async test "persists various entries in memory and as JSONL" {
         "timestamp": 1786903823973,
       },
     },
+    {
+      "id": "e5",
+      "parentId": "e4",
+      "timestamp": "2026-08-16T18:10:23.973Z",
+      "type": "context_edit",
+      "targetId": "e3",
+      "replacement": null,
+    },
   ])
 
   @coding_agent.remove_file(path)
@@ -269,6 +289,7 @@ async test "persists various entries in memory and as JSONL" {
       #|{"id":"e2","parentId":"e1","timestamp":"2026-08-16T18:10:23.973Z","type":"message","message":{"role":"user","content":[{"type":"text","text":"hello"}],"timestamp":1786903823973}}
       #|{"id":"e3","parentId":"e2","timestamp":"2026-08-16T18:10:23.973Z","type":"message","message":{"role":"assistant","content":[{"type":"text","text":"hi","textSignature":"{\"type\":\"message\",\"id\":\"msg_1\"}"}],"api":"openai-responses","provider":"deepseek","model":"deepseek-v4-flash","stopReason":"stop","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":1786903823973}}
       #|{"id":"e4","parentId":"e3","timestamp":"2026-08-16T18:10:23.973Z","type":"message","message":{"role":"toolResult","toolCallId":"call_1","toolName":"bash","content":[{"type":"text","text":"ok"}],"isError":false,"timestamp":1786903823973}}
+      #|{"id":"e5","parentId":"e4","timestamp":"2026-08-16T18:10:23.973Z","type":"context_edit","targetId":"e3","replacement":null}
       #|
     ),
   )
@@ -517,4 +538,27 @@ test "pi signatures and optional message fields round trip" {
   }
   let entry : @agent_session.SessionEntry = @json.from_json(entry_json)
   assert_eq(entry.to_json(), entry_json)
+}
+
+///|
+/// pi also allows `context_edit` to carry `{"content": ...}`. pi.mbt has no way
+/// to honour a content replacement, so reading one fails instead of silently
+/// dropping the entry's intent.
+async test "a context_edit content replacement is rejected on read" {
+  let dir = @coding_agent.create_temp_dir("pim-context-edit-reject-")
+  let path = "\{dir}/journal.jsonl"
+  @coding_agent.write_bytes_file(
+    path, b"{\"type\":\"session\",\"version\":3,\"id\":\"hdr\",\"timestamp\":\"1970-01-01T00:00:00.000Z\",\"cwd\":\"/tmp\"}\n{\"id\":\"e1\",\"parentId\":null,\"timestamp\":\"1970-01-01T00:00:00.001Z\",\"type\":\"context_edit\",\"targetId\":\"e0\",\"replacement\":{\"content\":\"edited\"}}\n",
+  )
+  let error = try {
+    ignore(@coding_agent.fetch_entries(path))
+    ""
+  } catch {
+    err => err.to_string()
+  }
+  assert_true(
+    error.contains("context_edit content replacement is not supported"),
+  )
+  @coding_agent.remove_file(path)
+  @coding_agent.remove_dir(dir)
 }

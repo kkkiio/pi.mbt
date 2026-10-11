@@ -298,9 +298,13 @@ async test "latest compaction omits older summaries within the kept range" {
 }
 
 ///|
-/// Replaying a journal skips `Error` assistant messages and keeps every other
-/// entry, so a failed request never re-enters the context.
-async test "session hydration drops Error assistant messages from the journal" {
+/// Replaying a journal keeps every entry, including a superseded `Error` turn:
+/// the journal is a record of what happened, and a resumed buffer that reads
+/// like the journal is what makes `session.messages` usable as history.
+/// Keeping a failure out of the prompt is the request build's job
+/// (`transform_messages` drops `Error` / `Aborted`), so live and resumed
+/// contexts agree without hydration filtering anything.
+async test "session hydration keeps Error assistant messages like every other entry" {
   let journal = @agent_session.InMemorySessionJournal()
   ignore(
     journal.append([
@@ -322,17 +326,20 @@ async test "session hydration drops Error assistant messages from the journal" {
       { id: "ok1", content: Message(Assistant(ok_message())), },
     ]),
   )
-  // The constructor hydrates `message_buffer` from the journal: superseded
-  // Error turns are dropped (the journal keeps them), everything else is kept
-  // in order, so a resumed session never replays a failure into the prompt.
+  // The constructor hydrates `message_buffer` from the journal verbatim.
   let llm = StubLLM::{ }
   let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
-  assert_eq(session.message_buffer.length(), 2)
+  assert_eq(session.message_buffer.length(), 3)
   let user_count = session.message_buffer
     .filter(m => m is @agent_loop.AgentMessage::User(_))
     .length()
   assert_eq(user_count, 1)
-  let text = match session.message_buffer[1] {
+  match session.message_buffer[1] {
+    @agent_loop.AgentMessage::Assistant(message) =>
+      assert_true(message.stop_reason is @agent_loop.StopReason::Error)
+    _ => fail("expected the superseded Error turn to survive hydration")
+  }
+  let text = match session.message_buffer[2] {
     @agent_loop.AgentMessage::Assistant(m) =>
       match m.content {
         [@agent_loop.AssistantMessageContent::Text(text, ..)] => text
@@ -557,7 +564,7 @@ async fn fake_tool_execute(
   _on_update : @agent_loop.ToolExecUpdateCallback,
 ) -> @agent_loop.ToolResult {
   @async.sleep(0)
-  { content: [], is_error: false, terminate: false, details: {}, usage: None, }
+  { content: [], is_error: false, details: {}, usage: None, }
 }
 
 ///|
@@ -700,7 +707,7 @@ async fn blocking_execute(
   _on_update : @agent_loop.ToolExecUpdateCallback,
 ) -> @agent_loop.ToolResult {
   @async.sleep(3000)
-  { content: [], details: {}, is_error: false, terminate: false, usage: None, }
+  { content: [], details: {}, is_error: false, usage: None, }
 }
 
 ///|
@@ -809,7 +816,6 @@ async fn probe_execute(
     content: [@agent_loop.InputMessageContent::Text("probe-ok")],
     details: {},
     is_error: false,
-    terminate: false,
     usage: None,
   }
 }
@@ -1014,10 +1020,13 @@ async test "interrupt cancels retry backoff without starting another attempt" {
     assert_eq(ends, [(attempt, false, Some("Retry cancelled"))])
     assert_eq(llm.pending_responses(), 1)
     // Raw history keeps the completed failures; cancellation adds no fake turn.
-    assert_eq(journal.get_entries().length(), attempt + 1)
+    // Each attempted retry also records the `context_edit` that omits its failed
+    // turn, so `attempt` runs contribute `attempt` edits on top of the user
+    // message and the failed assistants.
+    assert_eq(journal.get_entries().length(), 2 * attempt + 1)
     session.prompt([user_message("next")])
     assert_eq(llm.pending_responses(), 0)
-    assert_eq(journal.get_entries().length(), attempt + 3)
+    assert_eq(journal.get_entries().length(), 2 * attempt + 3)
     assert_eq(ends.length(), 1)
   }
 }
@@ -1063,4 +1072,58 @@ async test "a completed retry reports success and releases its abort watcher" {
   @async.with_timeout(2000, () => session.prompt([user_message("go")]))
   assert_eq(llm.pending_responses(), 0)
   assert_eq(ends, [(1, true, None)])
+}
+
+///|
+/// A `context_edit` removes its target from the model projection and nothing
+/// else: the journal keeps the entry, and the entry itself is unchanged.
+async test "a context edit omits its target from the projection only" {
+  let journal = @agent_session.InMemorySessionJournal()
+  ignore(
+    journal.append([
+      { id: "u1", content: Message(User(user_message("request"))), },
+      { id: "a1", content: Message(Assistant(ok_message())), },
+      { id: "x1", content: ContextEdit(target_id="a1"), },
+    ]),
+  )
+  let session = @agent_session.AgentSession(
+    StubLLM::{ },
+    system_prompt="",
+    journal~,
+  )
+  inspect(session.message_buffer |> context_lines, content="user: request")
+  assert_eq(journal.get_entries().length(), 3)
+  match journal.get_entries()[1].content {
+    Message(Assistant(message)) =>
+      assert_true(message.stop_reason is @agent_loop.StopReason::Stop)
+    _ => fail("expected the edited target to stay in the journal")
+  }
+}
+
+///|
+/// Reloading a session projects the same context the live session has, so the
+/// buffer is a function of the journal rather than of what this process did.
+async test "a reloaded session projects the same context as the live one" {
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([
+    @faux.faux_message(
+      [],
+      stop_reason=@agent_loop.StopReason::Error,
+      error_message=Some("429 rate limit"),
+    ),
+    @faux.faux_message([@faux.faux_text("done")]),
+  ])
+  let journal = @agent_session.InMemorySessionJournal()
+  let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
+  session.prompt([user_message("go")])
+  let live = context_lines(session.message_buffer)
+  inspect(live, content="user: go\nassistant: done")
+  let reloaded = @agent_session.AgentSession(
+    StubLLM::{ },
+    system_prompt="",
+    journal~,
+  )
+  assert_eq(context_lines(reloaded.message_buffer), live)
+  // The failed turn stays in the record: user, error turn, its edit, the retry.
+  assert_eq(journal.get_entries().length(), 4)
 }

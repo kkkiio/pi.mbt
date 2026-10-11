@@ -9,8 +9,11 @@ const COMPACTION_SUMMARY_SUFFIX : String = "\n</summary>"
 ///|
 /// 从 journal 条目投影出模型上下文。压缩条目把此前的历史换成"总结 + 保留尾部"
 /// (pi 的 `buildContextEntries` + `sessionEntryToContextMessages`):总结作为一条
-/// user 消息注入,被摘要掉的历史不再进上下文。错误回合留在 journal 里(它是
-/// write-ahead log),同样不进上下文。
+/// user 消息注入,被摘要掉的历史不再进上下文。
+///
+/// `context_edit` 条目剔除它指向的目标(pi 的 `projectContextEntry` 在
+/// `replacement === null` 时返回空)。edits 从选中的条目里收集,所以被最新
+/// 压缩丢掉的那一段里的 edit 不再生效。
 fn project_messages(
   entries : ArrayView[SessionEntry],
 ) -> Array[@agent_loop.AgentMessage] {
@@ -39,7 +42,14 @@ fn project_messages(
       selected
     }
   }
+  let omitted : Set[String] = Set([])
+  for entry in selected {
+    if entry.content is ContextEdit(target_id~) {
+      omitted.add(target_id)
+    }
+  }
   for i, entry in selected {
+    guard !omitted.contains(entry.id) else { continue }
     match entry.content {
       Compaction(_) if i > 0 => ()
       Compaction(summary~, ..) =>
@@ -53,7 +63,6 @@ fn project_messages(
             timestamp: entry.timestamp,
           }),
         )
-      Message(Assistant(m)) if m.stop_reason is Error => ()
       Message(m) => messages.push(m)
       _ => ()
     }
@@ -68,7 +77,7 @@ pub struct AgentSession {
   tool_registry : @tools.ToolRegistry
   active_tools : Array[String]
   fanout : FanOutListener
-  message_buffer : Array[@agent_loop.AgentMessage]
+  mut message_buffer : Array[@agent_loop.AgentMessage]
   system_prompt : String
   /// 当前运行的中断控制器(每次 prompt 新建,结束后清空)。只有它能置位。
   mut active_run_abort_controller : @agent_loop.AbortController?
@@ -140,6 +149,7 @@ pub async fn AgentSession::prompt(
     self.active_run_abort_controller = None
   }
   let mut retry_attempt = 0
+  let mut last_assistant_entry_id : String? = None
   // 结束当前重试窗口:只在真的发起过重试时才发 `AutoRetryEnd`,然后归零。
   let settle_retry = (success : Bool, final_error : String?) => {
     if retry_attempt > 0 {
@@ -155,52 +165,76 @@ pub async fn AgentSession::prompt(
   }
   let mut pending_prompts = input
   for ;; {
-    let reason = @agent_loop.run_agent_loop(
-      self.llm,
-      self.system_prompt,
-      self.message_buffer,
-      agent_tools,
-      pending_prompts,
-      tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
-      abort=abort_controller.signal(),
-      event_sink=event => {
-        // Persist complete messages at their terminal events. User and
-        // assistant messages are complete at MessageEnd (assistant streaming
-        // events in between carry in-flight snapshots whose stop_reason is
-        // Pending); tool results complete at ToolExecutionEnd. Error turns
-        // are persisted unconditionally — the journal is a complete
-        // write-ahead log.
-        let content : SessionEntryContent? = match event {
-          MessageEnd(User(_) as m) => Some(Message(m))
-          MessageEnd(Assistant(m) as msg) => {
-            guard !(m.stop_reason is Pending) else {
-              fail("journal cannot persist a message with pending stop_reason")
-            }
-            Some(Message(msg))
+    let sink : async (@agent_loop.AgentEvent) -> Unit = event => {
+      // Persist complete messages at their terminal events. User and
+      // assistant messages are complete at MessageEnd (assistant streaming
+      // events in between carry in-flight snapshots whose stop_reason is
+      // Pending); tool results complete at ToolExecutionEnd. Error turns
+      // are persisted unconditionally — the journal is a complete
+      // write-ahead log.
+      let content : SessionEntryContent? = match event {
+        MessageEnd(User(_) as m) => Some(Message(m))
+        MessageEnd(Assistant(m) as msg) => {
+          guard !(m.stop_reason is Pending) else {
+            fail("journal cannot persist a message with pending stop_reason")
           }
-          ToolExecutionEnd(result) => Some(Message(ToolResult(result)))
-          _ => None
+          Some(Message(msg))
         }
-        if content is Some(content) {
-          self.journal.append([{ id: self.journal.generate_id(), content, }])
-          |> ignore
+        ToolExecutionEnd(result) => Some(Message(ToolResult(result)))
+        _ => None
+      }
+      if content is Some(content) {
+        let stored = self.journal.append([
+          { id: self.journal.generate_id(), content, },
+        ])
+        if content is Message(Assistant(_)) {
+          last_assistant_entry_id = Some(stored[0].id)
         }
-        self.fanout.on_event(AgentSessionEvent::Loop(event))
-        // 成功的 assistant 响应结束当前重试窗口并归零,所以同一次 prompt 里后续的
-        // 调用各自重新拿满预算(pi 在 message_end 上重置)。取消不报成功。
-        match event {
-          MessageEnd(Assistant(message)) if retry_attempt > 0 =>
-            match message.stop_reason {
-              Aborted => settle_retry(false, Some("Retry cancelled"))
-              Error => ()
-              _ => settle_retry(true, None)
-            }
-          _ => ()
-        }
-      },
-    )
-    if reason is @agent_loop.LoopStopReason::Error {
-      let error_message = self.last_error_message()
+      }
+      self.fanout.on_event(AgentSessionEvent::Loop(event))
+      // 成功的 assistant 响应结束当前重试窗口并归零,所以同一次 prompt 里后续的
+      // 调用各自重新拿满预算(pi 在 message_end 上重置)。取消不报成功。
+      match event {
+        MessageEnd(Assistant(message)) if retry_attempt > 0 =>
+          match message.stop_reason {
+            Aborted => settle_retry(false, Some("Retry cancelled"))
+            Error => ()
+            _ => settle_retry(true, None)
+          }
+        _ => ()
+      }
+    }
+    // 有 prompt 就是新回合;没有 prompt 就是从现有 transcript 续跑(重试走这条)。
+    // 后者校验尾部,所以重试能进行本身就说明失败回合已被 `context_edit` 剔除。
+    if pending_prompts.length() > 0 {
+      @agent_loop.run_agent_loop(
+        self.llm,
+        self.system_prompt,
+        self.message_buffer.copy(),
+        agent_tools,
+        pending_prompts,
+        tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+        abort=abort_controller.signal(),
+        event_sink=sink,
+      )
+    } else {
+      @agent_loop.run_agent_loop_continue(
+        self.llm,
+        self.system_prompt,
+        self.message_buffer.copy(),
+        agent_tools,
+        tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+        abort=abort_controller.signal(),
+        event_sink=sink,
+      )
+    }
+    self.message_buffer = project_messages(self.journal.get_entries())
+    if self.message_buffer.last()
+      is Some(
+        @agent_loop.AgentMessage::Assistant(
+          { stop_reason: Error, error_message, .. }
+        )
+      ) {
       if error_message is Some(message) &&
         is_retryable_error_message(message) &&
         retry_attempt < MAX_AUTO_RETRIES {
@@ -214,11 +248,17 @@ pub async fn AgentSession::prompt(
             error_message=message,
           ),
         )
-        // Drop the failed turn's terminal Error message so the retried run
-        // continues from the same context; the prompt is already in the
-        // buffer, so no new user message is pushed or journaled. Keep this
-        // projection clean even when the backoff is interrupted.
-        drop_trailing_error_message(self.message_buffer)
+        if last_assistant_entry_id is Some(entry_id) {
+          ignore(
+            self.journal.append([
+              {
+                id: self.journal.generate_id(),
+                content: ContextEdit(target_id=entry_id),
+              },
+            ]),
+          )
+        }
+        self.message_buffer = project_messages(self.journal.get_entries())
         if wait_backoff(delay_ms, abort_controller.signal()) is Aborted {
           // 退避窗口里被中断:这一轮不再发起。
           settle_retry(false, Some("Retry cancelled"))
@@ -233,34 +273,6 @@ pub async fn AgentSession::prompt(
     // 重试窗口没等到新的 assistant 消息就结束了(例如退避睡完与 run 启动之间被中断)。
     settle_retry(false, Some("Retry cancelled"))
     break
-  }
-}
-
-///|
-/// Drops the trailing Error assistant message, if the last run ended with one.
-fn drop_trailing_error_message(
-  messages : Array[@agent_loop.AgentMessage],
-) -> Unit {
-  if messages.length() > 0 {
-    match messages[messages.length() - 1] {
-      @agent_loop.AgentMessage::Assistant(m) if m.stop_reason is Error =>
-        ignore(messages.pop())
-      _ => ()
-    }
-  }
-}
-
-///|
-/// The error message of the trailing assistant turn, when the last run ended
-/// with an Error terminal message.
-fn AgentSession::last_error_message(self : AgentSession) -> String? {
-  if self.message_buffer.length() == 0 {
-    return None
-  }
-  match self.message_buffer[self.message_buffer.length() - 1] {
-    @agent_loop.AgentMessage::Assistant(m) if m.stop_reason is Error =>
-      m.error_message
-    _ => None
   }
 }
 

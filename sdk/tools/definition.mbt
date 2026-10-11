@@ -12,7 +12,6 @@ pub async fn run_tool(
     return ToolResult::{
       content: [],
       is_error: true,
-      terminate: false,
       details: { "error": "Tool not found" },
       usage: None,
     }

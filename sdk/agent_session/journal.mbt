@@ -45,6 +45,14 @@ pub(all) enum SessionEntryContent {
   Custom(custom_type~ : String, data~ : Json?)
   /// pi metadata entries not used by the current agent (for example thinking levels).
   Metadata(Json)
+  /// pi's `context_edit`: an append-only change to one earlier entry's
+  /// contribution to the model context.
+  ///
+  /// Only pi's `replacement: null` form is represented — omit the target — which
+  /// is what the auto-retry lifecycle writes. pi's other form swaps the target's
+  /// content; nothing in pi.mbt emits it, so decoding one is an error instead of
+  /// a silent no-op. `project_messages` applies the edits.
+  ContextEdit(target_id~ : String)
 }
 
 ///|
@@ -84,6 +92,12 @@ pub impl ToJson for SessionEntry with fn to_json(self) -> Json {
       if data is Some(data) {
         obj["data"] = data
       }
+    }
+    ContextEdit(target_id~) => {
+      obj["type"] = "context_edit".to_json()
+      obj["targetId"] = target_id.to_json()
+      // pi always writes the field; `null` is the omit form this type represents.
+      obj["replacement"] = Json::null()
     }
     Metadata(Object(fields)) =>
       for key, value in fields {
@@ -165,6 +179,19 @@ pub impl FromJson for SessionEntry with fn from_json(json, path) {
         decode_error(content_path, "custom entry is missing customType")
       }
       Custom(custom_type~, data=fields.get("data"))
+    }
+    "context_edit" => {
+      guard fields.get("targetId") is Some(String(target_id)) else {
+        decode_error(content_path, "context_edit entry is missing targetId")
+      }
+      // pi also allows `{content}` here. Rejecting it keeps a decoded entry
+      // meaningful: the projection has no way to honour a replacement.
+      guard fields.get("replacement") is Some(Null) else {
+        decode_error(
+          content_path, "context_edit content replacement is not supported",
+        )
+      }
+      ContextEdit(target_id~)
     }
     "thinking_level_change" | "session_info" | "label" | "usage" =>
       Metadata(json)

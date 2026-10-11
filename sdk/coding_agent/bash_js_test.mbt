@@ -34,7 +34,6 @@ async test "bash tool returns merged output, exit code and details" {
     "content": [{ "type": "text", "text": "out\nerr\n" }],
     "details": { "truncation": null, "fullOutputPath": null },
     "isError": false,
-    "terminate": false,
     "usage": null,
   })
 }
@@ -89,7 +88,6 @@ async test "bash tool streams throttled updates and a terminal update" {
     "content": [{ "type": "text", "text": "tick1\ntick2\ntick3\ntick4\n" }],
     "details": { "truncation": null, "fullOutputPath": null },
     "isError": false,
-    "terminate": false,
     "usage": null,
   })
   // The terminal update replays exactly what the tool returned; `> 2` also pins
