@@ -81,6 +81,9 @@ pub struct AgentSession {
   system_prompt : String
   /// Agent-level auto-retry policy, read at every retryable failure.
   retry_settings : RetrySettings
+  /// Called after a completed assistant turn and all of its tool results, but
+  /// before `turn_end`. Read at every run, so a caller may replace or wrap it.
+  mut finish_turn_hook : @agent_loop.FinishTurnHook
   /// 当前运行的中断控制器(每次 prompt 新建,结束后清空)。只有它能置位。
   mut active_run_abort_controller : @agent_loop.AbortController?
 }
@@ -93,6 +96,7 @@ pub fn AgentSession::AgentSession(
   tool_registry? : @tools.ToolRegistry = @tools.ToolRegistry(),
   active_tools? : ArrayView[String] = [],
   retry_settings? : RetrySettings = RetrySettings::default(),
+  finish_turn_hook? : @agent_loop.FinishTurnHook = (_, _, _) => None,
 ) -> AgentSession {
   AgentSession::{
     tool_registry,
@@ -102,6 +106,7 @@ pub fn AgentSession::AgentSession(
     llm,
     system_prompt,
     retry_settings,
+    finish_turn_hook,
     active_run_abort_controller: None,
     message_buffer: project_messages(journal.get_entries()),
   }
@@ -220,6 +225,7 @@ pub async fn AgentSession::prompt(
         tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
         abort=abort_controller.signal(),
         event_sink=sink,
+        finish_turn_hook=self.finish_turn_hook,
       )
     } else {
       @agent_loop.run_agent_loop_continue(
@@ -230,6 +236,7 @@ pub async fn AgentSession::prompt(
         tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
         abort=abort_controller.signal(),
         event_sink=sink,
+        finish_turn_hook=self.finish_turn_hook,
       )
     }
     self.message_buffer = project_messages(self.journal.get_entries())
@@ -288,6 +295,17 @@ pub fn AgentSession::subscribe(
   listener : EventListener,
 ) -> Unit {
   self.fanout.listeners.push(listener)
+}
+
+///|
+/// Replace the finish-turn hook, mirroring pi's `agent.finishTurn = ...`. A
+/// wrapper can read the current hook first and delegate to it, which is how pi
+/// layers a further policy on top of the app's.
+pub fn AgentSession::set_finish_turn_hook(
+  self : AgentSession,
+  hook : @agent_loop.FinishTurnHook,
+) -> Unit {
+  self.finish_turn_hook = hook
 }
 
 ///|
