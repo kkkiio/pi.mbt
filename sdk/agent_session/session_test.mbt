@@ -853,6 +853,99 @@ fn event_lines(events : Array[@agent_session.AgentSessionEvent]) -> String {
 }
 
 ///|
+/// pi's own trick for retry tests — it runs them with
+/// `settingsManager.applyOverrides({ retry: { enabled: true, maxRetries,
+/// baseDelayMs: 1, maxAgentDelayMs } })`. Keeping the real mechanism but making
+/// every backoff window 1ms means these tests never wait out the defaults'
+/// 2s/4s, and their timeouts and margins stop being racy. Only the delay is
+/// overridden, so `maxAttempts` in the snapshots still reports pi's default.
+/// The defaults themselves are pinned by "retry settings mirror pi's resolved
+/// defaults and backoff".
+fn fast_retry_settings() -> @agent_session.RetrySettings {
+  { ..@agent_session.RetrySettings::default(), base_delay_ms: 1 }
+}
+
+///|
+/// `RetrySettings::default()` mirrors pi's `SETTINGS_DEFAULTS.retry` agent half
+/// (`enabled`, `maxRetries`, `baseDelayMs`, `maxAgentDelayMs`), and `delay_ms`
+/// is pi's `retryDelayMs`: `baseDelayMs * 2^(attempt-1)` capped per attempt.
+async test "retry settings mirror pi's resolved defaults and backoff" {
+  let settings = @agent_session.RetrySettings::default()
+  assert_true(settings.enabled)
+  assert_eq(settings.max_retries, 3)
+  assert_eq(settings.base_delay_ms, 2000)
+  assert_eq(settings.max_agent_delay_ms, 60_000)
+  // The cap only binds from attempt 6 on: 2000 * 2^5 = 64000 > 60000.
+  json_inspect(Array::makei(7, i => settings.delay_ms(i + 1)), content=[
+    2000, 4000, 8000, 16000, 32000, 60000, 60000,
+  ])
+}
+
+///|
+/// `max_agent_delay_ms` is a per-attempt ceiling. Unlike the sibling provider
+/// setting `retry.provider.maxRetryDelayMs`, `0` means "cap every delay at 0"
+/// (immediate retries) rather than "no limit".
+async test "retry delay honours the cap and saturates on a huge attempt" {
+  let capped = @agent_session.RetrySettings::{
+    enabled: true,
+    max_retries: 3,
+    base_delay_ms: 2000,
+    max_agent_delay_ms: 5000,
+  }
+  json_inspect(Array::makei(4, i => capped.delay_ms(i + 1)), content=[
+    2000, 4000, 5000, 5000,
+  ])
+  let no_backoff = @agent_session.RetrySettings::{
+    enabled: true,
+    max_retries: 3,
+    base_delay_ms: 1000,
+    max_agent_delay_ms: 0,
+  }
+  json_inspect(Array::makei(3, i => no_backoff.delay_ms(i + 1)), content=[
+    0, 0, 0,
+  ])
+  // A base already above the cap is clamped on the first attempt.
+  let base_over_cap = @agent_session.RetrySettings::{
+    enabled: true,
+    max_retries: 3,
+    base_delay_ms: 9000,
+    max_agent_delay_ms: 5000,
+  }
+  assert_eq(base_over_cap.delay_ms(1), 5000)
+  // Doubling saturates at the cap instead of shifting left: `1 << attempt`
+  // would wrap negative for a large attempt count and then slip past the
+  // `> max` clamp. pi guards `baseDelayMs * 2^(attempt-1)` the same way with
+  // `Number.isSafeInteger`.
+  assert_eq(capped.delay_ms(1_000_000), 5000)
+  assert_eq(base_over_cap.delay_ms(64), 5000)
+}
+
+///|
+/// `enabled: false` suppresses retries entirely: the first retryable failure
+/// ends the run with no `auto_retry_start` and no second provider call.
+async test "retry settings can disable auto-retry" {
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([error_message("429 rate limit"), ok_message()])
+  let session = @agent_session.AgentSession(llm, system_prompt="", retry_settings={
+    enabled: false,
+    max_retries: 3,
+    base_delay_ms: 2000,
+    max_agent_delay_ms: 60_000,
+  })
+  let retry_events : Array[@agent_session.AgentSessionEvent] = []
+  session.subscribe(event => {
+    match event {
+      AutoRetryStart(..) | AutoRetryEnd(..) => retry_events.push(event)
+      _ => ()
+    }
+  })
+  session.prompt([user_message("go")])
+  // The retryable failure was not retried, so the scripted success is unused.
+  assert_eq(llm.pending_responses(), 1)
+  assert_eq(retry_events.length(), 0)
+}
+
+///|
 /// 同一次 prompt 内发生两次"错误 → 恢复":每次恢复都结束当前重试窗口并归零,
 /// 所以第二次失败又从 `attempt=1` 开始(pi 在 `message_end` 上重置的契约)。
 async test "auto-retry window resets after each successful response" {
@@ -881,6 +974,7 @@ async test "auto-retry window resets after each successful response" {
     system_prompt="",
     tool_registry=registry,
     active_tools=["probe"],
+    retry_settings=fast_retry_settings(),
   )
   let events : Array[@agent_session.AgentSessionEvent] = []
   session.subscribe(event => events.push(event))
@@ -898,7 +992,7 @@ async test "auto-retry window resets after each successful response" {
       #|{"type":"message_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0,"errorMessage":"overloaded_error"}}
       #|{"type":"turn_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0,"errorMessage":"overloaded_error"},"toolCalls":[]}
       #|{"type":"agent_end"}
-      #|{"type":"auto_retry_start","attempt":1,"maxAttempts":2,"delayMs":500,"errorMessage":"overloaded_error"}
+      #|{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":1,"errorMessage":"overloaded_error"}
       #|{"type":"agent_start"}
       #|{"type":"turn_start"}
       #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}
@@ -912,7 +1006,7 @@ async test "auto-retry window resets after each successful response" {
       #|{"type":"message_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0,"errorMessage":"rate limit exceeded"}}
       #|{"type":"turn_end","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"error","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0,"errorMessage":"rate limit exceeded"},"toolCalls":[]}
       #|{"type":"agent_end"}
-      #|{"type":"auto_retry_start","attempt":1,"maxAttempts":2,"delayMs":500,"errorMessage":"rate limit exceeded"}
+      #|{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":1,"errorMessage":"rate limit exceeded"}
       #|{"type":"agent_start"}
       #|{"type":"turn_start"}
       #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}
@@ -920,6 +1014,7 @@ async test "auto-retry window resets after each successful response" {
       #|{"type":"auto_retry_end","success":true,"attempt":1,"finalError":null}
       #|{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"stop","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0},"toolCalls":[]}
       #|{"type":"agent_end"}
+
     ),
   )
 }
@@ -985,7 +1080,11 @@ async test "a completing tool call returns and records its result" {
 
 ///|
 /// Interrupt inside each backoff window, not from its start event. The deadline
-/// begins at interrupt, so the second attempt's initial 500ms wait is allowed.
+/// begins at interrupt, so the second attempt's initial backoff wait is allowed.
+///
+/// This is the one retry test that cannot use the 1ms `fast_retry_settings`:
+/// it has to deliver the abort while a backoff sleep is still pending, which
+/// needs a window wide enough to survive the 20ms poll below.
 async test "interrupt cancels retry backoff without starting another attempt" {
   for attempt in [1, 2] {
     let llm = @faux.FauxLLM::FauxLLM()
@@ -993,7 +1092,12 @@ async test "interrupt cancels retry backoff without starting another attempt" {
     responses.push(ok_message())
     llm.set_responses(responses)
     let journal = @agent_session.InMemorySessionJournal()
-    let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
+    let session = @agent_session.AgentSession(
+      llm,
+      system_prompt="",
+      journal~,
+      retry_settings={ ..fast_retry_settings(), base_delay_ms: 200 },
+    )
     let started = @async.Semaphore::Semaphore(1, initial_value=0)
     let ends : Array[(Int, Bool, String?)] = []
     session.subscribe(event => {
@@ -1036,7 +1140,11 @@ async test "interrupt cancels retry backoff without starting another attempt" {
 async test "interrupt during a retried generation reports a cancelled retry" {
   let llm = @faux.FauxLLM::FauxLLM(chunk_delay_ms=20)
   llm.set_responses([error_message("429 rate limit"), ok_message()])
-  let session = @agent_session.AgentSession(llm, system_prompt="")
+  let session = @agent_session.AgentSession(
+    llm,
+    system_prompt="",
+    retry_settings=fast_retry_settings(),
+  )
   let mut starts = 0
   let ends : Array[(Int, Bool, String?)] = []
   session.subscribe(event => {
@@ -1062,7 +1170,11 @@ async test "interrupt during a retried generation reports a cancelled retry" {
 async test "a completed retry reports success and releases its abort watcher" {
   let llm = @faux.FauxLLM::FauxLLM()
   llm.set_responses([error_message("429 rate limit"), ok_message()])
-  let session = @agent_session.AgentSession(llm, system_prompt="")
+  let session = @agent_session.AgentSession(
+    llm,
+    system_prompt="",
+    retry_settings=fast_retry_settings(),
+  )
   let ends : Array[(Int, Bool, String?)] = []
   session.subscribe(event => {
     if event is AutoRetryEnd(attempt~, success~, final_error~) {
