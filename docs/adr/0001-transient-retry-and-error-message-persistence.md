@@ -26,45 +26,57 @@ turn fails, where does that failed message live, and who ever sees it?
 
 When a turn fails with a retryable error and the session auto-retries, the
 failed assistant message (call it A₁) is superseded by the retried turn's
-message (A₂). Three places can each choose to keep or drop A₁:
+message (A₂). Two questions decide its fate:
 
-| | Keep A₁? | Rationale |
+| | Keep A₁? | How |
 | --- | --- | --- |
 | **Journal (on-disk history)** | **Keep** | The journal is a write-ahead log; failure evidence must not be erased. |
-| **Live context (what the LLM sees during the run)** | **Drop** | Before retrying, A₁ is popped from the in-memory message buffer, so the retried call never sees its own half-produced attempt. |
-| **Resumed context (what the LLM sees after reloading a session)** | **Drop** | Hydration filters out assistant messages with `stop_reason = Error`, so a resumed session never replays a failed turn into the prompt. |
+| **Model context (what the model sees)** | **Drop** | Two layers, below. |
+
+The retry records the omission rather than editing memory: before backing off,
+the session appends a `context_edit` targeting A₁'s entry, and the model
+context is recomputed from the journal. A₁ therefore leaves the context the
+same way on every path — live, retried, or reloaded — because the context is a
+projection of the journal and the omission is part of the journal. This is
+pi's mechanism (`_omitRecoveryAttempt` → `appendContextEdit(targetId, null)`),
+and the entry carries pi's wire shape so a pi tool can read it.
+
+The omission is load-bearing rather than cosmetic. A retry continues with
+`run_agent_loop_continue`, which rejects a transcript ending in an assistant
+message: the failed turn is exactly such a tail, so a retry can only proceed
+once the omission has been recorded.
+
+A second layer covers what the omission cannot: the request build drops any
+`stop_reason = Error` / `Aborted` assistant message (`transform_messages`,
+mirroring pi). Two cases need it. A transcript that never went through this
+session — hand-written, imported, or written before the omission existed —
+carries no edit. And when the retry budget is exhausted the session records no
+omission, because nothing supersedes the failed turn: A₁ stays in the journal
+and in the projection, and only the request build keeps it out of the prompt.
 
 Consequences of this combination:
 
-- The disk journal may contain `[user, A₁(error), A₂(success), …]` — a
-  complete, honest history.
-- The model never sees A₁, live or after resume — context is always the
-  clean, successful path.
-- Live and resumed behavior are identical by construction.
+- The disk journal may contain `[user, A₁(error), context_edit(A₁), A₂(success), …]`
+  — a complete, honest history.
+- The model never sees A₁ — context is always the clean, successful path.
+- `session.messages` is a function of the journal, so a reloaded session
+  projects what a live one does, with no second mechanism to keep in step.
 
 ### Alternatives considered
 
-**Persist everything, resume unfiltered (pi's behavior).**
-pi keeps error messages in the journal and its resume path
-(`buildSessionContext`) filters only `deferred` messages, so a resumed pi
-session *does* replay superseded error messages into the model context,
-while its live retry removes them — live and resume disagree. pi accepts
-this; prefix-cache locality doesn't suffer because provider caches have
-minute-scale TTLs and never survive a process restart. Rejected: we prefer
-live/resume consistency over mimicking pi's incidental behavior.
+**Drop A₁ from memory instead of recording the omission.**
+Pop it from the in-memory buffer before a retry, and filter it while hydrating.
+This was the first implementation. Rejected: the pop is not persisted, so a
+reloaded session could not reproduce it, and the two mechanisms had to be kept
+in step by hand. pi reached the same conclusion — its `buildSessionProjection`
+filters nothing; the omission is recorded instead.
 
 **Persist only terminal errors.**
 A failed message reaches the journal only when the retry budget is
-exhausted or the error is not retryable; hydration needs no filter because
-the journal already reads as "what the model actually saw". Rejected:
-superseded failures leave no trace in the journal, weakening failure
-forensics — the journal should be self-sufficient as a record of what
-happened.
-
-Note on cross-tool compatibility: pi reading a pim journal includes our
-error messages in context (pi filters nothing else); pim reading any journal
-drops them. Both are safe; the contexts differ only by whether a failed
-attempt is visible to the model.
+exhausted or the error is not retryable, so the journal would already read as
+"what the model actually saw". Rejected: superseded failures leave no trace
+in the journal, weakening failure forensics — the journal should be
+self-sufficient as a record of what happened.
 
 ## Retry layering (the mechanical part)
 
@@ -88,7 +100,9 @@ attempt is visible to the model.
    Retryability pattern-matches `error_message` against pi's blacklist
    (quota/billing, context overflow) and whitelist (overloaded, rate limit,
    5xx, transport) — across layer boundaries errors are text, and pi does
-   the same.
+   the same. Each attempt re-enters the loop through
+   `run_agent_loop_continue`, so the failed turn must already be omitted
+   from the context (see the lifecycle section).
 5. `AgentSessionEvent` is the session-level event union
    (`Loop(AgentEvent)` plus session events), keeping retry signals out of
    the agent loop's `AgentEvent`.

@@ -1,19 +1,10 @@
 ///|
 /// Loop-level ports of pi's `finishTurn` `{ action: "end" }` cases
 /// (`packages/agent/test/agent-loop.test.ts` and `packages/agent/test/agent.test.ts`).
-///
-/// pi.mbt has no `Agent` class, so the two Agent-level cases are expressed
-/// against `run_agent_loop` directly: the `finish_turn_hook` argument replaces
-/// `AgentOptions.finishTurn`, and the steering channel replaces the two queues.
-/// pi's follow-up queue has no pi.mbt counterpart yet (see the TODO in
-/// `run_agent_loop`), so the follow-up half of "queues stay untouched" is not
-/// covered here.
 
 ///|
 /// A scripted stand-in for a provider: each `generate` call replays the next
-/// queued terminal message and advances the cursor. Only `Start` is emitted,
-/// because the loop's sink uses it to mark the message as started and these
-/// tests do not assert streamed deltas.
+/// queued terminal message, advancing the cursor. Only `Start` is emitted.
 struct EndHookLLM {
   responses : Array[@agent_loop.AssistantMessage]
   /// When set, `generate` fires this controller before returning the scripted
@@ -134,9 +125,6 @@ fn end_hook_message_role(message : @agent_loop.AgentMessage) -> String {
 }
 
 ///|
-/// pi `agent-loop.test.ts` "action:end skips queue polling and next-turn
-/// preparation": the tool batch would normally drive another provider request,
-/// but `end` returns a Stop without polling steering again.
 async test "finish turn end: stops the run and skips the next steering poll" {
   let llm = EndHookLLM::new([
     end_hook_assistant(
@@ -189,9 +177,6 @@ async test "finish turn end: stops the run and skips the next steering poll" {
 }
 
 ///|
-/// pi `agent-loop.test.ts` "action:end receives finalized turn context and
-/// stops before queue polling": the tool really ran, and the hook observes the
-/// transcript with the tool result already appended.
 async test "finish turn end: hook sees the transcript with tool results appended" {
   let llm = EndHookLLM::new([
     end_hook_assistant(
@@ -245,10 +230,8 @@ async test "finish turn end: hook sees the transcript with tool results appended
 }
 
 ///|
-/// A hook that is awaited can be long-running (pi's README forwards the signal
-/// into `await shouldStop(turn, signal)`), so it needs to see whether the run is
-/// being cancelled. On a normal turn the signal is still live and `end` is a
-/// deliberate stop.
+
+///|
 async test "finish turn end: hook receives a live signal on a normal turn" {
   let llm = EndHookLLM::new([
     end_hook_assistant(
@@ -277,11 +260,8 @@ async test "finish turn end: hook receives a live signal on a normal turn" {
 }
 
 ///|
-/// An abort that lands while the provider is streaming: the hook still runs and
-/// observes the aborted signal, but its `end` decision is discarded — aborted
-/// responses are hard exits, and `LoopStopReason::Aborted` outranks the hook.
-///
-/// pi has no case for this: its only signal test is an `instanceof` smoke check.
+
+///|
 async test "finish turn end: hook sees an aborted signal, hard exit wins" {
   let controller = @agent_loop.AbortController::new()
   let llm = EndHookLLM::new(
@@ -325,9 +305,6 @@ async test "finish turn end: hook sees an aborted signal, hard exit wins" {
 }
 
 ///|
-/// pi `agent.test.ts` "keeps queues when finishTurn ends the run": a steering
-/// message queued during the turn stays queued because `end` skips the
-/// post-turn poll. The turn itself carries no tool call, matching pi's case.
 async test "finish turn end: leaves queued steering unconsumed" {
   let llm = EndHookLLM::new([
     end_hook_assistant(
@@ -369,13 +346,8 @@ async test "finish turn end: leaves queued steering unconsumed" {
 }
 
 ///|
-/// A cancellation that predates the run is closed out by the provider, not by
-/// the loop: `generate` sees the live signal and returns an `Aborted` message
-/// without starting a request. The loop therefore never inspects the signal
-/// (pi's `runLoop` only threads it through). The turn stays balanced, the
-/// prompt is recorded rather than dropped, and the aborted message is part of
-/// what the run returns — dropping it is `transform_messages`' job, at request
-/// build time.
+
+///|
 async test "pre-aborted run completes a balanced turn instead of dropping it" {
   let llm = EndHookLLM::new([
     end_hook_assistant([], stop_reason=@agent_loop.StopReason::Aborted),
@@ -384,7 +356,7 @@ async test "pre-aborted run completes a balanced turn instead of dropping it" {
   let events : Array[@agent_loop.AgentEvent] = []
   let controller = @agent_loop.AbortController::new()
   controller.abort()
-  let added = @agent_loop.run_agent_loop(
+  @agent_loop.run_agent_loop(
     llm,
     "",
     messages,
@@ -398,7 +370,6 @@ async test "pre-aborted run completes a balanced turn instead of dropping it" {
   json_inspect(messages.map(end_hook_message_role), content=[
     "user", "assistant",
   ])
-  json_inspect(added.map(end_hook_message_role), content=["user", "assistant"])
   json_inspect(events.map(end_hook_event_name), content=[
     "agent_start", "turn_start", "message_start", "message_end", "message_start",
     "message_end", "turn_end", "agent_end",
@@ -407,4 +378,104 @@ async test "pre-aborted run completes a balanced turn instead of dropping it" {
     Some(Assistant(message)) => assert_true(message.stop_reason is Aborted)
     _ => fail("expected a trailing assistant message")
   }
+}
+
+///|
+fn end_hook_user_message(text : String) -> @agent_loop.AgentMessage {
+  @agent_loop.AgentMessage::User(end_hook_user(text))
+}
+
+///|
+fn end_hook_assistant_message(
+  content : Array[@agent_loop.AssistantMessageContent],
+  stop_reason~ : @agent_loop.StopReason,
+) -> @agent_loop.AgentMessage {
+  @agent_loop.AgentMessage::Assistant(end_hook_assistant(content, stop_reason~))
+}
+
+///|
+fn end_hook_tool_result_message(
+  tool_call_id : String,
+  tool_name : String,
+) -> @agent_loop.AgentMessage {
+  @agent_loop.AgentMessage::ToolResult({
+    tool_call_id,
+    tool_name,
+    content: [@agent_loop.InputMessageContent::Text("done")],
+    details: None,
+    usage: None,
+    is_error: false,
+    timestamp: 1786903823973,
+  })
+}
+
+///|
+async test "continue runs a turn from a tool result tail" {
+  let llm = EndHookLLM::new([
+    end_hook_assistant(
+      [end_hook_text("done")],
+      stop_reason=@agent_loop.StopReason::Stop,
+    ),
+  ])
+  let messages : Array[@agent_loop.AgentMessage] = [
+    end_hook_user_message("run"),
+    end_hook_assistant_message(
+      [end_hook_tool_call("noop", {}, id="tool-1")],
+      stop_reason=@agent_loop.StopReason::ToolUse,
+    ),
+    end_hook_tool_result_message("tool-1", "noop"),
+  ]
+  let events : Array[@agent_loop.AgentEvent] = []
+  @agent_loop.run_agent_loop_continue(
+    llm,
+    "",
+    messages,
+    end_hook_no_tools(),
+    tool_executor=(_, _) => end_hook_tool_result(),
+    event_sink=event => events.push(event),
+  )
+  json_inspect(messages.map(end_hook_message_role), content=[
+    "user", "assistant", "toolResult", "assistant",
+  ])
+  json_inspect(events.map(end_hook_event_name), content=[
+    "agent_start", "turn_start", "message_start", "message_end", "turn_end", "agent_end",
+  ])
+}
+
+///|
+async fn end_hook_continue_error(
+  messages : Array[@agent_loop.AgentMessage],
+) -> String {
+  let llm = EndHookLLM::new([])
+  try {
+    @agent_loop.run_agent_loop_continue(
+      llm,
+      "",
+      messages,
+      end_hook_no_tools(),
+      tool_executor=(_, _) => end_hook_tool_result(),
+    )
+    ""
+  } catch {
+    err => err.to_string()
+  }
+}
+
+///|
+async test "continue rejects an empty transcript" {
+  let error = end_hook_continue_error([])
+  assert_true(error.contains("no messages in context"))
+}
+
+///|
+async test "continue rejects an assistant tail" {
+  let messages : Array[@agent_loop.AgentMessage] = [
+    end_hook_user_message("hi"),
+    end_hook_assistant_message(
+      [end_hook_text("done")],
+      stop_reason=@agent_loop.StopReason::Stop,
+    ),
+  ]
+  let error = end_hook_continue_error(messages)
+  assert_true(error.contains("Cannot continue from message role: assistant"))
 }

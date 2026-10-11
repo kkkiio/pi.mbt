@@ -12,13 +12,12 @@ pub async fn run_agent_loop(
   // TODO: support follow-up channel
   event_sink? : async (AgentEvent) -> Unit = _ => (),
   finish_turn_hook? : FinishTurnHook = (_, _, _) => None,
-) -> ArrayView[AgentMessage] {
+) -> Unit {
   event_sink(AgentEvent::AgentStart)
   let mut pending_prompts = prompts
   if steer_channel() is ([_, ..] as steer_messages) {
     pending_prompts += steer_messages
   }
-  let message_begin = messages.length()
   for ;; {
     event_sink(AgentEvent::TurnStart)
     for prompt in pending_prompts {
@@ -214,7 +213,45 @@ pub async fn run_agent_loop(
     break
   }
   event_sink(AgentEvent::AgentEnd(messages))
-  messages[message_begin:]
+}
+
+///|
+/// Continue the loop from the current transcript, appending no prompt.
+///
+/// The transcript must end with something the model can answer: a user message
+/// or a tool result. pi's `runAgentLoopContinue` rejects the other cases, and
+/// this mirrors it.
+pub async fn run_agent_loop_continue(
+  llm : &LLM,
+  system_prompt : String,
+  messages : Array[AgentMessage],
+  tools : ArrayView[ToolDefinition],
+  tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
+  steer_channel? : () -> ArrayView[UserMessage] = fn() { [] },
+  abort? : AbortSignal = AbortSignal::never(),
+  event_sink? : async (AgentEvent) -> Unit = _ => (),
+  finish_turn_hook? : FinishTurnHook = (_, _, _) => None,
+) -> Unit {
+  guard messages.length() > 0 else {
+    fail("Cannot continue: no messages in context")
+  }
+  match messages[messages.length() - 1] {
+    Assistant(_) => fail("Cannot continue from message role: assistant")
+    _ => ()
+  }
+  let no_prompts : Array[UserMessage] = []
+  run_agent_loop(
+    llm,
+    system_prompt,
+    messages,
+    tools,
+    no_prompts,
+    tool_executor~,
+    steer_channel~,
+    abort~,
+    event_sink~,
+    finish_turn_hook~,
+  )
 }
 
 ///|

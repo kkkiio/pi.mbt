@@ -77,9 +77,6 @@ fn tm_role(message : @agent_loop.AgentMessage) -> String {
 }
 
 ///|
-/// pi "adds synthetic tool results for trailing orphaned tool calls": a turn
-/// that requested a tool and never reported a result still encodes as a
-/// well-formed request.
 async test "orphaned tool call gets a synthetic error result" {
   let result = @providers.transform_messages(
     [
@@ -134,8 +131,6 @@ async test "orphaned tool call gets a synthetic error result" {
 }
 
 ///|
-/// pi "adds synthetic results only for trailing tool calls that are still
-/// missing results": answered calls are left alone.
 async test "only unanswered tool calls get synthetic results" {
   let result = @providers.transform_messages(
     [
@@ -200,8 +195,6 @@ async test "only unanswered tool calls get synthetic results" {
 }
 
 ///|
-/// pi: "Skip errored/aborted assistant messages entirely." They stay in the
-/// journal, but an unfinished turn is never replayed to the provider.
 async test "errored and aborted assistant messages are dropped" {
   let result = @providers.transform_messages(
     [
@@ -251,8 +244,8 @@ async test "errored and aborted assistant messages are dropped" {
 }
 
 ///|
-/// A dropped message takes its tool calls with it, so nothing is owed: the
-/// encoder must not invent a result for a call the request no longer contains.
+
+///|
 async test "a dropped message does not owe a synthetic result" {
   let result = @providers.transform_messages(
     [
@@ -301,8 +294,6 @@ async test "a dropped message does not owe a synthetic result" {
 }
 
 ///|
-/// A tool result has to follow its call, so the synthetic result is inserted
-/// before the message that interrupts the batch, not appended at the end.
 async test "synthetic result is flushed before the next assistant message" {
   let result = @providers.transform_messages(
     [
