@@ -2,7 +2,10 @@
 fn encode_responses_input(context : @agent_loop.Context) -> Array[Json] raise {
   let input : Array[Json] = []
   let custom_call_ids : Set[String] = Set([])
-  for message in context.messages {
+  // Replay normalization: drop errored/aborted assistant turns and answer any
+  // tool call the transcript never answered, so a partial turn can neither be
+  // replayed nor leave a dangling `function_call` (see `transform_messages`).
+  for message in transform_messages(context.messages) {
     match message {
       User({ content: contents, .. }) =>
         input.push({

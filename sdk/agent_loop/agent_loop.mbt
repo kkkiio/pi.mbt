@@ -12,17 +12,14 @@ pub async fn run_agent_loop(
   // TODO: support follow-up channel
   event_sink? : async (AgentEvent) -> Unit = _ => (),
   finish_turn_hook? : FinishTurnHook = (_, _, _) => None,
-) -> LoopStopReason {
+) -> ArrayView[AgentMessage] {
   event_sink(AgentEvent::AgentStart)
   let mut pending_prompts = prompts
   if steer_channel() is ([_, ..] as steer_messages) {
     pending_prompts += steer_messages
   }
-  let reason : LoopStopReason = for ;; {
-    // 上一回合被中断:不再开新回合(此时 provider 已产出 Aborted 消息)。
-    if abort.is_aborted() {
-      break Aborted
-    }
+  let message_begin = messages.length()
+  for ;; {
     event_sink(AgentEvent::TurnStart)
     for prompt in pending_prompts {
       let msg = AgentMessage::User(prompt)
@@ -114,10 +111,10 @@ pub async fn run_agent_loop(
     event_sink(AgentEvent::MessageEnd(final_msg))
 
     let tool_results = []
-    let early_stop_reason = match assistant_message.stop_reason {
+    let hard_exit = match assistant_message.stop_reason {
       Pending => fail("generate returned a message with pending stop_reason")
-      Aborted => Some(LoopStopReason::Aborted)
-      Error => Some(LoopStopReason::Error)
+      Aborted => true
+      Error => true
       (Length with model_error = true)
       | (Stop | ToolUse with model_error = false) => {
         for content in assistant_message.content {
@@ -195,16 +192,16 @@ pub async fn run_agent_loop(
           tool_results.push(tool_result)
           messages.push(AgentMessage::ToolResult(tool_result))
         }
-        None
+        false
       }
     }
     let finish_turn_decision = finish_turn_hook(messages, tool_results, abort)
     event_sink(AgentEvent::TurnEnd(assistant_message, tool_results))
-    if early_stop_reason is Some(r) {
-      break r
+    if hard_exit {
+      break
     }
     match finish_turn_decision {
-      Some(End) => break Stop
+      Some(End) => break
       None => ()
     }
     if tool_results.length() > 0 {
@@ -214,18 +211,10 @@ pub async fn run_agent_loop(
     if pending_prompts.length() > 0 {
       continue
     }
-    break Stop
+    break
   }
   event_sink(AgentEvent::AgentEnd(messages))
-  reason
-}
-
-///|
-pub enum LoopStopReason {
-  Stop
-  /// The model was aborted by the user or system.
-  Aborted
-  Error
+  messages[message_begin:]
 }
 
 ///|

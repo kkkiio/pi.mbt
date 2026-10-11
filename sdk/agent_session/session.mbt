@@ -155,7 +155,7 @@ pub async fn AgentSession::prompt(
   }
   let mut pending_prompts = input
   for ;; {
-    let reason = @agent_loop.run_agent_loop(
+    let _ = @agent_loop.run_agent_loop(
       self.llm,
       self.system_prompt,
       self.message_buffer,
@@ -199,8 +199,12 @@ pub async fn AgentSession::prompt(
         }
       },
     )
-    if reason is @agent_loop.LoopStopReason::Error {
-      let error_message = self.last_error_message()
+    if self.message_buffer.last()
+      is Some(
+        @agent_loop.AgentMessage::Assistant(
+          { stop_reason: Error, error_message, .. }
+        )
+      ) {
       if error_message is Some(message) &&
         is_retryable_error_message(message) &&
         retry_attempt < MAX_AUTO_RETRIES {
@@ -247,20 +251,6 @@ fn drop_trailing_error_message(
         ignore(messages.pop())
       _ => ()
     }
-  }
-}
-
-///|
-/// The error message of the trailing assistant turn, when the last run ended
-/// with an Error terminal message.
-fn AgentSession::last_error_message(self : AgentSession) -> String? {
-  if self.message_buffer.length() == 0 {
-    return None
-  }
-  match self.message_buffer[self.message_buffer.length() - 1] {
-    @agent_loop.AgentMessage::Assistant(m) if m.stop_reason is Error =>
-      m.error_message
-    _ => None
   }
 }
 

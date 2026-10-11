@@ -152,7 +152,7 @@ async test "finish turn end: stops the run and skips the next steering poll" {
   let ordering : Array[String] = []
   let events : Array[@agent_loop.AgentEvent] = []
   let steer_polls : Array[Int] = []
-  let reason = @agent_loop.run_agent_loop(
+  let _ = @agent_loop.run_agent_loop(
     llm,
     "",
     messages,
@@ -172,7 +172,6 @@ async test "finish turn end: stops the run and skips the next steering poll" {
     },
     event_sink=event => events.push(event),
   )
-  assert_true(reason is @agent_loop.LoopStopReason::Stop)
   // One provider call: `end` cancelled the pending tool follow-up.
   assert_eq(llm.cursor, 1)
   // Steering is polled once before the loop and never again.
@@ -209,7 +208,7 @@ async test "finish turn end: hook sees the transcript with tool results appended
   let hook_tool_call_ids : Array[String] = []
   let hook_roles : Array[String] = []
   let events : Array[@agent_loop.AgentEvent] = []
-  let reason = @agent_loop.run_agent_loop(
+  let _ = @agent_loop.run_agent_loop(
     llm,
     "",
     messages,
@@ -230,7 +229,6 @@ async test "finish turn end: hook sees the transcript with tool results appended
     },
     event_sink=event => events.push(event),
   )
-  assert_true(reason is @agent_loop.LoopStopReason::Stop)
   assert_eq(llm.cursor, 1)
   json_inspect(executed, content=[{ "value": "hello" }])
   json_inspect(hook_tool_call_ids, content=["tool-1"])
@@ -261,7 +259,7 @@ async test "finish turn end: hook receives a live signal on a normal turn" {
   let messages : Array[@agent_loop.AgentMessage] = []
   let controller = @agent_loop.AbortController::new()
   let observed : Array[Bool] = []
-  let reason = @agent_loop.run_agent_loop(
+  let _ = @agent_loop.run_agent_loop(
     llm,
     "",
     messages,
@@ -275,7 +273,6 @@ async test "finish turn end: hook receives a live signal on a normal turn" {
       Some(@agent_loop.AgentTurnDecision::End)
     },
   )
-  assert_true(reason is @agent_loop.LoopStopReason::Stop)
   json_inspect(observed, content=[false])
 }
 
@@ -299,7 +296,7 @@ async test "finish turn end: hook sees an aborted signal, hard exit wins" {
   let messages : Array[@agent_loop.AgentMessage] = []
   let observed : Array[Bool] = []
   let events : Array[@agent_loop.AgentEvent] = []
-  let reason = @agent_loop.run_agent_loop(
+  let _ = @agent_loop.run_agent_loop(
     llm,
     "",
     messages,
@@ -316,7 +313,6 @@ async test "finish turn end: hook sees an aborted signal, hard exit wins" {
     },
     event_sink=event => events.push(event),
   )
-  assert_true(reason is @agent_loop.LoopStopReason::Aborted)
   json_inspect(observed, content=[true, false])
   assert_eq(llm.cursor, 1)
   json_inspect(events.map(end_hook_event_name), content=[
@@ -343,7 +339,7 @@ async test "finish turn end: leaves queued steering unconsumed" {
   let events : Array[@agent_loop.AgentEvent] = []
   let queued : Array[@agent_loop.UserMessage] = [end_hook_user("steering")]
   let steer_calls : Array[Int] = []
-  let reason = @agent_loop.run_agent_loop(
+  let _ = @agent_loop.run_agent_loop(
     llm,
     "",
     messages,
@@ -361,7 +357,6 @@ async test "finish turn end: leaves queued steering unconsumed" {
     finish_turn_hook=(_, _, _) => Some(@agent_loop.AgentTurnDecision::End),
     event_sink=event => events.push(event),
   )
-  assert_true(reason is @agent_loop.LoopStopReason::Stop)
   // Polled once before the loop; the post-turn poll never happened.
   assert_eq(steer_calls.length(), 1)
   json_inspect(messages.map(end_hook_message_role), content=[
@@ -371,4 +366,45 @@ async test "finish turn end: leaves queued steering unconsumed" {
     "agent_start", "turn_start", "message_start", "message_end", "message_start",
     "message_end", "turn_end", "agent_end",
   ])
+}
+
+///|
+/// A cancellation that predates the run is closed out by the provider, not by
+/// the loop: `generate` sees the live signal and returns an `Aborted` message
+/// without starting a request. The loop therefore never inspects the signal
+/// (pi's `runLoop` only threads it through). The turn stays balanced, the
+/// prompt is recorded rather than dropped, and the aborted message is part of
+/// what the run returns — dropping it is `transform_messages`' job, at request
+/// build time.
+async test "pre-aborted run completes a balanced turn instead of dropping it" {
+  let llm = EndHookLLM::new([
+    end_hook_assistant([], stop_reason=@agent_loop.StopReason::Aborted),
+  ])
+  let messages : Array[@agent_loop.AgentMessage] = []
+  let events : Array[@agent_loop.AgentEvent] = []
+  let controller = @agent_loop.AbortController::new()
+  controller.abort()
+  let added = @agent_loop.run_agent_loop(
+    llm,
+    "",
+    messages,
+    end_hook_no_tools(),
+    [end_hook_user("hi")],
+    tool_executor=(_, _) => end_hook_tool_result(),
+    steer_channel=end_hook_no_steering,
+    abort=controller.signal(),
+    event_sink=event => events.push(event),
+  )
+  json_inspect(messages.map(end_hook_message_role), content=[
+    "user", "assistant",
+  ])
+  json_inspect(added.map(end_hook_message_role), content=["user", "assistant"])
+  json_inspect(events.map(end_hook_event_name), content=[
+    "agent_start", "turn_start", "message_start", "message_end", "message_start",
+    "message_end", "turn_end", "agent_end",
+  ])
+  match messages.last() {
+    Some(Assistant(message)) => assert_true(message.stop_reason is Aborted)
+    _ => fail("expected a trailing assistant message")
+  }
 }
