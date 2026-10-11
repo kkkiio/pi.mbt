@@ -862,7 +862,7 @@ fn event_lines(events : Array[@agent_session.AgentSessionEvent]) -> String {
 /// The defaults themselves are pinned by "retry settings mirror pi's resolved
 /// defaults and backoff".
 fn fast_retry_settings() -> @agent_session.RetrySettings {
-  { ..@agent_session.RetrySettings::default(), base_delay_ms: 1 }
+  { ..@agent_session.RetrySettings::default(), base_delay_ms: 1, }
 }
 
 ///|
@@ -1014,7 +1014,6 @@ async test "auto-retry window resets after each successful response" {
       #|{"type":"auto_retry_end","success":true,"attempt":1,"finalError":null}
       #|{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"done"}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"stop","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0},"toolCalls":[]}
       #|{"type":"agent_end"}
-
     ),
   )
 }
@@ -1092,11 +1091,12 @@ async test "interrupt cancels retry backoff without starting another attempt" {
     responses.push(ok_message())
     llm.set_responses(responses)
     let journal = @agent_session.InMemorySessionJournal()
+    let retry_settings = { ..fast_retry_settings(), base_delay_ms: 200, }
     let session = @agent_session.AgentSession(
       llm,
       system_prompt="",
       journal~,
-      retry_settings={ ..fast_retry_settings(), base_delay_ms: 200 },
+      retry_settings~,
     )
     let started = @async.Semaphore::Semaphore(1, initial_value=0)
     let ends : Array[(Int, Bool, String?)] = []
