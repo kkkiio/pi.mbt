@@ -1,0 +1,37 @@
+# Pull-request gate: formatting, type-checking on both targets, the offline
+# suites, the CLI contract tests, and the package checks — the same steps the
+# release workflow runs before publishing.
+#
+# `coverage.yml` runs on these same events, but it is explicitly a report
+# (`continue-on-error`), and it neither checks formatting nor runs `moon check`,
+# the native suite, `moon build`, `moon cram`, or the package checks — so a
+# formatting break or a native-target failure could reach main. This job is the
+# gate; its steps live in `.github/actions/verify` so the release workflow and
+# this one cannot drift apart.
+
+name: check
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/setup
+
+      - uses: ./.github/actions/verify

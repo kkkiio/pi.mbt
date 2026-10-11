@@ -1,0 +1,58 @@
+# The gate shared by pull-request CI (`check.yml`) and the release workflow:
+# formatting, type-checking on both targets, the offline suites, the CLI
+# contract tests, the Mooncakes package listing, and the npm tarball smoke test.
+#
+# One copy on purpose. `release.yml` runs this on the tagged commit before
+# publishing to npm/Mooncakes, so whatever a pull request exercises here is
+# exactly what the release gate will exercise — a step added or tightened below
+# reaches both, instead of drifting apart until a release fails.
+#
+# The caller must check out the repository and run `.github/actions/setup`
+# (MoonBit CLI + registry) first. `release.yml` uploads the tarball this action
+# writes to `$RUNNER_TEMP/npm-package`, so it must run before that upload.
+#
+# `continue-on-error` is deliberately absent: unlike `coverage.yml`, this is a
+# gate, and every step below must block a merge.
+
+name: "Verify"
+description: "Format, type-check, test, build and pack checks shared by PR CI and the release gate."
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+
+    # tui_app's blackbox tests import @earendil-works/pi-tui at runtime, so the
+    # js dependencies must be installed before `moon test` runs.
+    - name: Install JS dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Check and test SDK and CLI
+      shell: bash
+      run: |
+        moon fmt --check
+        moon check --target js --deny-warn
+        moon check --target native --deny-warn
+        moon test --target js
+        moon test --target native
+        moon build --target js
+        moon cram test --work-directory . tests/cram
+
+    - name: Inspect Mooncakes package contents
+      shell: bash
+      run: moon package --frozen --list
+
+    - name: Build and smoke-test the npm tarball
+      shell: bash
+      run: |
+        bash scripts/pack-npm.sh
+        mkdir -p "$RUNNER_TEMP/npm-package"
+        npm pack --pack-destination "$RUNNER_TEMP/npm-package"
+        consumer=$(mktemp -d)
+        trap 'rm -rf "$consumer"' EXIT
+        npm install --prefix "$consumer" --ignore-scripts --no-audit --no-fund \
+          "$RUNNER_TEMP"/npm-package/*.tgz
+        "$consumer/node_modules/.bin/pim" --help

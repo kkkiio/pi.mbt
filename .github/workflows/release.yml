@@ -32,10 +32,6 @@ jobs:
           ref: ${{ github.event.release.tag_name || github.ref }}
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-
       - name: Check release version
         id: version
         env:
@@ -53,32 +49,11 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      - name: Install JS dependencies
-        run: npm ci
-
-      - name: Check and test SDK and CLI
-        run: |
-          moon fmt --check
-          moon check --target js --deny-warn
-          moon check --target native --deny-warn
-          moon test --target js
-          moon test --target native
-          moon build --target js
-          moon cram test --work-directory . tests/cram
-
-      - name: Inspect Mooncakes package contents
-        run: moon package --frozen --list
-
-      - name: Build and smoke-test the npm tarball
-        run: |
-          bash scripts/pack-npm.sh
-          mkdir -p "$RUNNER_TEMP/npm-package"
-          npm pack --pack-destination "$RUNNER_TEMP/npm-package"
-          consumer=$(mktemp -d)
-          trap 'rm -rf "$consumer"' EXIT
-          npm install --prefix "$consumer" --ignore-scripts --no-audit --no-fund \
-            "$RUNNER_TEMP"/npm-package/*.tgz
-          "$consumer/node_modules/.bin/pim" --help
+      # The gate itself is shared with `check.yml`: formatting, type-checking on
+      # both targets, the offline suites, the CLI contract tests, the Mooncakes
+      # listing, and the npm tarball smoke test. Anything published below was
+      # checked by the same steps a pull request runs.
+      - uses: ./.github/actions/verify
 
       - uses: actions/upload-artifact@v4
         with:
