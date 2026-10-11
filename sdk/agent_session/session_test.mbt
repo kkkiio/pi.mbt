@@ -1078,6 +1078,101 @@ async test "a completing tool call returns and records its result" {
 }
 
 ///|
+/// The finish-turn hook is reachable from a session and its `End` decision
+/// stops the run: the tool batch would otherwise drive a second provider call,
+/// so the scripted follow-up response must stay unconsumed.
+async test "finish turn hook on a session ends the run after the tool batch" {
+  let log : Array[String] = []
+  let registry = probe_tools(log)
+  let journal = @agent_session.InMemorySessionJournal()
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([
+    @faux.faux_message(
+      [@faux.faux_tool_call("probe", {}, id="call-probe")],
+      stop_reason=@agent_loop.StopReason::ToolUse,
+    ),
+    @faux.faux_message([@faux.faux_text("should not run")]),
+  ])
+  let hook_calls : Array[Int] = []
+  let session = @agent_session.AgentSession(
+    llm,
+    system_prompt="",
+    journal~,
+    tool_registry=registry,
+    active_tools=["probe"],
+    finish_turn_hook=(_, tool_results, _) => {
+      hook_calls.push(tool_results.length())
+      Some(@agent_loop.AgentTurnDecision::End)
+    },
+  )
+  let events : Array[@agent_session.AgentSessionEvent] = []
+  session.subscribe(event => events.push(event))
+  session.prompt([user_message("go")])
+  assert_eq(log, ["probe"])
+  // One provider call: the hook ran after the tool result and stopped the run.
+  assert_eq(llm.pending_responses(), 1)
+  assert_eq(hook_calls, [1])
+  assert_eq(events.filter(event => event is Loop(TurnEnd(_, _))).length(), 1)
+  assert_eq(events.filter(event => event is Loop(AgentEnd(_))).length(), 1)
+  json_inspect(journal_roles(journal), content=[
+    "user", "assistant", "toolResult",
+  ])
+}
+
+///|
+/// Message roles in journal order, for the finish-turn tests below.
+fn journal_roles(journal : &@agent_session.SessionJournal) -> Array[String] {
+  journal
+  .get_entries()
+  .filter_map(entry => {
+    match entry.content {
+      Message(User(_)) => Some("user")
+      Message(Assistant(_)) => Some("assistant")
+      Message(ToolResult(_)) => Some("toolResult")
+      _ => None
+    }
+  })
+}
+
+///|
+/// `set_finish_turn_hook` replaces the hook after construction, and a wrapper
+/// can read the current one first — the shape pi relies on when a higher layer
+/// layers its own policy over the app's.
+async test "a session can replace and wrap its finish turn hook" {
+  let log : Array[String] = []
+  let registry = probe_tools(log)
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([
+    @faux.faux_message(
+      [@faux.faux_tool_call("probe", {}, id="call-probe")],
+      stop_reason=@agent_loop.StopReason::ToolUse,
+    ),
+    @faux.faux_message([@faux.faux_text("should not run")]),
+  ])
+  let calls : Array[String] = []
+  let session = @agent_session.AgentSession(
+    llm,
+    system_prompt="",
+    tool_registry=registry,
+    active_tools=["probe"],
+    finish_turn_hook=(_, _, _) => {
+      calls.push("inner")
+      None
+    },
+  )
+  let inner = session.finish_turn_hook
+  session.set_finish_turn_hook((messages, tool_results, abort) => {
+    calls.push("outer")
+    // Delegate to the hook this one replaced, then decide.
+    ignore(inner(messages, tool_results, abort))
+    Some(@agent_loop.AgentTurnDecision::End)
+  })
+  session.prompt([user_message("go")])
+  assert_eq(llm.pending_responses(), 1)
+  assert_eq(calls, ["outer", "inner"])
+}
+
+///|
 /// Interrupt inside each backoff window, not from its start event. The deadline
 /// begins at interrupt, so the second attempt's initial backoff wait is allowed.
 ///
