@@ -79,6 +79,11 @@ CLI 契约由 `tests/cram/` 下的 `mooncram` 转录持续验证。
 - 需要验证凭证来源(auth.json vs 环境变量)时,用隔离的 `PIM_CONFIG_DIR` 并在
   子 shell 里 `unset` 环境变量,这样才能真正证明读的是哪个来源。
 
+### API Comment Policy
+
+在 public API 上写 Doc 注释。
+防御性注释写到 `*_test.mbt` 文件里。
+
 ## Operation Guide
 
 日常迭代流程:
