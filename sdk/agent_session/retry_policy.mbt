@@ -16,6 +16,64 @@ let retryable_provider_pattern : @string.Regex = @string.Regex::unsafe_from_stri
 )
 
 ///|
+/// Agent-level retry policy: pi's `RetrySettings` (the `retry.*` settings
+/// half) in the resolved form `SettingsManager.getRetrySettings()` returns,
+/// with every optional field defaulted. pi keeps the provider-level knobs
+/// (`retry.provider.*`) in a separate accessor, so they are not here.
+pub(all) struct RetrySettings {
+  /// Whether a retryable failure re-runs the turn at all.
+  enabled : Bool
+  /// Max consecutive retries after a retryable error. The initial attempt does
+  /// not count, matching pi's `maxRetries` / `maxAttempts`.
+  max_retries : Int
+  /// Exponential-backoff base in milliseconds: the first retry waits this long.
+  base_delay_ms : Int
+  /// Ceiling on a single backoff delay, not on the total wait.
+  max_agent_delay_ms : Int
+}
+
+///|
+/// pi's `SETTINGS_DEFAULTS.retry` (`enabled`, `maxRetries`, `baseDelayMs`,
+/// `maxAgentDelayMs`): three retries waiting 2s, 4s, then 8s.
+pub fn RetrySettings::default() -> RetrySettings {
+  {
+    enabled: true,
+    max_retries: 3,
+    base_delay_ms: 2000,
+    max_agent_delay_ms: 60_000,
+  }
+}
+
+///|
+/// pi's `retryDelayMs`: exponential backoff `baseDelayMs * 2^(attempt-1)` from
+/// a 1-indexed attempt, capped per attempt by `maxAgentDelayMs`. Doubling
+/// saturates at the cap instead of shifting, so a large attempt count cannot
+/// overflow into a negative delay that would then slip past the cap. pi has
+/// the same guard via `Number.isSafeInteger`.
+pub fn RetrySettings::delay_ms(self : RetrySettings, attempt : Int) -> Int {
+  let max = self.max_agent_delay_ms
+  let mut delay = if self.base_delay_ms > max {
+    max
+  } else {
+    self.base_delay_ms
+  }
+  // An Int saturates after 63 doublings, so clamping the exponent keeps this
+  // loop bounded even when `attempt` is far larger than the cap can notice.
+  let mut doublings = if attempt > 64 {
+    63
+  } else if attempt > 1 {
+    attempt - 1
+  } else {
+    0
+  }
+  while doublings > 0 && delay < max {
+    doublings = doublings - 1
+    delay = if delay > max - delay { max } else { delay + delay }
+  }
+  delay
+}
+
+///|
 /// Whether a failed assistant turn's `error_message` looks like a transient
 /// provider or transport error worth retrying the whole prompt. Mirrors pi's
 /// `isRetryableAssistantError`: quota/billing blacklist first, then the

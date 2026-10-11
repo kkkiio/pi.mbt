@@ -79,6 +79,8 @@ pub struct AgentSession {
   fanout : FanOutListener
   mut message_buffer : Array[@agent_loop.AgentMessage]
   system_prompt : String
+  /// Agent-level auto-retry policy, read at every retryable failure.
+  retry_settings : RetrySettings
   /// 当前运行的中断控制器(每次 prompt 新建,结束后清空)。只有它能置位。
   mut active_run_abort_controller : @agent_loop.AbortController?
 }
@@ -90,6 +92,7 @@ pub fn AgentSession::AgentSession(
   journal? : &SessionJournal = InMemorySessionJournal(),
   tool_registry? : @tools.ToolRegistry = @tools.ToolRegistry(),
   active_tools? : ArrayView[String] = [],
+  retry_settings? : RetrySettings = RetrySettings::default(),
 ) -> AgentSession {
   AgentSession::{
     tool_registry,
@@ -98,6 +101,7 @@ pub fn AgentSession::AgentSession(
     fanout: FanOutListener::FanOutListener(),
     llm,
     system_prompt,
+    retry_settings,
     active_run_abort_controller: None,
     message_buffer: project_messages(journal.get_entries()),
   }
@@ -235,15 +239,16 @@ pub async fn AgentSession::prompt(
           { stop_reason: Error, error_message, .. }
         )
       ) {
-      if error_message is Some(message) &&
+      if self.retry_settings.enabled &&
+        error_message is Some(message) &&
         is_retryable_error_message(message) &&
-        retry_attempt < MAX_AUTO_RETRIES {
+        retry_attempt < self.retry_settings.max_retries {
         retry_attempt = retry_attempt + 1
-        let delay_ms = auto_retry_delay_ms(retry_attempt)
+        let delay_ms = self.retry_settings.delay_ms(retry_attempt)
         self.fanout.on_event(
           AgentSessionEvent::AutoRetryStart(
             attempt=retry_attempt,
-            max_attempts=MAX_AUTO_RETRIES,
+            max_attempts=self.retry_settings.max_retries,
             delay_ms~,
             error_message=message,
           ),
@@ -310,31 +315,6 @@ pub fn AgentSession::active_tool_names(
 pub fn AgentSession::abort(self : AgentSession) -> Unit {
   guard self.active_run_abort_controller is Some(controller) else { return }
   controller.abort()
-}
-
-///|
-/// Max consecutive auto-retries after a retryable error, not counting the
-/// initial attempt. pi reports the same number as `maxAttempts`.
-const MAX_AUTO_RETRIES : Int = 2
-
-///|
-/// Base exponential-backoff delay in milliseconds for auto-retry sleeps.
-const AUTO_RETRY_BASE_DELAY_MS : Int = 500
-
-///|
-/// Ceiling on a single backoff sleep, matching pi's
-/// `DEFAULT_MAX_AGENT_RETRY_DELAY_MS`.
-const AUTO_RETRY_MAX_DELAY_MS : Int = 60_000
-
-///|
-/// pi's `retryDelayMs`: exponential backoff from the base delay, capped per attempt.
-fn auto_retry_delay_ms(attempt : Int) -> Int {
-  let delay = AUTO_RETRY_BASE_DELAY_MS << (attempt - 1)
-  if delay > AUTO_RETRY_MAX_DELAY_MS {
-    AUTO_RETRY_MAX_DELAY_MS
-  } else {
-    delay
-  }
 }
 
 ///|
