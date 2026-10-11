@@ -1138,10 +1138,6 @@ fn journal_roles(journal : &@agent_session.SessionJournal) -> Array[String] {
 /// `set_finish_turn_hook` replaces the hook after construction, and a wrapper
 /// can read the current one first — the shape pi relies on when a higher layer
 /// layers its own policy over the app's.
-///
-/// This file is a blackbox test, so both halves exercise the surface an SDK
-/// consumer has: the field is read from outside the package, and the write goes
-/// through the setter, because a `pub struct` field is not assignable there.
 async test "a session can replace and wrap its finish turn hook" {
   let log : Array[String] = []
   let registry = probe_tools(log)

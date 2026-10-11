@@ -83,8 +83,6 @@ pub struct AgentSession {
   retry_settings : RetrySettings
   /// Called after a completed assistant turn and all of its tool results, but
   /// before `turn_end`. Read at every run, so a caller may replace or wrap it.
-  /// Readable from other packages; replacing goes through
-  /// `set_finish_turn_hook`.
   mut finish_turn_hook : @agent_loop.FinishTurnHook
   /// 当前运行的中断控制器(每次 prompt 新建,结束后清空)。只有它能置位。
   mut active_run_abort_controller : @agent_loop.AbortController?
@@ -300,12 +298,9 @@ pub fn AgentSession::subscribe(
 }
 
 ///|
-/// Replace the finish-turn hook, mirroring pi's `agent.finishTurn = ...`.
-///
-/// A `pub struct` field is readable from other packages but assignable only
-/// within this one, so a wrapper reads the current hook from the field and
-/// installs the replacement here. That read-then-replace pair is the shape pi
-/// relies on to layer a further policy over the app's.
+/// Replace the finish-turn hook, mirroring pi's `agent.finishTurn = ...`. A
+/// wrapper can read the current hook first and delegate to it, which is how pi
+/// layers a further policy on top of the app's.
 pub fn AgentSession::set_finish_turn_hook(
   self : AgentSession,
   hook : @agent_loop.FinishTurnHook,
