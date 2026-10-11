@@ -557,7 +557,7 @@ async fn fake_tool_execute(
   _on_update : @agent_loop.ToolExecUpdateCallback,
 ) -> @agent_loop.ToolResult {
   @async.sleep(0)
-  { content: [], is_error: false, terminate: false, details: {}, usage: None, }
+  { content: [], is_error: false, details: {}, usage: None, }
 }
 
 ///|
@@ -700,7 +700,7 @@ async fn blocking_execute(
   _on_update : @agent_loop.ToolExecUpdateCallback,
 ) -> @agent_loop.ToolResult {
   @async.sleep(3000)
-  { content: [], details: {}, is_error: false, terminate: false, usage: None, }
+  { content: [], details: {}, is_error: false, usage: None, }
 }
 
 ///|
@@ -809,7 +809,6 @@ async fn probe_execute(
     content: [@agent_loop.InputMessageContent::Text("probe-ok")],
     details: {},
     is_error: false,
-    terminate: false,
     usage: None,
   }
 }

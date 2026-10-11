@@ -258,7 +258,6 @@ async fn execute_bash_tool(
     content: [@agent_loop.InputMessageContent::Text(outputText)],
     details,
     is_error: false,
-    terminate: false,
     usage: None,
   }
 }

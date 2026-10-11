@@ -260,7 +260,6 @@ async test "tool details and usage survive journal resume" {
         details,
         usage: Some(usage),
         is_error: false,
-        terminate: true,
       },
     }),
   })
