@@ -46,10 +46,7 @@ pub fn RetrySettings::default() -> RetrySettings {
 
 ///|
 /// pi's `retryDelayMs`: exponential backoff `baseDelayMs * 2^(attempt-1)` from
-/// a 1-indexed attempt, capped per attempt by `maxAgentDelayMs`. Doubling
-/// saturates at the cap instead of shifting, so a large attempt count cannot
-/// overflow into a negative delay that would then slip past the cap. pi has
-/// the same guard via `Number.isSafeInteger`.
+/// a 1-indexed attempt, capped per attempt by `maxAgentDelayMs`.
 pub fn RetrySettings::delay_ms(self : RetrySettings, attempt : Int) -> Int {
   let max = self.max_agent_delay_ms
   let mut delay = if self.base_delay_ms > max {
@@ -57,8 +54,6 @@ pub fn RetrySettings::delay_ms(self : RetrySettings, attempt : Int) -> Int {
   } else {
     self.base_delay_ms
   }
-  // An Int saturates after 63 doublings, so clamping the exponent keeps this
-  // loop bounded even when `attempt` is far larger than the cap can notice.
   let mut doublings = if attempt > 64 {
     63
   } else if attempt > 1 {

@@ -912,8 +912,10 @@ async test "retry delay honours the cap and saturates on a huge attempt" {
     max_agent_delay_ms: 5000,
   }
   assert_eq(base_over_cap.delay_ms(1), 5000)
-  // Doubling saturates instead of shifting, so a huge attempt count cannot wrap
-  // negative and slip past the cap.
+  // Doubling saturates at the cap instead of shifting left: `1 << attempt`
+  // would wrap negative for a large attempt count and then slip past the
+  // `> max` clamp. pi guards `baseDelayMs * 2^(attempt-1)` the same way with
+  // `Number.isSafeInteger`.
   assert_eq(capped.delay_ms(1_000_000), 5000)
   assert_eq(base_over_cap.delay_ms(64), 5000)
 }
