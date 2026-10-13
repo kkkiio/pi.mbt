@@ -931,28 +931,140 @@ async test "retry delay honours the cap and saturates on a huge attempt" {
 }
 
 ///|
-/// 订阅方抛错不是模型失败:错误原样冒到 `prompt` 的调用方,而不是被折成一条
-/// 伪造的 Error 回合。pi 的 `handleRunFailure` 会把 listener 错误伪装成 error
-/// 回合(prompt 正常返回),这里刻意不对齐 —— 订阅者的 bug 不该改写 transcript。
-async test "a throwing listener propagates instead of faking an error turn" {
-  let llm = @faux.FauxLLM::FauxLLM()
-  llm.set_responses([@faux.faux_message([@faux.faux_text("done")])])
-  let journal = @agent_session.InMemorySessionJournal()
-  let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
-  session.subscribe(event => {
-    guard event is Loop(MessageUpdate(_)) else { return }
-    @async.sleep(0)
-    fail("listener exploded")
-  })
-  let message = try {
-    session.prompt([user_message("go")])
-    ""
-  } catch {
-    err => err.to_string()
+/// Observe the actual next model request, not the session's private buffer.
+struct ContextCapturingLLM {
+  inner : @faux.FauxLLM
+  contexts : Array[Array[@agent_loop.AgentMessage]]
+}
+
+///|
+impl @agent_loop.LLM for ContextCapturingLLM with fn generate(
+  self : ContextCapturingLLM,
+  ctx : @agent_loop.Context,
+  sink~ : async (@agent_loop.GenerationEvent) -> Unit,
+  abort~ : @agent_loop.AbortSignal,
+) -> @agent_loop.AssistantMessage {
+  self.contexts.push(ctx.messages.to_owned())
+  self.inner.generate(ctx, sink~, abort~)
+}
+
+///|
+/// pi's handleRunFailure closes a listener failure with an error/aborted turn.
+/// The next prompt keeps the journaled user, but not the interrupted partial.
+async test "listener failures close the run and preserve the next model context" {
+  for phase in ["start", "update", "turn_end", "aborted_update"] {
+    let inner = @faux.FauxLLM::FauxLLM(chunk_size=3)
+    inner.set_responses([
+      @faux.faux_message([@faux.faux_text("discarded response")]),
+      @faux.faux_message([@faux.faux_text("next answer")]),
+    ])
+    let llm = ContextCapturingLLM::{ inner, contexts: [], }
+    let journal = @agent_session.InMemorySessionJournal()
+    let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
+    let mut failed = false
+    let recovery_events : Array[String] = []
+    session.subscribe(event => {
+      let should_fail = match event {
+        Loop(MessageStart(Assistant(_))) => phase == "start"
+        Loop(MessageUpdate(TextDelta(..))) =>
+          phase == "update" || phase == "aborted_update"
+        Loop(TurnEnd(_, _)) => phase == "turn_end"
+        _ => false
+      }
+      if !failed && should_fail {
+        failed = true
+        if phase == "aborted_update" {
+          session.abort()
+        }
+        @async.sleep(0)
+        fail("listener exploded")
+      }
+      if failed {
+        match event {
+          Loop(MessageStart(Assistant(_))) => recovery_events.push("start")
+          Loop(MessageEnd(Assistant(_))) => recovery_events.push("end")
+          Loop(TurnEnd(_, _)) => recovery_events.push("turn_end")
+          Loop(AgentEnd(_)) => recovery_events.push("agent_end")
+          _ => ()
+        }
+      }
+    })
+    session.prompt([user_message("first request")])
+    assert_eq(recovery_events, ["start", "end", "turn_end", "agent_end"])
+    let entries = journal.get_entries()
+    let expected_count = if phase == "turn_end" { 3 } else { 2 }
+    assert_eq(entries.length(), expected_count)
+    guard entries[expected_count - 1].content is Message(Assistant(failure)) else {
+      fail("expected terminal assistant failure")
+    }
+    assert_true(
+      failure.error_message.unwrap_or("").contains("listener exploded"),
+    )
+    assert_eq(failure.api, "faux")
+    assert_eq(failure.provider, "faux")
+    assert_eq(failure.model, "faux-1")
+    assert_eq(context_lines([Assistant(failure)]), "assistant: ")
+    if phase == "aborted_update" {
+      assert_true(failure.stop_reason is Aborted)
+    } else {
+      assert_true(failure.stop_reason is Error)
+    }
+    session.prompt([user_message("second request")])
+    assert_eq(
+      context_lines(llm.contexts[1]),
+      if phase == "turn_end" {
+        "user: first request\nassistant: discarded response\nassistant: \nuser: second request"
+      } else {
+        "user: first request\nassistant: \nuser: second request"
+      },
+    )
   }
-  assert_true(message.contains("listener exploded"))
-  // 只留下 user 消息:没有伪造的 Error assistant 回合。
-  assert_eq(journal.get_entries().length(), 1)
+}
+
+///|
+/// Like pi, an exception while delivering the synthetic failure still escapes.
+/// Cleanup must leave the same session reusable with exactly its saved history.
+async test "a listener that also rejects recovery leaves the session reusable" {
+  for reject_end in [false, true] {
+    let inner = @faux.FauxLLM::FauxLLM()
+    inner.set_responses([
+      @faux.faux_message([@faux.faux_text("unfinished")]),
+      @faux.faux_message([@faux.faux_text("next answer")]),
+    ])
+    let llm = ContextCapturingLLM::{ inner, contexts: [], }
+    let journal = @agent_session.InMemorySessionJournal()
+    let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
+    let mut reject = true
+    session.subscribe(event => {
+      guard reject else { return }
+      match event {
+        Loop(MessageUpdate(TextDelta(..))) => fail("initial listener failure")
+        Loop(MessageStart(Assistant(m))) if m.stop_reason is Error &&
+          !reject_end => fail("recovery listener failure")
+        Loop(MessageEnd(Assistant(m))) if m.stop_reason is Error && reject_end =>
+          fail("recovery listener failure")
+        _ => ()
+      }
+    })
+    let error = try {
+      session.prompt([user_message("first request")])
+      ""
+    } catch {
+      err => err.to_string()
+    }
+    assert_true(error.contains("recovery listener failure"))
+    assert_eq(journal.get_entries().length(), if reject_end { 2 } else { 1 })
+    reject = false
+    session.prompt([user_message("second request")])
+    assert_eq(
+      context_lines(llm.contexts[1]),
+      if reject_end {
+        "user: first request\nassistant: \nuser: second request"
+      } else {
+        "user: first request\nuser: second request"
+      },
+    )
+  }
 }
 
 ///|

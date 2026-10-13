@@ -6,7 +6,8 @@
 /// with an in-flight `AssistantMessage` snapshot whose `stop_reason` is
 /// `Pending` and `usage` is `None`; metadata is only trustworthy from
 /// `MessageEnd` onwards.
-pub enum AgentEvent {
+/// The owning session also emits terminal events when the loop raises.
+pub(all) enum AgentEvent {
   AgentStart
   TurnStart
   MessageStart(AgentMessage)

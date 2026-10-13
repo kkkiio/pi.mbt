@@ -1,7 +1,7 @@
 ///|
 /// Marks an error raised by an event listener (the `event_sink` chain) so the
-/// terminal `catch` below re-raises it instead of dressing a listener failure
-/// up as a failed model turn. Never escapes `run_agent_loop`.
+/// generation catch passes it to the owning run's lifecycle handler rather
+/// than treating it as a provider response. Never escapes `run_agent_loop`.
 priv suberror ListenerError {
   ListenerError(Error)
 }
@@ -11,7 +11,7 @@ priv suberror ListenerError {
 ///
 /// Provider failures become a terminal `AssistantMessage` with `stop_reason` `Error`
 /// or `Aborted`. Errors raised by `event_sink` (an event listener) are re-raised to
-/// the caller instead: a listener bug must not enter the transcript as a model turn.
+/// the caller, where `AgentSession` closes the run like pi's `handleRunFailure`.
 pub async fn run_agent_loop(
   llm : &LLM,
   system_prompt : String,
@@ -74,7 +74,7 @@ pub async fn run_agent_loop(
       },
       abort~,
     ) catch {
-      // 订阅方的错误不是模型失败:原样重抛(见 `*_test.mbt` 的 listener 契约)。
+      // Listener failures belong to the run lifecycle, not provider generation.
       ListenerError(err) => raise err
       err => {
         let error_message = {

@@ -120,6 +120,10 @@ pub fn AgentSession::AgentSession(
 /// mirroring pi's session-level auto-retry: the failed turn's terminal Error
 /// message is dropped and the assistant generation continues — the user
 /// prompt and any prior tool work stay in place and are journaled once.
+///
+/// Like pi's `Agent.runWithLifecycle`, a runtime/listener failure closes the
+/// run with an assistant Error/Aborted message and terminal events. If a
+/// listener also rejects those events, that error escapes; cleanup still runs.
 pub async fn AgentSession::prompt(
   self : AgentSession,
   input : Array[@agent_loop.UserMessage],
@@ -155,6 +159,7 @@ pub async fn AgentSession::prompt(
   let abort_controller = @agent_loop.AbortController::new()
   self.active_run_abort_controller = Some(abort_controller)
   defer {
+    self.message_buffer = project_messages(self.journal.get_entries())
     self.active_run_abort_controller = None
   }
   let mut retry_attempt = 0
@@ -174,7 +179,13 @@ pub async fn AgentSession::prompt(
   }
   let mut pending_prompts = input
   for ;; {
+    let mut assistant_metadata : @agent_loop.AssistantMessage? = None
     let sink : async (@agent_loop.AgentEvent) -> Unit = event => {
+      match event {
+        MessageStart(Assistant(message)) | MessageEnd(Assistant(message)) =>
+          assistant_metadata = Some(message)
+        _ => ()
+      }
       // Persist complete messages at their terminal events. User and
       // assistant messages are complete at MessageEnd (assistant streaming
       // events in between carry in-flight snapshots whose stop_reason is
@@ -199,6 +210,9 @@ pub async fn AgentSession::prompt(
         if content is Message(Assistant(_)) {
           last_assistant_entry_id = Some(stored[0].id)
         }
+        if content is Message(message) {
+          self.message_buffer.push(message)
+        }
       }
       self.fanout.on_event(AgentSessionEvent::Loop(event))
       // 成功的 assistant 响应结束当前重试窗口并归零,所以同一次 prompt 里后续的
@@ -215,29 +229,53 @@ pub async fn AgentSession::prompt(
     }
     // 有 prompt 就是新回合;没有 prompt 就是从现有 transcript 续跑(重试走这条)。
     // 后者校验尾部,所以重试能进行本身就说明失败回合已被 `context_edit` 剔除。
-    if pending_prompts.length() > 0 {
-      @agent_loop.run_agent_loop(
-        self.llm,
-        self.system_prompt,
-        self.message_buffer.copy(),
-        agent_tools,
-        pending_prompts,
-        tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
-        abort=abort_controller.signal(),
-        event_sink=sink,
-        finish_turn_hook=self.finish_turn_hook,
-      )
-    } else {
-      @agent_loop.run_agent_loop_continue(
-        self.llm,
-        self.system_prompt,
-        self.message_buffer.copy(),
-        agent_tools,
-        tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
-        abort=abort_controller.signal(),
-        event_sink=sink,
-        finish_turn_hook=self.finish_turn_hook,
-      )
+    try {
+      if pending_prompts.length() > 0 {
+        @agent_loop.run_agent_loop(
+          self.llm,
+          self.system_prompt,
+          self.message_buffer.copy(),
+          agent_tools,
+          pending_prompts,
+          tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+          abort=abort_controller.signal(),
+          event_sink=sink,
+          finish_turn_hook=self.finish_turn_hook,
+        )
+      } else {
+        @agent_loop.run_agent_loop_continue(
+          self.llm,
+          self.system_prompt,
+          self.message_buffer.copy(),
+          agent_tools,
+          tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+          abort=abort_controller.signal(),
+          event_sink=sink,
+          finish_turn_hook=self.finish_turn_hook,
+        )
+      }
+    } catch {
+      err => {
+        let failure : @agent_loop.AssistantMessage = {
+          content: [@agent_loop.AssistantMessageContent::Text("", signature={})],
+          api: assistant_metadata.map(m => m.api).unwrap_or(""),
+          provider: assistant_metadata.map(m => m.provider).unwrap_or(""),
+          model: assistant_metadata.map(m => m.model).unwrap_or(""),
+          stop_reason: if abort_controller.signal().is_aborted() {
+            Aborted
+          } else {
+            Error
+          },
+          error_message: Some(err.to_string()),
+          usage: None,
+          timestamp: @env.now(),
+        }
+        // pi's handleRunFailure uses the same event path, including listeners.
+        sink(MessageStart(Assistant(failure)))
+        sink(MessageEnd(Assistant(failure)))
+        sink(TurnEnd(failure, []))
+        sink(AgentEnd([Assistant(failure)]))
+      }
     }
     self.message_buffer = project_messages(self.journal.get_entries())
     if self.message_buffer.last()

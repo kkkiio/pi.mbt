@@ -423,8 +423,8 @@ pub async fn SessionHost::prompt(
       timestamp: @env.now(),
     },
   ]
-  // 订阅回调的错误会原样冒到这里(不再是伪造的 Error 回合):报一条错误再回到 idle,
-  // 否则命令 worker 带着异常退出,界面会卡在 working 状态。
+  // The session emits an error turn for runtime failures. Errors while
+  // delivering that turn can still escape to this UI boundary.
   self.session.prompt(input) catch {
     err => app.push_error("prompt failed: \{err}")
   }
