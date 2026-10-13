@@ -147,5 +147,27 @@ Error: tests/cram/testdata/auth-empty-key/auth.json: "deepseek" is not an api_ke
 [1]
 ```
 
-`--mode json` 的事件流契约(`tool_execution_start` /
-`tool_execution_end` 等)由 `tests/live/deepseek.md` 用真实 provider 覆盖。
+## 离线 JSONL 事件流
+
+通过 Node preload 替换 HTTP fetch,实际执行 `pim --no-session --mode json`:
+第一轮产生 bash 工具调用并执行 `echo pim-offline`,第二轮返回两段文本增量。
+fixture 禁止联网,并检查第二轮请求确实携带工具结果;配置目录和凭证都隔离。
+
+检查器验证子进程成功退出、stdout 每行都能解析为 JSON、最终回复和生命周期,
+然后保留完整的 `message_update` / `tool_execution_*` 行作为快照。
+换行与引号故意放在文本 delta 中,覆盖 JSONL 转义;不把时间戳纳入快照。
+真实 provider 的补充覆盖仍在 `tests/live/deepseek.md`。
+
+```mooncram
+$ node tests/cram/testdata/json-cli.mjs
+{"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"toolcall_start","contentIndex":0,"id":"call_offline","toolName":"bash"}}
+{"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"{\"command\":"}}
+{"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"\"echo pim-offline\"}"}}
+{"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"toolCall":{"type":"toolCall","id":"call_offline","name":"bash","arguments":{"command":"echo pim-offline"}}}}
+{"type":"tool_execution_start","toolName":"bash","args":{"command":"echo pim-offline"}}
+{"type":"tool_execution_end","toolName":"bash","content":[{"type":"text","text":"pim-offline\n"}],"isError":false}
+{"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_start","contentIndex":0}}
+{"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"pim-offline"}}
+{"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n\"complete\""}}
+{"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"pim-offline\n\"complete\""}}
+```
