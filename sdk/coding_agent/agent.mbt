@@ -5,8 +5,8 @@
 pub fn new_coding_session(
   llm : &@agent_loop.LLM,
   cwd~ : String,
-  journal? : &@agent_session.SessionJournal = @agent_session.InMemorySessionJournal(),
-  active_tools? : ArrayView[String] = [
+  journal~ : &@agent_session.SessionJournal = @agent_session.InMemorySessionJournal(),
+  active_tools~ : ArrayView[String] = [
     BASH_TOOL_NAME,
     @agent_session.WEB_SEARCH_TOOL_NAME,
   ],

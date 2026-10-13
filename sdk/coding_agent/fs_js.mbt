@@ -67,7 +67,7 @@ extern "js" fn FsResult::as_bool(self : FsResult) -> Bool =
   #| (res) => res.content
 
 ///|
-extern "js" fn FsResult::as_int(self : FsResult) -> Int =
+extern "js" fn FsResult::as_int(self : FsResult) -> Int32 =
   #| (res) => res.content
 
 ///|
@@ -116,15 +116,15 @@ extern "js" fn rm_sync(path : String, options : FsOptions) -> Unit = "rmSync"
 
 ///|
 #module("node:fs")
-extern "js" fn open_sync(path : String, flags : String, mode : Int) -> Int = "openSync"
+extern "js" fn open_sync(path : String, flags : String, mode : Int32) -> Int32 = "openSync"
 
 ///|
 #module("node:fs")
-extern "js" fn write_sync(fd : Int, data : Bytes) -> Int = "writeSync"
+extern "js" fn write_sync(fd : Int32, data : Bytes) -> Int32 = "writeSync"
 
 ///|
 #module("node:fs")
-extern "js" fn close_sync(fd : Int) -> Unit = "closeSync"
+extern "js" fn close_sync(fd : Int32) -> Unit = "closeSync"
 
 ///|
 #module("node:fs")
@@ -247,10 +247,10 @@ extern "js" fn remove_dir_ffi(
 
 ///|
 extern "js" fn open_file_ffi(
-  open : (String, String, Int) -> Int,
+  open : (String, String, Int32) -> Int32,
   path : String,
   flags : String,
-  mode : Int,
+  mode : Int32,
 ) -> FsResult =
   #| function(open, path, flags, mode) {
   #|   try {
@@ -265,8 +265,8 @@ extern "js" fn open_file_ffi(
 /// chunk is on disk. A zero-byte write would spin forever, so treat it as an
 /// error instead.
 extern "js" fn write_all_ffi(
-  write : (Int, Bytes) -> Int,
-  fd : Int,
+  write : (Int32, Bytes) -> Int32,
+  fd : Int32,
   data : Bytes,
 ) -> FsResult =
   #| function(write, fd, data) {
@@ -369,7 +369,7 @@ extern "js" fn rename_file_ffi(
 pub fn write_file_atomically(
   path : String,
   data : Bytes,
-  permission? : Int = 0o600,
+  permission~ : Int32 = 0o600,
 ) -> Unit raise FsError {
   let temp_path = "\{path}.tmp"
   let staged = create_file(temp_path, allow_existing=true, permission~) catch {
@@ -435,7 +435,7 @@ pub fn create_temp_dir(prefix : String) -> String raise FsError {
 ///|
 /// A file opened for sequential writes: the bash tool's output spill file.
 pub struct FsFile {
-  fd : Int
+  fd : Int32
 }
 
 ///|
@@ -443,8 +443,8 @@ pub struct FsFile {
 /// the file already exists, mirroring `@async/fs.create`.
 pub fn create_file(
   path : String,
-  allow_existing? : Bool = false,
-  permission? : Int = 0o600,
+  allow_existing~ : Bool = false,
+  permission~ : Int32 = 0o600,
 ) -> FsFile raise FsError {
   let flags = if allow_existing { "w" } else { "wx" }
   let res = open_file_ffi(open_sync, path, flags, permission)
@@ -466,9 +466,9 @@ pub fn FsFile::write_bytes(self : FsFile, data : Bytes) -> Unit raise FsError {
 pub impl @io.Writer for FsFile with fn write_once(
   self : FsFile,
   bytes : Bytes,
-  offset~ : Int,
-  len~ : Int,
-) -> Int {
+  offset~ : Int32,
+  len~ : Int32,
+) -> Int32 {
   self.write_bytes(bytes[offset:offset + len].to_owned())
   len
 }
@@ -490,7 +490,7 @@ pub fn FsFile::close(self : FsFile) -> Unit {
 /// resumed session keeps writing after its recorded entries.
 pub fn open_append_file(
   path : String,
-  permission? : Int = 0o600,
+  permission~ : Int32 = 0o600,
 ) -> FsFile raise FsError {
   let res = open_file_ffi(open_sync, path, "a", permission)
   guard res.is_ok() else { raise FsError(res.as_message()) }
@@ -506,7 +506,7 @@ pub fn open_append_file(
 pub struct LazyFile {
   path : String
   append : Bool
-  permission : Int
+  permission : Int32
   mut file : FsFile?
 }
 
@@ -515,8 +515,8 @@ pub struct LazyFile {
 /// 追加到已有文件(续写已恢复的会话)。
 pub fn open_lazy_file(
   path : String,
-  append? : Bool = false,
-  permission? : Int = 0o600,
+  append~ : Bool = false,
+  permission~ : Int32 = 0o600,
 ) -> LazyFile {
   { path, append, permission, file: None, }
 }
@@ -553,9 +553,9 @@ pub fn LazyFile::close(self : LazyFile) -> Unit {
 pub impl @io.Writer for LazyFile with fn write_once(
   self : LazyFile,
   bytes : Bytes,
-  offset~ : Int,
-  len~ : Int,
-) -> Int {
+  offset~ : Int32,
+  len~ : Int32,
+) -> Int32 {
   let file = self.ensure_open()
   file.write_bytes(bytes[offset:offset + len].to_owned())
   len

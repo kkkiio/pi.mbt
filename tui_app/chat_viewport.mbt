@@ -22,8 +22,8 @@ pub fn chat_viewport_new(
   pending~ : Component,
   editor~ : Component,
   footer~ : Component,
-  scrollbar? : String = "auto",
-  theme? : Theme? = None,
+  scrollbar~ : String = "auto",
+  theme~ : Theme? = None,
 ) -> ChatViewport {
   let transcript = match theme {
     Some(theme) =>

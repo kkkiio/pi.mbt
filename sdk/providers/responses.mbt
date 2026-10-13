@@ -36,9 +36,9 @@ fn encode_responses_input(context : @agent_loop.Context) -> Array[Json] raise {
                 ],
               }
               if signature is { "phase": String(phase), .. } {
-                item["phase"] = phase.to_json()
+                item["phase"] = Json(phase)
               }
-              input.push(item.to_json())
+              input.push(Json(item))
             }
             Thinking(_, signature~) => input.push(signature)
             HostedToolCall(_, signature~) => input.push(signature)
@@ -118,17 +118,17 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
   api~ : String,
   provider~ : String,
   model~ : String,
-  custom_tool_input_properties? : Map[String, String] = Map([]),
-  now? : () -> UInt64 = @env.now,
+  custom_tool_input_properties~ : Map[String, String] = Map([]),
+  now~ : () -> UInt64 = @env.now,
   /// 中断信号:置位后停止读流,返回已收到内容的 `Aborted` 消息(对应 pi 的
   /// `signal` 交给 fetch、由 provider 产出 `stopReason: "aborted"` 的消息)。
-  abort? : @agent_loop.AbortSignal = @agent_loop.AbortSignal::never(),
+  abort~ : @agent_loop.AbortSignal = @agent_loop.AbortSignal::never(),
 ) -> @agent_loop.AssistantMessage {
-  let idle_timeout_ms : Int = 120_000
+  let idle_timeout_ms : Int32 = 120_000
   let started_at = now()
   let data_lines : Array[StringView] = []
   let acc : Array[@agent_loop.AssistantMessageContent] = []
-  let slots : Map[Int, ResponsesOutputSlot] = Map([])
+  let slots : Map[Int32, ResponsesOutputSlot] = Map([])
   let final_message : @agent_loop.AssistantMessage = for ;; {
     if abort.is_aborted() {
       break aborted_message(acc, api~, provider~, model~, now=started_at)
@@ -238,7 +238,7 @@ async fn wait_abort_task(abort : @agent_loop.AbortSignal) -> Race {
 
 ///|
 /// 竞速分支:空闲超时。既不读到数据也不中断时,把流当作停滞报错。
-async fn idle_timeout_task(timeout_ms : Int) -> Race {
+async fn idle_timeout_task(timeout_ms : Int32) -> Race {
   @async.sleep(timeout_ms)
   Race::IdleTimeout
 }
@@ -266,11 +266,11 @@ fn aborted_message(
 
 ///|
 priv enum ResponsesOutputSlot {
-  Thinking(Int)
-  Text(Int)
-  FunctionCall(Int, String)
-  CustomToolCall(Int, String, String)
-  HostedToolCall(Int)
+  Thinking(Int32)
+  Text(Int32)
+  FunctionCall(Int32, String)
+  CustomToolCall(Int32, String, String)
+  HostedToolCall(Int32)
 }
 
 ///|
@@ -278,7 +278,7 @@ async fn flush_sse_event(
   data_lines : Array[StringView],
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
   acc : Array[@agent_loop.AssistantMessageContent],
-  slots : Map[Int, ResponsesOutputSlot],
+  slots : Map[Int32, ResponsesOutputSlot],
   custom_tool_input_properties : Map[String, String],
   api~ : String,
   provider~ : String,
@@ -347,8 +347,8 @@ fn parse_sse_event(
   event : StringView,
   data : StringView,
   acc : Array[@agent_loop.AssistantMessageContent],
-  slots : Map[Int, ResponsesOutputSlot],
-  custom_tool_input_properties? : Map[String, String] = Map([]),
+  slots : Map[Int32, ResponsesOutputSlot],
+  custom_tool_input_properties~ : Map[String, String] = Map([]),
   api~ : String,
   provider~ : String,
   model~ : String,

@@ -3,8 +3,8 @@ pub const BASH_TOOL_NAME = "bash"
 
 ///|
 pub fn new_bash_tool_definition(
-  cwd? : String = @env.current_dir().unwrap(),
-  exec? : async (BashExecParams) -> Int = local_bash_exec,
+  cwd~ : String = @env.current_dir().unwrap(),
+  exec~ : async (BashExecParams) -> Int32 = local_bash_exec,
 ) -> @tools.ToolDefinition {
   {
     name: BASH_TOOL_NAME,
@@ -43,7 +43,7 @@ pub fn new_bash_tool_definition(
 pub(all) struct BashExecParams {
   command : String
   cwd : String
-  timeout : Int?
+  timeout : Int32?
   /// Called from the JS `data` handler for stdout and stderr, so it has no
   /// coroutine context: it must stay synchronous. The throttled UI update is
   /// scheduled with a JS timer for the same reason.
@@ -55,7 +55,7 @@ pub(all) struct BashExecParams {
 ///|
 struct BashToolInput {
   command : String
-  timeout : Int?
+  timeout : Int32?
 } derive(FromJson)
 
 ///|
@@ -66,7 +66,7 @@ async fn execute_bash_tool(
   cwd : String,
   input : Json,
   on_update? : @agent_loop.ToolExecUpdateCallback,
-  exec~ : async (BashExecParams) -> Int,
+  exec~ : async (BashExecParams) -> Int32,
 ) -> @agent_loop.ToolResult {
   let params : BashToolInput = @json.from_json(input)
   let command = params.command
@@ -109,7 +109,7 @@ async fn execute_bash_tool(
         null
       },
       "fullOutputPath": match snapshot.full_output_path {
-        Some(value) => value.to_json()
+        Some(value) => Json(value)
         None => null
       },
     })
@@ -278,7 +278,7 @@ pub impl ToJson for BashToolDetails with fn to_json(self : BashToolDetails) -> J
       None => null
     },
     "fullOutputPath": match self.full_output_path {
-      Some(value) => value.to_json()
+      Some(value) => Json(value)
       None => null
     },
   }
@@ -288,10 +288,10 @@ pub impl ToJson for BashToolDetails with fn to_json(self : BashToolDetails) -> J
 pub extend BashToolDetails with ToJson::{to_json}
 
 ///|
-const DEFAULT_MAX_LINES : Int = 2000
+const DEFAULT_MAX_LINES : Int32 = 2000
 
 ///|
-const DEFAULT_MAX_BYTES : Int = 50 * 1024
+const DEFAULT_MAX_BYTES : Int32 = 50 * 1024
 
 ///|
 const BASH_UPDATE_THROTTLE_MS = 100

@@ -43,7 +43,7 @@ fn open_journal(
     None => (@agent_session.InMemorySessionJournal(), () => (), None)
     Some(dir) => {
       @coding_agent.create_dir(dir)
-      let rand = @random.Rand::new()
+      let rand = @random.Rand()
       let path = "\{dir}/\{@env.now()}_\{rand.uint64()}.jsonl"
       // 文件不在启动时创建:第一次真正要写入时才建(见 `JsonlSessionJournal`)。
       let file = @coding_agent.open_lazy_file(path)

@@ -33,7 +33,7 @@
 /// Failure mode of one bash execution, named so the caller's `catch` can
 /// switch on the error instead of parsing a message.
 pub(all) suberror BashExecError {
-  TimedOut(Int)
+  TimedOut(Int32)
   Aborted
 }
 
@@ -73,7 +73,7 @@ priv type JsTimer
 
 ///|
 /// The exit code, or `-1` when the process died from a signal.
-extern "js" fn JsBashEnd::code(self : JsBashEnd) -> Int =
+extern "js" fn JsBashEnd::code(self : JsBashEnd) -> Int32 =
   #| (end) => end.code ?? -1
 
 ///|
@@ -117,7 +117,7 @@ extern "js" fn spawn_bash_ffi(
   cwd : String,
   env_json : String,
   inherit_env : Bool,
-  timeout_ms : Int,
+  timeout_ms : Int32,
 ) -> JsBashProc =
   #| function(spawn, onData, command, cwd, envJson, inheritEnv, timeoutMs) {
   #|   const extra = JSON.parse(envJson);
@@ -201,7 +201,7 @@ extern "js" fn spawn_bash_ffi(
 ///|
 /// Schedule `callback` after `ms` milliseconds. The callback runs outside the
 /// MoonBit coroutine, so it must be synchronous.
-extern "js" fn set_timeout(callback : () -> Unit, ms : Int) -> JsTimer =
+extern "js" fn set_timeout(callback : () -> Unit, ms : Int32) -> JsTimer =
   #| (callback, ms) => setTimeout(callback, ms)
 
 ///|
@@ -212,7 +212,7 @@ extern "js" fn clear_timeout(timer : JsTimer) -> Unit =
 fn encode_override_envs(envs : Map[String, String]) -> String {
   let fields : Map[String, Json] = Map([])
   for key, value in envs {
-    fields[key] = value.to_json()
+    fields[key] = Json(value)
   }
   Json::object(fields).stringify()
 }
@@ -229,7 +229,7 @@ fn data_callback(callback : ((BytesView) -> Unit)?) -> (Bytes) -> Unit {
 }
 
 ///|
-async fn local_bash_exec(params : BashExecParams) -> Int {
+async fn local_bash_exec(params : BashExecParams) -> Int32 {
   let timeout_ms = params.timeout.map_or(0, seconds => seconds * 1000)
   let proc = spawn_bash_ffi(
     spawn_sync,

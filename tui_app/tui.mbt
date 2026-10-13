@@ -29,7 +29,7 @@ pub async fn terminal_new() -> Terminal {
 /// 排空 stdin,避免退出时残留的按键/转义序列漏给父 shell。
 pub async fn Terminal::drain_input(
   self : Terminal,
-  max_ms? : Int = 1000,
+  max_ms~ : Int32 = 1000,
 ) -> Unit {
   let promise : @js_async.Promise[Unit] = call(self.handle, "drainInput", [
     Value::cast_from(max_ms),
@@ -57,12 +57,12 @@ pub fn Unlisten::unlisten(self : Unlisten) -> Unit {
 ///|
 pub async fn tui_new(
   terminal : Terminal,
-  theme? : Theme? = None,
-  show_hardware_cursor? : Bool = true,
-  mouse? : Bool = true,
-  wheel_scroll_lines? : Int = 1,
-  copy_on_select? : Bool = true,
-  scroll_to_end_indicator? : (() -> String)? = None,
+  theme~ : Theme? = None,
+  show_hardware_cursor~ : Bool = true,
+  mouse~ : Bool = true,
+  wheel_scroll_lines~ : Int32 = 1,
+  copy_on_select~ : Bool = true,
+  scroll_to_end_indicator~ : (() -> String)? = None,
 ) -> Tui {
   load_module()
   let options = Object::new()
@@ -120,7 +120,7 @@ pub fn Tui::start(self : Tui) -> Unit {
 
 ///|
 /// 停止并恢复终端。`preserve_screen` 为假时把最终画面倒回主屏。
-pub fn Tui::stop(self : Tui, preserve_screen? : Bool = false) -> Unit {
+pub fn Tui::stop(self : Tui, preserve_screen~ : Bool = false) -> Unit {
   let options = Object::new()
   options["preserveScreen"] = preserve_screen
   let _ : Value = call(self.handle, "stop", [options.to_value()])
@@ -128,13 +128,13 @@ pub fn Tui::stop(self : Tui, preserve_screen? : Bool = false) -> Unit {
 
 ///|
 /// 排一次渲染(节流 16ms)。
-pub fn Tui::request_render(self : Tui, force? : Bool = false) -> Unit {
+pub fn Tui::request_render(self : Tui, force~ : Bool = false) -> Unit {
   let _ : Value = call(self.handle, "requestRender", [Value::cast_from(force)])
 }
 
 ///|
 /// 立即渲染一帧。
-pub fn Tui::render_now(self : Tui, force? : Bool = false) -> Unit {
+pub fn Tui::render_now(self : Tui, force~ : Bool = false) -> Unit {
   let _ : Value = call(self.handle, "renderNow", [Value::cast_from(force)])
 }
 
@@ -171,7 +171,7 @@ pub fn Terminal::set_progress(self : Terminal, active : Bool) -> Unit {
 pub fn Tui::flash(
   self : Tui,
   message : String,
-  duration_ms? : Int = 2000,
+  duration_ms~ : Int32 = 2000,
 ) -> Unit {
   let args : Array[Value] = [
     Value::cast_from(message),
@@ -194,7 +194,7 @@ pub fn Tui::add_input_listener(
 
 ///|
 /// 主滚动视窗的滚动位置。
-pub fn Tui::viewport_top(self : Tui) -> Int {
+pub fn Tui::viewport_top(self : Tui) -> Int32 {
   get(self.handle, "viewportTop")
 }
 

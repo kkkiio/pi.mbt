@@ -1,9 +1,9 @@
 ///|
 pub fn build_system_prompt(
   cwd~ : String,
-  guidelines? : ArrayView[String] = [],
-  project_context_files? : ArrayView[ProjectContextFile] = [],
-  skills? : ArrayView[Skill] = [],
+  guidelines~ : ArrayView[String] = [],
+  project_context_files~ : ArrayView[ProjectContextFile] = [],
+  skills~ : ArrayView[Skill] = [],
 ) -> String {
   let builder = StringBuilder()
   builder <+

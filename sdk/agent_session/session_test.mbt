@@ -57,7 +57,7 @@ fn ok_message() -> @agent_loop.AssistantMessage {
 /// A user message with the fixed timestamp the journal snapshots pin.
 fn user_message(
   text : String,
-  timestamp? : UInt64 = 1786903823973,
+  timestamp~ : UInt64 = 1786903823973,
 ) -> @agent_loop.UserMessage {
   { content: [@agent_loop.InputMessageContent::Text(text)], timestamp, }
 }
@@ -1240,7 +1240,7 @@ async test "finish turn hook on a session ends the run after the tool batch" {
     ),
     @faux.faux_message([@faux.faux_text("should not run")]),
   ])
-  let hook_calls : Array[Int] = []
+  let hook_calls : Array[Int32] = []
   let session = @agent_session.AgentSession(
     llm,
     system_prompt="",
@@ -1341,7 +1341,7 @@ async test "interrupt cancels retry backoff without starting another attempt" {
       retry_settings~,
     )
     let started = @async.Semaphore::Semaphore(1, initial_value=0)
-    let ends : Array[(Int, Bool, String?)] = []
+    let ends : Array[(Int32, Bool, String?)] = []
     session.subscribe(event => {
       match event {
         AutoRetryStart(attempt=number, ..) if number == attempt =>
@@ -1388,7 +1388,7 @@ async test "interrupt during a retried generation reports a cancelled retry" {
     retry_settings=fast_retry_settings(),
   )
   let mut starts = 0
-  let ends : Array[(Int, Bool, String?)] = []
+  let ends : Array[(Int32, Bool, String?)] = []
   session.subscribe(event => {
     match event {
       Loop(MessageStart(Assistant(_))) => {
@@ -1417,7 +1417,7 @@ async test "a completed retry reports success and releases its abort watcher" {
     system_prompt="",
     retry_settings=fast_retry_settings(),
   )
-  let ends : Array[(Int, Bool, String?)] = []
+  let ends : Array[(Int32, Bool, String?)] = []
   session.subscribe(event => {
     if event is AutoRetryEnd(attempt~, success~, final_error~) {
       ends.push((attempt, success, final_error))

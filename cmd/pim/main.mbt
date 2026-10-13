@@ -179,7 +179,7 @@ async fn main {
           @coding_agent.create_dir(dir) catch {
             err => fatal("Error: \{clean_error_message("\{err}")}")
           }
-          let rand = @random.Rand::new()
+          let rand = @random.Rand()
           let path = "\{dir}/\{@env.now()}_\{rand.uint64()}.jsonl"
           // Session journals contain prompts and tool output: owner-only (0600).
           let file = @coding_agent.open_lazy_file(path)

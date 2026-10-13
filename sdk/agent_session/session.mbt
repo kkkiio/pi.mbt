@@ -18,7 +18,7 @@ fn project_messages(
   entries : ArrayView[SessionEntry],
 ) -> Array[@agent_loop.AgentMessage] {
   let messages : Array[@agent_loop.AgentMessage] = []
-  let mut compaction_index : Int? = None
+  let mut compaction_index : Int32? = None
   for i, entry in entries {
     if entry.content is Compaction(_) {
       compaction_index = Some(i)
@@ -92,11 +92,11 @@ pub struct AgentSession {
 pub fn AgentSession::AgentSession(
   llm : &@agent_loop.LLM,
   system_prompt~ : String,
-  journal? : &SessionJournal = InMemorySessionJournal(),
-  tool_registry? : @tools.ToolRegistry = @tools.ToolRegistry(),
-  active_tools? : ArrayView[String] = [],
-  retry_settings? : RetrySettings = RetrySettings::default(),
-  finish_turn_hook? : @agent_loop.FinishTurnHook = (_, _, _) => None,
+  journal~ : &SessionJournal = InMemorySessionJournal(),
+  tool_registry~ : @tools.ToolRegistry = @tools.ToolRegistry(),
+  active_tools~ : ArrayView[String] = [],
+  retry_settings~ : RetrySettings = RetrySettings::default(),
+  finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _, _) => None,
 ) -> AgentSession {
   AgentSession::{
     tool_registry,
@@ -384,7 +384,7 @@ priv enum BackoffWait {
 ///|
 /// 退避睡眠与中断竞速:谁先到谁赢,输的一支被 `@async.any` 取消。
 async fn wait_backoff(
-  delay_ms : Int,
+  delay_ms : Int32,
   abort : @agent_loop.AbortSignal,
 ) -> BackoffWait {
   @async.any([

@@ -25,7 +25,7 @@ pub fn to_pi_json(event : AgentSessionEvent) -> Json raise {
         "success": success,
         "attempt": attempt,
         "finalError": match final_error {
-          Some(message) => message.to_json()
+          Some(message) => Json(message)
           None => null
         },
       }

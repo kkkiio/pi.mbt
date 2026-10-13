@@ -50,7 +50,7 @@ extern "js" fn FetchFixture::restore(self : FetchFixture) -> Unit =
   #| (fixture) => { globalThis.fetch = fixture.original; }
 
 ///|
-extern "js" fn FetchFixture::calls(self : FetchFixture) -> Int =
+extern "js" fn FetchFixture::calls(self : FetchFixture) -> Int32 =
   #| (fixture) => fixture.calls
 
 ///|

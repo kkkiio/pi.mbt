@@ -19,11 +19,11 @@ pub async fn run_agent_loop(
   tools : ArrayView[ToolDefinition],
   prompts : ArrayView[UserMessage],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
-  steer_channel? : () -> ArrayView[UserMessage] = fn() { [] },
-  abort? : AbortSignal = AbortSignal::never(),
+  steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
+  abort~ : AbortSignal = AbortSignal::never(),
   // TODO: support follow-up channel
-  event_sink? : async (AgentEvent) -> Unit = _ => (),
-  finish_turn_hook? : FinishTurnHook = (_, _, _) => None,
+  event_sink~ : async (AgentEvent) -> Unit = _ => (),
+  finish_turn_hook~ : FinishTurnHook = (_, _, _) => None,
 ) -> Unit {
   event_sink(AgentEvent::AgentStart)
   let mut pending_prompts = prompts
@@ -245,10 +245,10 @@ pub async fn run_agent_loop_continue(
   messages : Array[AgentMessage],
   tools : ArrayView[ToolDefinition],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
-  steer_channel? : () -> ArrayView[UserMessage] = fn() { [] },
-  abort? : AbortSignal = AbortSignal::never(),
-  event_sink? : async (AgentEvent) -> Unit = _ => (),
-  finish_turn_hook? : FinishTurnHook = (_, _, _) => None,
+  steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
+  abort~ : AbortSignal = AbortSignal::never(),
+  event_sink~ : async (AgentEvent) -> Unit = _ => (),
+  finish_turn_hook~ : FinishTurnHook = (_, _, _) => None,
 ) -> Unit {
   guard messages.length() > 0 else {
     fail("Cannot continue: no messages in context")

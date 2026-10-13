@@ -4,7 +4,7 @@ extern "js" fn plain(value : String) -> String =
 
 ///|
 /// Capture the public TuiApp terminal output, without exposing Footer's renderer.
-extern "js" fn capture_screen(width : Int, draw : () -> Unit) -> String =
+extern "js" fn capture_screen(width : Int32, draw : () -> Unit) -> String =
   #| (width, draw) => {
   #|   const stdout = process.stdout, write = stdout.write;
   #|   const columns = Object.getOwnPropertyDescriptor(stdout, 'columns');
@@ -24,16 +24,16 @@ extern "js" fn capture_screen(width : Int, draw : () -> Unit) -> String =
   #| }
 
 ///|
-fn screen(app : @tui_app.TuiApp, width : Int) -> String {
+fn screen(app : @tui_app.TuiApp, width : Int32) -> String {
   plain(capture_screen(width, fn() { app.tui.render_now(force=true) }))
 }
 
 ///|
 fn usage(
-  input : Int,
-  output : Int,
-  read : Int,
-  write : Int,
+  input : Int32,
+  output : Int32,
+  read : Int32,
+  write : Int32,
 ) -> @agent_loop.Usage {
   @agent_loop.Usage::{
     input,

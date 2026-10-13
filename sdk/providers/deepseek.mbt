@@ -14,23 +14,23 @@ priv suberror RetryableApiError {
 ///|
 /// Total attempts for the provider-level retry window (connection through the
 /// first SSE event): 1 initial attempt + 2 retries.
-const RETRY_ATTEMPTS : Int = 3
+const RETRY_ATTEMPTS : Int32 = 3
 
 ///|
 /// Base exponential-backoff delay in milliseconds (doubling per retry, capped
 /// at `MAX_BACKOFF_MS`).
-const RETRY_BACKOFF_MS : Int = 500
+const RETRY_BACKOFF_MS : Int32 = 500
 
 ///|
 /// Ceiling on a single backoff sleep, so a generous budget cannot accumulate
 /// minutes-long sleeps between attempts.
-const MAX_BACKOFF_MS : Int = 60_000
+const MAX_BACKOFF_MS : Int32 = 60_000
 
 ///|
 /// A response status worth retrying: rate limiting or a server-side failure.
 /// Other 4xx are caller errors (bad key, malformed request) that a retry
 /// cannot fix.
-fn retryable_status(code : Int) -> Bool {
+fn retryable_status(code : Int32) -> Bool {
   code == 429 || (code >= 500 && code < 600)
 }
 
@@ -55,7 +55,7 @@ pub fn DeepSeekProvider::DeepSeekProvider(
 pub impl LLMProvider for DeepSeekProvider with fn new_llm(
   self,
   model_id,
-  thinking? : String = "high",
+  thinking~ : String = "high",
 ) {
   DeepSeekResponsesAPILLM(self.api_key, model_id~, thinking~)
 }
@@ -74,8 +74,8 @@ struct DeepSeekResponsesAPILLM {
 ///|
 pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(
   api_key : String,
-  model_id? : String = "deepseek-v4-flash",
-  thinking? : String = "high",
+  model_id~ : String = "deepseek-v4-flash",
+  thinking~ : String = "high",
 ) -> DeepSeekResponsesAPILLM {
   { api_key, model_id, thinking, }
 }

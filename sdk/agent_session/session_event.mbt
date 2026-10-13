@@ -6,14 +6,14 @@ pub enum AgentSessionEvent {
   Loop(@agent_loop.AgentEvent)
   /// Emitted before the backoff sleep of each auto-retry of a failed prompt.
   AutoRetryStart(
-    attempt~ : Int,
-    max_attempts~ : Int,
-    delay_ms~ : Int,
+    attempt~ : Int32,
+    max_attempts~ : Int32,
+    delay_ms~ : Int32,
     error_message~ : String
   )
   /// Emitted once a retried prompt settles: success after a retry, or the
   /// budget exhausted / error not retryable / retry cancelled.
-  AutoRetryEnd(attempt~ : Int, success~ : Bool, final_error~ : String?)
+  AutoRetryEnd(attempt~ : Int32, success~ : Bool, final_error~ : String?)
 }
 
 ///|

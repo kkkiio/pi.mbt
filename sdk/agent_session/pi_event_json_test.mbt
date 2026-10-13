@@ -101,7 +101,7 @@ async test "toolcall_start keeps id and toolName on the wire" {
 /// `faux` 都是先 push 带 id/name 的 `ToolCall` 再发 `ToolCallStart`)。
 struct BadSnapshotLLM {
   content : Array[@agent_loop.AssistantMessageContent]
-  content_index : Int
+  content_index : Int32
 }
 
 ///|
@@ -179,7 +179,7 @@ async test "json message updates stay linear in response length" {
 
 ///|
 /// 一条回复的 `message_update` 线字节总和。分片数随长度线性增长,每片大小固定。
-async fn json_update_bytes(characters : Int) -> Int {
+async fn json_update_bytes(characters : Int32) -> Int32 {
   let llm = @faux.FauxLLM::FauxLLM()
   llm.set_responses([
     @faux.faux_message([@faux.faux_text("x".repeat(characters))]),

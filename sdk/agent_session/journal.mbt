@@ -38,7 +38,7 @@ pub(all) enum SessionEntryContent {
   Compaction(
     summary~ : String,
     first_kept_entry_id~ : String,
-    tokens_before~ : Int,
+    tokens_before~ : Int32,
     details~ : Json?,
     usage~ : @agent_loop.Usage?
   )
@@ -58,27 +58,27 @@ pub(all) enum SessionEntryContent {
 ///|
 pub impl ToJson for SessionEntry with fn to_json(self) -> Json {
   let obj : Map[String, Json] = Map([])
-  obj["id"] = self.id.to_json()
+  obj["id"] = Json(self.id)
   obj["parentId"] = match self.parent_id {
-    Some(id) => id.to_json()
+    Some(id) => Json(id)
     None => Json::null()
   }
-  obj["timestamp"] = format_journal_timestamp(self.timestamp).to_json()
+  obj["timestamp"] = Json(format_journal_timestamp(self.timestamp))
   match self.content {
     Message(message) => {
-      obj["type"] = "message".to_json()
+      obj["type"] = Json("message")
       obj["message"] = message.to_json()
     }
     ModelChange(provider~, model_id~) => {
-      obj["type"] = "model_change".to_json()
-      obj["provider"] = provider.to_json()
-      obj["modelId"] = model_id.to_json()
+      obj["type"] = Json("model_change")
+      obj["provider"] = Json(provider)
+      obj["modelId"] = Json(model_id)
     }
     Compaction(summary~, first_kept_entry_id~, tokens_before~, details~, usage~) => {
-      obj["type"] = "compaction".to_json()
-      obj["summary"] = summary.to_json()
-      obj["firstKeptEntryId"] = first_kept_entry_id.to_json()
-      obj["tokensBefore"] = tokens_before.to_json()
+      obj["type"] = Json("compaction")
+      obj["summary"] = Json(summary)
+      obj["firstKeptEntryId"] = Json(first_kept_entry_id)
+      obj["tokensBefore"] = Json(tokens_before)
       if details is Some(details) {
         obj["details"] = details
       }
@@ -87,15 +87,15 @@ pub impl ToJson for SessionEntry with fn to_json(self) -> Json {
       }
     }
     Custom(custom_type~, data~) => {
-      obj["type"] = "custom".to_json()
-      obj["customType"] = custom_type.to_json()
+      obj["type"] = Json("custom")
+      obj["customType"] = Json(custom_type)
       if data is Some(data) {
         obj["data"] = data
       }
     }
     ContextEdit(target_id~) => {
-      obj["type"] = "context_edit".to_json()
-      obj["targetId"] = target_id.to_json()
+      obj["type"] = Json("context_edit")
+      obj["targetId"] = Json(target_id)
       // pi always writes the field; `null` is the omit form this type represents.
       obj["replacement"] = Json::null()
     }
@@ -238,7 +238,7 @@ pub fn format_journal_timestamp(timestamp : UInt64) -> String {
   ) catch {
     error => abort(error.to_string())
   }
-  let pad = (value : Int, width : Int) => {
+  let pad = (value : Int32, width : Int32) => {
     let text = value.to_string()
     "0".repeat(width - text.length()) + text
   }
@@ -563,12 +563,12 @@ struct InMemorySessionJournal {
 
 ///|
 pub fn InMemorySessionJournal::InMemorySessionJournal(
-  now? : () -> UInt64 = @env.now,
+  now~ : () -> UInt64 = @env.now,
 ) -> InMemorySessionJournal {
   InMemorySessionJournal::{
     journal: [],
     ids: Set([]),
-    rand: @random.Rand::new(),
+    rand: @random.Rand(),
     leaf_id: None,
     now,
   }

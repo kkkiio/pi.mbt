@@ -13,10 +13,7 @@ fn bash_callable() -> @tools.CallableDefinition raise {
 fn text_of(content : Array[@agent_loop.InputMessageContent]) -> String raise {
   match content {
     [@agent_loop.InputMessageContent::Text(text)] => text
-    _ =>
-      fail(
-        "expected a single text output, got \{content.to_json().stringify()}",
-      )
+    _ => fail("expected a single text output, got \{Json(content).stringify()}")
   }
 }
 

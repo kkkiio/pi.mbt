@@ -4,7 +4,7 @@
 
 ///|
 /// spinner 刷新间隔(毫秒),对齐 pi Loader 的 80ms。
-const TICK_INTERVAL_MS : Int = 80
+const TICK_INTERVAL_MS : Int32 = 80
 
 ///|
 /// 跑全屏 TUI,直到用户退出(ctrl+c / ctrl+d / `/quit`)。
@@ -17,7 +17,7 @@ pub async fn run(
   cwd : String,
   thinking : String,
   session_dir : String?,
-  resume_path? : String? = None,
+  resume_path~ : String? = None,
 ) -> Unit {
   // 先建会话宿主(会创建 session 目录,可能抛 FsError),再碰终端:终端
   // 副作用只在 app.start() 里发生,这之前失败不需要恢复终端。

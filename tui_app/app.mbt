@@ -16,7 +16,7 @@ pub struct PendingList {
 /// 构造排队列表。
 pub fn PendingList::new(
   theme : Theme,
-  lines? : Array[String] = [],
+  lines~ : Array[String] = [],
 ) -> PendingList {
   { theme, lines, }
 }
@@ -371,7 +371,7 @@ pub fn TuiApp::tool_call(
   name : String,
   arguments : Json,
   id~ : String,
-  timed? : Bool = false,
+  timed~ : Bool = false,
 ) -> Unit {
   self.transcript.push_tool_call(name, arguments, id~, timed~)
   self.tui.request_render()
@@ -384,7 +384,7 @@ pub fn TuiApp::tool_result(
   text : String,
   is_error : Bool,
   id~ : String,
-  details? : Json? = None,
+  details~ : Json? = None,
 ) -> Unit {
   self.transcript.push_tool_result(name, text, is_error, id~, details~)
   self.tui.request_render()
@@ -394,7 +394,7 @@ pub fn TuiApp::tool_result(
 pub fn TuiApp::set_usage(
   self : TuiApp,
   usage : @agent_loop.Usage,
-  update_cache_hit? : Bool = true,
+  update_cache_hit~ : Bool = true,
 ) -> Unit {
   self.footer.set_usage(usage, update_cache_hit~)
   self.tui.request_render()
@@ -493,9 +493,9 @@ pub fn TuiApp::set_session_name(self : TuiApp, name : String?) -> Unit {
 ///|
 pub fn TuiApp::begin_retry(
   self : TuiApp,
-  attempt : Int,
-  max_attempts : Int,
-  delay_ms : Int,
+  attempt : Int32,
+  max_attempts : Int32,
+  delay_ms : Int32,
 ) -> Unit {
   self.running = true
   self.status.set_retry(attempt, max_attempts, delay_ms)

@@ -15,20 +15,20 @@ pub struct FauxLLM {
   provider : String
   model : String
   mut responses : Array[@agent_loop.AssistantMessage]
-  mut cursor : Int
+  mut cursor : Int32
   /// 流式分片之间的间隔(毫秒);0 表示不等待,让分片背靠背发出。
-  chunk_delay_ms : Int
+  chunk_delay_ms : Int32
   /// 每个流式分片的最大 UTF-16 长度(至少 1)。
-  chunk_size : Int
+  chunk_size : Int32
 }
 
 ///|
 pub fn FauxLLM::FauxLLM(
-  api? : String = "faux",
-  provider? : String = "faux",
-  model? : String = "faux-1",
-  chunk_delay_ms? : Int = 0,
-  chunk_size? : Int = 16,
+  api~ : String = "faux",
+  provider~ : String = "faux",
+  model~ : String = "faux-1",
+  chunk_delay_ms~ : Int32 = 0,
+  chunk_size~ : Int32 = 16,
 ) -> FauxLLM {
   let size = if chunk_size <= 0 { 1 } else { chunk_size }
   FauxLLM::{
@@ -65,7 +65,7 @@ pub fn FauxLLM::append_responses(
 
 ///|
 /// How many scripted responses have not been consumed yet.
-pub fn FauxLLM::pending_responses(self : FauxLLM) -> Int {
+pub fn FauxLLM::pending_responses(self : FauxLLM) -> Int32 {
   self.responses.length() - self.cursor
 }
 
@@ -84,7 +84,7 @@ pub fn faux_thinking(text : String) -> @agent_loop.AssistantMessageContent {
 ///|
 /// Monotonic default tool-call ids so a batch of `faux_tool_call`s stays
 /// addressable without the test threading an id through.
-let faux_call_seq : Ref[Int] = Ref(0)
+let faux_call_seq : Ref[Int32] = Ref(0)
 
 ///|
 /// A tool-call block for use inside `faux_message`.
@@ -107,12 +107,12 @@ pub fn faux_tool_call(
 /// A terminal assistant message for `set_responses`.
 pub fn faux_message(
   content : Array[@agent_loop.AssistantMessageContent],
-  stop_reason? : @agent_loop.StopReason = @agent_loop.StopReason::Stop,
-  error_message? : String? = None,
-  api? : String = "faux",
-  provider? : String = "faux",
-  model? : String = "faux-1",
-  timestamp? : UInt64 = 0,
+  stop_reason~ : @agent_loop.StopReason = @agent_loop.StopReason::Stop,
+  error_message~ : String? = None,
+  api~ : String = "faux",
+  provider~ : String = "faux",
+  model~ : String = "faux-1",
+  timestamp~ : UInt64 = 0,
 ) -> @agent_loop.AssistantMessage {
   {
     content,
@@ -130,7 +130,7 @@ pub fn faux_message(
 /// Split `text` into chunks of at most `size` UTF-16 code units. Text always
 /// yields at least one (possibly empty) chunk so a block still emits
 /// start/delta/end.
-fn split_chunks(text : String, size : Int) -> Array[String] {
+fn split_chunks(text : String, size : Int32) -> Array[String] {
   let chunks : Array[String] = []
   let total = text.length()
   let mut index = 0
