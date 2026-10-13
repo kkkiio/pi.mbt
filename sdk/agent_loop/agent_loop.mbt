@@ -1,5 +1,17 @@
 ///|
+/// Marks an error raised by an event listener (the `event_sink` chain) so the
+/// terminal `catch` below re-raises it instead of dressing a listener failure
+/// up as a failed model turn. Never escapes `run_agent_loop`.
+priv suberror ListenerError {
+  ListenerError(Error)
+}
+
+///|
 /// Runs the agent loop, which generates messages from the LLM and executes tools as needed.
+///
+/// Provider failures become a terminal `AssistantMessage` with `stop_reason` `Error`
+/// or `Aborted`. Errors raised by `event_sink` (an event listener) are re-raised to
+/// the caller instead: a listener bug must not enter the transcript as a model turn.
 pub async fn run_agent_loop(
   llm : &LLM,
   system_prompt : String,
@@ -37,7 +49,9 @@ pub async fn run_agent_loop(
             message_started = true
             let msg = AgentMessage::Assistant(partial)
             messages.push(msg)
-            event_sink(AgentEvent::MessageStart(msg))
+            event_sink(AgentEvent::MessageStart(msg)) catch {
+              err => raise ListenerError(err)
+            }
           }
           TextStart(partial~, ..)
           | TextDelta(partial~, ..)
@@ -50,14 +64,18 @@ pub async fn run_agent_loop(
           | ToolCallEnd(partial~, ..) =>
             // 在 Start 之前到达的中间事件违反流契约,直接丢弃;终态消息由 generate 的返回值兜底。
             if message_started {
-              let msg = AgentMessage::Assistant(partial)
-              messages[messages.length() - 1] = msg
-              event_sink(AgentEvent::MessageUpdate(msg))
+              messages[messages.length() - 1] = AgentMessage::Assistant(partial)
+              // 事件同时带增量和快照:订阅方要么按 delta 追加,要么用 partial 重建。
+              event_sink(AgentEvent::MessageUpdate(event)) catch {
+                err => raise ListenerError(err)
+              }
             }
         }
       },
       abort~,
     ) catch {
+      // 订阅方的错误不是模型失败:原样重抛(见 `*_test.mbt` 的 listener 契约)。
+      ListenerError(err) => raise err
       err => {
         let error_message = {
           let text = err.to_string()

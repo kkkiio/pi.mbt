@@ -844,12 +844,22 @@ fn probe_tools(log : Array[String]) -> @tools.ToolRegistry {
 }
 
 ///|
-/// 每个事件一行 JSON(与 `--mode json` 同一个 `ToJson`),过滤掉流式增量。
-fn event_lines(events : Array[@agent_session.AgentSessionEvent]) -> String {
-  events
-  .filter(event => !(event is Loop(MessageUpdate(_))))
-  .map(event => event.to_json().stringify())
-  .join("\n")
+/// 每个事件一行 JSON(与 `--mode json` 同一个投影),过滤掉流式增量。
+///
+/// 投影可能 raise(snapshot 不合约的 `toolcall_start`),而闭包类型没有 raise,
+/// 所以这里用循环把 raise 留在函数体里。
+fn event_lines(
+  events : Array[@agent_session.AgentSessionEvent],
+) -> String raise {
+  let out = StringBuilder()
+  for event in events {
+    guard !(event is Loop(MessageUpdate(_))) else { continue }
+    if !out.is_empty() {
+      out.write_string("\n")
+    }
+    out.write_string(@agent_session.to_pi_json(event).stringify())
+  }
+  out.to_string()
 }
 
 ///|
@@ -918,6 +928,31 @@ async test "retry delay honours the cap and saturates on a huge attempt" {
   // `Number.isSafeInteger`.
   assert_eq(capped.delay_ms(1_000_000), 5000)
   assert_eq(base_over_cap.delay_ms(64), 5000)
+}
+
+///|
+/// 订阅方抛错不是模型失败:错误原样冒到 `prompt` 的调用方,而不是被折成一条
+/// 伪造的 Error 回合。pi 的 `handleRunFailure` 会把 listener 错误伪装成 error
+/// 回合(prompt 正常返回),这里刻意不对齐 —— 订阅者的 bug 不该改写 transcript。
+async test "a throwing listener propagates instead of faking an error turn" {
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([@faux.faux_message([@faux.faux_text("done")])])
+  let journal = @agent_session.InMemorySessionJournal()
+  let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
+  session.subscribe(event => {
+    guard event is Loop(MessageUpdate(_)) else { return }
+    @async.sleep(0)
+    fail("listener exploded")
+  })
+  let message = try {
+    session.prompt([user_message("go")])
+    ""
+  } catch {
+    err => err.to_string()
+  }
+  assert_true(message.contains("listener exploded"))
+  // 只留下 user 消息:没有伪造的 Error assistant 回合。
+  assert_eq(journal.get_entries().length(), 1)
 }
 
 ///|

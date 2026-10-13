@@ -198,7 +198,10 @@ async fn main {
   if mode is Json {
     // JSONL 模式:每个 AgentSessionEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。
     session.subscribe(event => {
-      write_stdout(event.to_json().stringify())
+      let line = @agent_session.to_pi_json(event) catch {
+        err => fatal("Error: \{clean_error_message("\{err}")}")
+      }
+      write_stdout(line.stringify())
       // Like pi's JSON subscriber, wait for the stdout queue between events:
       // a slow reader then throttles the stream instead of buffering it.
       flush_output()
