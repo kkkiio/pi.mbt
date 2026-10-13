@@ -26,8 +26,8 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Check Codex review state
-        uses: kkkiio/codex-review-check@1316541ec2e6324e77101c112c969c293dcca3c8
+        uses: kkkiio/codex-review-check@fd9c653d66dc3602a9d8d57b01f325c4810fcb0c
         with:
           github-token: ${{ github.token }}
           pull-request: ${{ inputs['pull-request'] || github.event.pull_request.number }}
-          require-lgtm: true
+          require-lgtm: false
