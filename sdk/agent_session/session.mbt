@@ -78,7 +78,9 @@ pub struct AgentSession {
   active_tools : Array[String]
   fanout : FanOutListener
   mut message_buffer : Array[@agent_loop.AgentMessage]
-  system_prompt : String
+  mut system_prompt : String
+  /// Coding sessions rebuild tool-dependent guidance after tool selection changes.
+  system_prompt_builder : ((ArrayView[String]) -> String)?
   /// Agent-level auto-retry policy, read at every retryable failure.
   retry_settings : RetrySettings
   /// Called after a completed assistant turn and all of its tool results, but
@@ -97,6 +99,7 @@ pub fn AgentSession::AgentSession(
   active_tools~ : ArrayView[String] = [],
   retry_settings~ : RetrySettings = RetrySettings::default(),
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _, _) => None,
+  system_prompt_builder~ : ((ArrayView[String]) -> String)? = None,
 ) -> AgentSession {
   AgentSession::{
     tool_registry,
@@ -105,6 +108,7 @@ pub fn AgentSession::AgentSession(
     fanout: FanOutListener::FanOutListener(),
     llm,
     system_prompt,
+    system_prompt_builder,
     retry_settings,
     finish_turn_hook,
     active_run_abort_controller: None,
@@ -357,6 +361,9 @@ pub fn AgentSession::set_active_tools(
     }
   }
   names.blit_to(self.active_tools)
+  if self.system_prompt_builder is Some(build) {
+    self.system_prompt = build(self.active_tools)
+  }
 }
 
 ///|

@@ -17,22 +17,25 @@ pub fn new_coding_session(
   let bash_tool = new_bash_tool_definition(cwd~)
   tool_registry.register_tool(bash_tool)
   tool_registry.register_tool(@agent_session.web_search_tool)
-  let system_prompt = build_system_prompt(
-    cwd~,
-    guidelines=active_tools
-      .iter()
-      .flat_map(name => {
-        tool_registry
-        .get_tool(name)
-        .map_or(Iter::empty(), t => t.prompt_guidelines.iter())
-      })
-      .to_array(),
-    project_context_files=context_files,
-    skills~,
-  )
+  let system_prompt_builder = (names : ArrayView[String]) => {
+    build_system_prompt(
+      cwd~,
+      guidelines=names
+        .iter()
+        .flat_map(name => {
+          tool_registry
+          .get_tool(name)
+          .map_or(Iter::empty(), t => t.prompt_guidelines.iter())
+        })
+        .to_array(),
+      project_context_files=context_files,
+      skills~,
+    )
+  }
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt~,
+    system_prompt=system_prompt_builder(active_tools),
+    system_prompt_builder=Some(system_prompt_builder),
     journal~,
     tool_registry~,
     active_tools~,
