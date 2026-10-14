@@ -17,7 +17,7 @@
 async test "message_update exposes the delta and stays delta-only on the wire" {
   let llm = @faux.FauxLLM::FauxLLM(chunk_size=5)
   llm.set_responses([@faux.faux_message([@faux.faux_text("0123456789")])])
-  let session = @agent_session.AgentSession(llm, system_prompt="")
+  let session = @agent_session.AgentSession(llm)
   let updates : Array[@agent_loop.GenerationEvent] = []
   let lines : Array[String] = []
   session.subscribe(event => {
@@ -72,7 +72,6 @@ async test "toolcall_start keeps id and toolName on the wire" {
   ])
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     tool_registry=probe_tools([]),
     active_tools=["probe"],
   )
@@ -152,7 +151,7 @@ async test "toolcall_start without a tool call raises instead of inventing field
 ///|
 /// 跑一次不合约的 run,返回投影抛出的诊断文本。
 async fn wire_failure_of(llm : BadSnapshotLLM) -> String {
-  let session = @agent_session.AgentSession(llm, system_prompt="")
+  let session = @agent_session.AgentSession(llm)
   let diagnostics : Array[String] = []
   session.subscribe(event => {
     ignore(@agent_session.to_pi_json(event)) catch {
@@ -184,7 +183,7 @@ async fn json_update_bytes(characters : Int32) -> Int32 {
   llm.set_responses([
     @faux.faux_message([@faux.faux_text("x".repeat(characters))]),
   ])
-  let session = @agent_session.AgentSession(llm, system_prompt="")
+  let session = @agent_session.AgentSession(llm)
   let mut bytes = 0
   session.subscribe(event => {
     guard event is Loop(MessageUpdate(_)) else { return }

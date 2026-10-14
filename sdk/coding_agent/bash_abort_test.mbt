@@ -83,7 +83,6 @@ async test "aborting a running bash tool kills the command and records an aborte
   ])
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     journal~,
     tool_registry=registry,
     active_tools=["bash"],
