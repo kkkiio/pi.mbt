@@ -1,6 +1,6 @@
 {
   "name": "@kkkiio/pim",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "MoonBit coding agent CLI (a pi subset): fullscreen TUI, bash tool, JSONL session journals",
   "type": "module",
   "license": "Apache-2.0",
