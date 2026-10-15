@@ -278,7 +278,6 @@ async test "tool details and usage survive journal resume" {
   )
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     journal~,
     tool_registry=registry,
     active_tools=["probe"],

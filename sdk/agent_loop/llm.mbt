@@ -64,28 +64,36 @@ pub(all) enum GrammarFormat {
 /// mid-stream events that arrive earlier (pi's `if (partialMessage)` guard).
 pub(all) enum GenerationEvent {
   Start(partial~ : AssistantMessage)
-  TextStart(content_index~ : Int, partial~ : AssistantMessage)
-  TextDelta(content_index~ : Int, delta~ : String, partial~ : AssistantMessage)
-  TextEnd(content_index~ : Int, content~ : String, partial~ : AssistantMessage)
-  ThinkingStart(content_index~ : Int, partial~ : AssistantMessage)
+  TextStart(content_index~ : Int32, partial~ : AssistantMessage)
+  TextDelta(
+    content_index~ : Int32,
+    delta~ : String,
+    partial~ : AssistantMessage
+  )
+  TextEnd(
+    content_index~ : Int32,
+    content~ : String,
+    partial~ : AssistantMessage
+  )
+  ThinkingStart(content_index~ : Int32, partial~ : AssistantMessage)
   ThinkingDelta(
-    content_index~ : Int,
+    content_index~ : Int32,
     delta~ : String,
     partial~ : AssistantMessage
   )
   ThinkingEnd(
-    content_index~ : Int,
+    content_index~ : Int32,
     content~ : String,
     partial~ : AssistantMessage
   )
-  ToolCallStart(content_index~ : Int, partial~ : AssistantMessage)
+  ToolCallStart(content_index~ : Int32, partial~ : AssistantMessage)
   ToolCallDelta(
-    content_index~ : Int,
+    content_index~ : Int32,
     delta~ : String,
     partial~ : AssistantMessage
   )
   ToolCallEnd(
-    content_index~ : Int,
+    content_index~ : Int32,
     tool_call~ : ToolCall,
     partial~ : AssistantMessage
   )
@@ -113,16 +121,16 @@ pub extend StopReason with Debug::{to_repr}
 
 ///|
 pub(all) struct Usage {
-  input : Int
-  output : Int
-  cache_read : Int
-  cache_write : Int
+  input : Int32
+  output : Int32
+  cache_read : Int32
+  cache_write : Int32
   /// Subset of `cache_write` written with 1h retention. Only Anthropic reports this split.
-  cache_write_1h : Int?
+  cache_write_1h : Int32?
   /// Reasoning/thinking tokens, when the provider reports them. This is a subset of
   /// `output`: `output` already includes these tokens. Set to a number (possibly 0) by providers that expose a reasoning breakdown; left undefined by providers that don't.
-  reasoning : Int?
-  total_tokens : Int
+  reasoning : Int32?
+  total_tokens : Int32
   cost : UsageCost
 } derive(Debug)
 
@@ -132,18 +140,18 @@ pub extend Usage with Debug::{to_repr}
 ///|
 pub impl ToJson for Usage with fn to_json(self : Usage) -> Json {
   let obj : Map[String, Json] = {
-    "input": self.input.to_json(),
-    "output": self.output.to_json(),
-    "cacheRead": self.cache_read.to_json(),
-    "cacheWrite": self.cache_write.to_json(),
-    "totalTokens": self.total_tokens.to_json(),
+    "input": Json(self.input),
+    "output": Json(self.output),
+    "cacheRead": Json(self.cache_read),
+    "cacheWrite": Json(self.cache_write),
+    "totalTokens": Json(self.total_tokens),
     "cost": self.cost.to_json(),
   }
   if self.cache_write_1h is Some(n) {
-    obj["cacheWrite1h"] = n.to_json()
+    obj["cacheWrite1h"] = Json(n)
   }
   if self.reasoning is Some(n) {
-    obj["reasoning"] = n.to_json()
+    obj["reasoning"] = Json(n)
   }
   Json::object(obj)
 }
@@ -166,11 +174,11 @@ pub extend UsageCost with Debug::{to_repr}
 ///|
 pub impl ToJson for UsageCost with fn to_json(self : UsageCost) -> Json {
   Json::object({
-    "input": self.input.to_json(),
-    "output": self.output.to_json(),
-    "cacheRead": self.cache_read.to_json(),
-    "cacheWrite": self.cache_write.to_json(),
-    "total": self.total.to_json(),
+    "input": Json(self.input),
+    "output": Json(self.output),
+    "cacheRead": Json(self.cache_read),
+    "cacheWrite": Json(self.cache_write),
+    "total": Json(self.total),
   })
 }
 
@@ -196,12 +204,12 @@ pub extend StopReason with Show::{to_string, output}
 /// Serialized values match pi's `StopReason` strings.
 pub impl ToJson for StopReason with fn to_json(self : StopReason) -> Json {
   match self {
-    Pending => "pending".to_json()
-    Stop => "stop".to_json()
-    Length => "length".to_json()
-    ToolUse => "toolUse".to_json()
-    Aborted => "aborted".to_json()
-    Error => "error".to_json()
+    Pending => Json("pending")
+    Stop => Json("stop")
+    Length => Json("length")
+    ToolUse => Json("toolUse")
+    Aborted => Json("aborted")
+    Error => Json("error")
   }
 }
 

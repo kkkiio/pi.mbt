@@ -9,7 +9,7 @@ pub enum Phase {
   Idle
   /// 工作态:标签(如 "thinking" / 工具名)。
   Working(String)
-  Retrying(Int, Int, Double)
+  Retrying(Int32, Int32, Double)
 }
 
 ///|
@@ -18,12 +18,12 @@ pub struct StatusLine {
   theme : Theme
   thinking : String
   mut current : Phase
-  mut spinner_index : Int
+  mut spinner_index : Int32
 }
 
 ///|
 /// 创建一个空闲的状态行。
-pub fn StatusLine::new(theme : Theme, thinking? : String = "off") -> StatusLine {
+pub fn StatusLine::new(theme : Theme, thinking~ : String = "off") -> StatusLine {
   StatusLine::{ theme, thinking, current: Idle, spinner_index: 0, }
 }
 
@@ -42,9 +42,9 @@ pub fn StatusLine::set_working(self : StatusLine, label : String) -> Unit {
 ///|
 pub fn StatusLine::set_retry(
   self : StatusLine,
-  attempt : Int,
-  max_attempts : Int,
-  delay_ms : Int,
+  attempt : Int32,
+  max_attempts : Int32,
+  delay_ms : Int32,
 ) -> Unit {
   self.current = Retrying(
     attempt,
@@ -76,7 +76,7 @@ pub fn StatusLine::is_working(self : StatusLine) -> Bool {
 
 ///|
 /// 返回指定序号的旋转帧。
-fn spinner_frame(index : Int) -> String {
+fn spinner_frame(index : Int32) -> String {
   match index % 10 {
     0 => "⠋"
     1 => "⠙"
@@ -103,8 +103,8 @@ fn StatusLine::activity_text(self : StatusLine, label : String) -> String {
 /// 渲染输入框上边框。空闲时返回 `None`(调用方回退到默认 `─` 边框)。
 pub fn StatusLine::render_border(
   self : StatusLine,
-  width : Int,
-  hidden_lines? : Int = 0,
+  width : Int32,
+  hidden_lines~ : Int32 = 0,
 ) -> String? {
   if self.current is Idle {
     return None
@@ -180,10 +180,10 @@ pub fn StatusLine::render_border(
 }
 
 ///|
-extern "js" fn retry_seconds(ms : Double) -> Int = "ms => Math.max(0, Math.ceil(ms / 1000))"
+extern "js" fn retry_seconds(ms : Double) -> Int32 = "ms => Math.max(0, Math.ceil(ms / 1000))"
 
 ///|
-fn truncate_without_ellipsis(text : String, width : Int) -> String {
+fn truncate_without_ellipsis(text : String, width : Int32) -> String {
   ns_get("truncateToWidth").apply([
     Value::cast_from(text),
     Value::cast_from(width),

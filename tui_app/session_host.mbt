@@ -43,7 +43,7 @@ fn open_journal(
     None => (@agent_session.InMemorySessionJournal(), () => (), None)
     Some(dir) => {
       @coding_agent.create_dir(dir)
-      let rand = @random.Rand::new()
+      let rand = @random.Rand()
       let path = "\{dir}/\{@env.now()}_\{rand.uint64()}.jsonl"
       // 文件不在启动时创建:第一次真正要写入时才建(见 `JsonlSessionJournal`)。
       let file = @coding_agent.open_lazy_file(path)
@@ -361,7 +361,16 @@ fn SessionHost::on_event(
         TurnStart => ()
         MessageStart(Assistant(_)) => app.assistant_start()
         MessageStart(_) => ()
-        MessageUpdate(Assistant(message)) => self.sync_assistant(message, app)
+        // 只有文本/thinking 增量影响正文渲染。工具调用行由 `ToolExecutionStart`
+        // 建立(参数取自终态消息),所以 `ToolCall*` 的 update 不需要重绘。
+        MessageUpdate(
+          TextStart(partial~, ..)
+          | TextDelta(partial~, ..)
+          | TextEnd(partial~, ..)
+          | ThinkingStart(partial~, ..)
+          | ThinkingDelta(partial~, ..)
+          | ThinkingEnd(partial~, ..)
+        ) => self.sync_assistant(partial, app)
         MessageUpdate(_) => ()
         MessageEnd(Assistant(message)) => {
           self.sync_assistant(message, app)
@@ -414,6 +423,10 @@ pub async fn SessionHost::prompt(
       timestamp: @env.now(),
     },
   ]
-  self.session.prompt(input)
+  // The session emits an error turn for runtime failures. Errors while
+  // delivering that turn can still escape to this UI boundary.
+  self.session.prompt(input) catch {
+    err => app.push_error("prompt failed: \{err}")
+  }
   app.set_idle()
 }

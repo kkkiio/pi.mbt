@@ -17,7 +17,7 @@ extern "js" fn strip_ansi(text : String) -> String =
 
 ///|
 /// 剥色 + 逐行断言「一行 = 一个元素」契约。
-fn assert_rows(lines : Array[String], width : Int) -> Array[String] raise {
+fn assert_rows(lines : Array[String], width : Int32) -> Array[String] raise {
   let rows : Array[String] = []
   for index, line in lines {
     let text = strip_ansi(line)
@@ -38,7 +38,7 @@ fn assert_rows(lines : Array[String], width : Int) -> Array[String] raise {
 /// 渲染一条聊天记录并断言行契约。
 fn render_rows(
   transcript : @tui_app.Transcript,
-  width : Int,
+  width : Int32,
 ) -> Array[String] raise {
   assert_rows(@tui_app.Widget::render(transcript, width), width)
 }

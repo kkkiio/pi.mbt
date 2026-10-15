@@ -25,11 +25,11 @@ pub(all) struct RetrySettings {
   enabled : Bool
   /// Max consecutive retries after a retryable error. The initial attempt does
   /// not count, matching pi's `maxRetries` / `maxAttempts`.
-  max_retries : Int
+  max_retries : Int32
   /// Exponential-backoff base in milliseconds: the first retry waits this long.
-  base_delay_ms : Int
+  base_delay_ms : Int32
   /// Ceiling on a single backoff delay, not on the total wait.
-  max_agent_delay_ms : Int
+  max_agent_delay_ms : Int32
 }
 
 ///|
@@ -47,7 +47,7 @@ pub fn RetrySettings::default() -> RetrySettings {
 ///|
 /// pi's `retryDelayMs`: exponential backoff `baseDelayMs * 2^(attempt-1)` from
 /// a 1-indexed attempt, capped per attempt by `maxAgentDelayMs`.
-pub fn RetrySettings::delay_ms(self : RetrySettings, attempt : Int) -> Int {
+pub fn RetrySettings::delay_ms(self : RetrySettings, attempt : Int32) -> Int32 {
   let max = self.max_agent_delay_ms
   let mut delay = if self.base_delay_ms > max {
     max

@@ -94,7 +94,7 @@ async test "bash tool streams throttled updates and a terminal update" {
   // that a mid-stream update arrived while the command was still running (the
   // JS timer's job). How many arrive depends on timing, so only the threshold
   // is asserted.
-  assert_eq(updates[updates.length() - 1].to_json(), result.content.to_json())
+  assert_eq(Json(updates[updates.length() - 1]), Json(result.content))
   assert_true(updates.length() > 2)
 }
 

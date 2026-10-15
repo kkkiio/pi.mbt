@@ -93,14 +93,14 @@ priv struct ResponseDeltaEvent {
   /// Incremental text or tool input.
   delta : String
   /// Index of the output item receiving the delta.
-  output_index : Int
+  output_index : Int32
 } derive(FromJson)
 
 ///|
 /// Fields consumed from events that delimit an output item's nested part.
 priv struct ResponseOutputIndexEvent {
   /// Index of the affected output item.
-  output_index : Int
+  output_index : Int32
 } derive(FromJson)
 
 ///|
@@ -153,9 +153,9 @@ priv struct ResponseIncompleteDetails {
 ///|
 /// OpenAPI `ResponseUsage` token accounting.
 priv struct ResponseUsage {
-  input_tokens : Int
-  output_tokens : Int
-  total_tokens : Int
+  input_tokens : Int32
+  output_tokens : Int32
+  total_tokens : Int32
   input_tokens_details : ResponseUsageDetails?
   output_tokens_details : ResponseUsageDetails?
 } derive(FromJson)
@@ -163,9 +163,9 @@ priv struct ResponseUsage {
 ///|
 /// Token detail fields used by OpenAI-compatible Responses providers.
 priv struct ResponseUsageDetails {
-  cached_tokens : Int?
-  cache_write_tokens : Int?
-  reasoning_tokens : Int?
+  cached_tokens : Int32?
+  cache_write_tokens : Int32?
+  reasoning_tokens : Int32?
 } derive(FromJson)
 
 ///|

@@ -13,10 +13,7 @@ fn bash_callable() -> @tools.CallableDefinition raise {
 fn text_of(content : Array[@agent_loop.InputMessageContent]) -> String raise {
   match content {
     [@agent_loop.InputMessageContent::Text(text)] => text
-    _ =>
-      fail(
-        "expected a single text output, got \{content.to_json().stringify()}",
-      )
+    _ => fail("expected a single text output, got \{Json(content).stringify()}")
   }
 }
 
@@ -86,7 +83,6 @@ async test "aborting a running bash tool kills the command and records an aborte
   ])
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     journal~,
     tool_registry=registry,
     active_tools=["bash"],

@@ -15,7 +15,7 @@ pub struct JsonlSessionJournal[W] {
   created_at : UInt64
   mut leaf_id : String?
   /// 构造时已存在的条目数(已落盘)。flush 只写这个下标之后的条目。
-  start_index : Int
+  start_index : Int32
   /// 是否已经开始落盘。`false` 时新条目只在内存里。
   mut flushed : Bool
   now : () -> UInt64
@@ -34,11 +34,11 @@ pub struct JsonlSessionJournal[W] {
 /// closing `writer` when done.
 pub fn[W] JsonlSessionJournal::JsonlSessionJournal(
   writer : W,
-  entries? : Array[@agent_session.SessionEntry] = [],
-  rand? : @random.Rand = @random.Rand::new(),
-  cwd? : String = @env.current_dir().unwrap_or(""),
-  now? : () -> UInt64 = @env.now,
-  fresh? : Bool = true,
+  entries~ : Array[@agent_session.SessionEntry] = [],
+  rand~ : @random.Rand = @random.Rand(),
+  cwd~ : String = @env.current_dir().unwrap_or(""),
+  now~ : () -> UInt64 = @env.now,
+  fresh~ : Bool = true,
 ) -> JsonlSessionJournal[W] {
   let ids = Set([])
   let mut leaf_id : String? = None

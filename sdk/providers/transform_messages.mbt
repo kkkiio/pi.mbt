@@ -13,7 +13,7 @@
 /// cross-model thinking downgrade.
 pub fn transform_messages(
   messages : ArrayView[@agent_loop.AgentMessage],
-  now? : () -> UInt64 = @env.now,
+  now~ : () -> UInt64 = @env.now,
 ) -> Array[@agent_loop.AgentMessage] {
   let result : Array[@agent_loop.AgentMessage] = []
   let mut pending : Array[@agent_loop.ToolCall] = []

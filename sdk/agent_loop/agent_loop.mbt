@@ -1,5 +1,17 @@
 ///|
+/// Marks an error raised by an event listener (the `event_sink` chain) so the
+/// generation catch passes it to the owning run's lifecycle handler rather
+/// than treating it as a provider response. Never escapes `run_agent_loop`.
+priv suberror ListenerError {
+  ListenerError(Error)
+}
+
+///|
 /// Runs the agent loop, which generates messages from the LLM and executes tools as needed.
+///
+/// Provider failures become a terminal `AssistantMessage` with `stop_reason` `Error`
+/// or `Aborted`. Errors raised by `event_sink` (an event listener) are re-raised to
+/// the caller, where `AgentSession` closes the run like pi's `handleRunFailure`.
 pub async fn run_agent_loop(
   llm : &LLM,
   system_prompt : String,
@@ -7,11 +19,11 @@ pub async fn run_agent_loop(
   tools : ArrayView[ToolDefinition],
   prompts : ArrayView[UserMessage],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
-  steer_channel? : () -> ArrayView[UserMessage] = fn() { [] },
-  abort? : AbortSignal = AbortSignal::never(),
+  steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
+  abort~ : AbortSignal = AbortSignal::never(),
   // TODO: support follow-up channel
-  event_sink? : async (AgentEvent) -> Unit = _ => (),
-  finish_turn_hook? : FinishTurnHook = (_, _, _) => None,
+  event_sink~ : async (AgentEvent) -> Unit = _ => (),
+  finish_turn_hook~ : FinishTurnHook = (_, _, _) => None,
 ) -> Unit {
   event_sink(AgentEvent::AgentStart)
   let mut pending_prompts = prompts
@@ -37,7 +49,9 @@ pub async fn run_agent_loop(
             message_started = true
             let msg = AgentMessage::Assistant(partial)
             messages.push(msg)
-            event_sink(AgentEvent::MessageStart(msg))
+            event_sink(AgentEvent::MessageStart(msg)) catch {
+              err => raise ListenerError(err)
+            }
           }
           TextStart(partial~, ..)
           | TextDelta(partial~, ..)
@@ -50,14 +64,18 @@ pub async fn run_agent_loop(
           | ToolCallEnd(partial~, ..) =>
             // 在 Start 之前到达的中间事件违反流契约,直接丢弃;终态消息由 generate 的返回值兜底。
             if message_started {
-              let msg = AgentMessage::Assistant(partial)
-              messages[messages.length() - 1] = msg
-              event_sink(AgentEvent::MessageUpdate(msg))
+              messages[messages.length() - 1] = AgentMessage::Assistant(partial)
+              // 事件同时带增量和快照:订阅方要么按 delta 追加,要么用 partial 重建。
+              event_sink(AgentEvent::MessageUpdate(event)) catch {
+                err => raise ListenerError(err)
+              }
             }
         }
       },
       abort~,
     ) catch {
+      // Listener failures belong to the run lifecycle, not provider generation.
+      ListenerError(err) => raise err
       err => {
         let error_message = {
           let text = err.to_string()
@@ -227,10 +245,10 @@ pub async fn run_agent_loop_continue(
   messages : Array[AgentMessage],
   tools : ArrayView[ToolDefinition],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
-  steer_channel? : () -> ArrayView[UserMessage] = fn() { [] },
-  abort? : AbortSignal = AbortSignal::never(),
-  event_sink? : async (AgentEvent) -> Unit = _ => (),
-  finish_turn_hook? : FinishTurnHook = (_, _, _) => None,
+  steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
+  abort~ : AbortSignal = AbortSignal::never(),
+  event_sink~ : async (AgentEvent) -> Unit = _ => (),
+  finish_turn_hook~ : FinishTurnHook = (_, _, _) => None,
 ) -> Unit {
   guard messages.length() > 0 else {
     fail("Cannot continue: no messages in context")

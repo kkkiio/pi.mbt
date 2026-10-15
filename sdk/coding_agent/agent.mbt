@@ -5,26 +5,25 @@
 pub fn new_coding_session(
   llm : &@agent_loop.LLM,
   cwd~ : String,
-  journal? : &@agent_session.SessionJournal = @agent_session.InMemorySessionJournal(),
-  active_tools? : ArrayView[String] = [
+  journal~ : &@agent_session.SessionJournal = @agent_session.InMemorySessionJournal(),
+  active_tools~ : ArrayView[String] = [
     BASH_TOOL_NAME,
     @agent_session.WEB_SEARCH_TOOL_NAME,
   ],
 ) -> @agent_session.AgentSession {
-  let context_files = load_agents_files(cwd)
-  let skills = discover_skills("\{cwd}/.agents/skills")
-  let system_prompt = build_system_prompt(
-    cwd~,
-    project_context_files=context_files,
-    skills~,
-  )
   let tool_registry = @tools.ToolRegistry()
   let bash_tool = new_bash_tool_definition(cwd~)
   tool_registry.register_tool(bash_tool)
   tool_registry.register_tool(@agent_session.web_search_tool)
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt~,
+    system_prompt_contributes=[
+      coding_assistant_system_prompt_contributor(),
+      tools_guidelines_system_prompt_contributor(tool_registry),
+      project_context_system_prompt_contributor(cwd~),
+      skills_system_prompt_contributor(cwd~),
+      cwd_system_prompt_contributor(cwd~),
+    ],
     journal~,
     tool_registry~,
     active_tools~,

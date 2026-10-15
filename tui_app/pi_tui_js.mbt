@@ -43,7 +43,7 @@ fn js_array(values : Array[Value]) -> Value {
 ///|
 /// pi-tui 的 `Component` 协议:每帧按宽度重渲染。
 extern "js" fn js_component(
-  render : (Int) -> FixedArray[String],
+  render : (Int32) -> FixedArray[String],
   invalidate : () -> Unit,
 ) -> Value = "(render, invalidate) => ({ render: (width) => render(width), invalidate: () => invalidate() })"
 

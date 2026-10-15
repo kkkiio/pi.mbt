@@ -23,7 +23,7 @@ pub struct Component {
 /// 元素里带换行时,终端会把后半段写到视窗下方的物理行(dock / 输入框),
 /// 而那些行的模型串没变 → 差分不会重画 → 内容残留在输入框里。
 pub trait Widget {
-  fn render(Self, Int) -> Array[String]
+  fn render(Self, Int32) -> Array[String]
   fn invalidate(Self) -> Unit = _
 }
 
@@ -36,7 +36,7 @@ impl Widget with fn invalidate(self) {
 ///|
 /// 用「按宽度取行」的闭包注册一个 pi-tui `Component`。
 /// 闭包直接捕获组件对象即可(MoonBit 的 struct 是引用语义,读到的是当前状态)。
-pub fn component_of(render : (Int) -> Array[String]) -> Component {
+pub fn component_of(render : (Int32) -> Array[String]) -> Component {
   Component::{
     handle: js_component(fn(width) { FixedArray::from_array(render(width)) }, fn() {
       ()
@@ -48,7 +48,7 @@ pub fn component_of(render : (Int) -> Array[String]) -> Component {
 /// Attach a left-click handler; pi-tui supplies document-local coordinates.
 pub fn Component::on_click(
   self : Component,
-  click : (Int, Int) -> Bool,
+  click : (Int32, Int32) -> Bool,
 ) -> Unit {
   js_component_click(self.handle, click)
 }
@@ -56,7 +56,7 @@ pub fn Component::on_click(
 ///|
 extern "js" fn js_component_click(
   handle : Value,
-  click : (Int, Int) -> Bool,
+  click : (Int32, Int32) -> Bool,
 ) -> Unit =
   #| (component, click) => { component.handleMouse = event => event.type === 'click' && event.button === 'left' && click(event.y, event.width) ? {handled:true} : undefined; }
 
@@ -86,8 +86,8 @@ pub fn mount_ref(widget : &Widget) -> Component {
 /// 带内边距的文本块(pi-tui `Text`)。
 pub fn text(
   content : String,
-  padding_x? : Int = 1,
-  padding_y? : Int = 0,
+  padding_x~ : Int32 = 1,
+  padding_y~ : Int32 = 0,
 ) -> Component {
   let args : Array[Value] = [
     Value::cast_from(content),
@@ -103,13 +103,13 @@ pub fn text(
 pub fn render_markdown_themed(
   theme : Theme,
   content : String,
-  width : Int,
-  padding_x? : Int = 1,
-  padding_y? : Int = 0,
-  body_role? : String = "text",
-  body_italic? : Bool = false,
-  preserve_ordered_markers? : Bool = false,
-  preserve_backslash_escapes? : Bool = false,
+  width : Int32,
+  padding_x~ : Int32 = 1,
+  padding_y~ : Int32 = 0,
+  body_role~ : String = "text",
+  body_italic~ : Bool = false,
+  preserve_ordered_markers~ : Bool = false,
+  preserve_backslash_escapes~ : Bool = false,
 ) -> Array[String] {
   let lines : FixedArray[String] = js_render_markdown(
     ns_get("Markdown"),
@@ -145,9 +145,9 @@ pub fn render_markdown_themed(
 extern "js" fn js_render_markdown(
   markdown_class : Value,
   content : String,
-  width : Int,
-  padding_x : Int,
-  padding_y : Int,
+  width : Int32,
+  padding_x : Int32,
+  padding_y : Int32,
   body : Value,
   body_italic : Bool,
   preserve_ordered : Bool,
@@ -180,7 +180,7 @@ extern "js" fn js_callback_highlight(
 
 ///|
 /// 空行。
-pub fn spacer(lines? : Int = 1) -> Component {
+pub fn spacer(lines~ : Int32 = 1) -> Component {
   Component::{ handle: ns_get("Spacer").new([Value::cast_from(lines)]), }
 }
 
@@ -188,8 +188,8 @@ pub fn spacer(lines? : Int = 1) -> Component {
 /// 最多显示 `max_lines` 行的文本(pi-tui `TruncatedText`)。
 pub fn truncated_text(
   content : String,
-  max_lines? : Int = 1,
-  padding_x? : Int = 0,
+  max_lines~ : Int32 = 1,
+  padding_x~ : Int32 = 0,
 ) -> Component {
   let args : Array[Value] = [
     Value::cast_from(content),
@@ -204,19 +204,19 @@ pub fn truncated_text(
 /// `basis` 为 `None` 表示按内容测量(`"auto"`),`Some(n)` 表示固定基准高度。
 pub struct StackChild {
   component : Component
-  basis : Int?
-  grow : Int
-  shrink : Int
-  min_size : Int
+  basis : Int32?
+  grow : Int32
+  shrink : Int32
+  min_size : Int32
 }
 
 ///|
 pub fn stack_child(
   component : Component,
-  basis? : Int? = None,
-  grow? : Int = 0,
-  shrink? : Int = 1,
-  min_size? : Int = 0,
+  basis~ : Int32? = None,
+  grow~ : Int32 = 0,
+  shrink~ : Int32 = 1,
+  min_size~ : Int32 = 0,
 ) -> StackChild {
   StackChild::{ component, basis, grow, shrink, min_size, }
 }
@@ -257,12 +257,12 @@ pub struct ScrollView {
 ///|
 pub fn scroll_view(
   child : Component,
-  follow_end? : Bool = true,
-  primary? : Bool = true,
-  overscroll? : String = "chain",
-  scrollbar? : String = "auto",
-  scrollbar_track_style? : ((String) -> String)? = None,
-  scrollbar_thumb_style? : ((String) -> String)? = None,
+  follow_end~ : Bool = true,
+  primary~ : Bool = true,
+  overscroll~ : String = "chain",
+  scrollbar~ : String = "auto",
+  scrollbar_track_style~ : ((String) -> String)? = None,
+  scrollbar_thumb_style~ : ((String) -> String)? = None,
 ) -> ScrollView {
   let options = Object::new()
   options["follow"] = if follow_end { "end" } else { "none" }
@@ -289,7 +289,7 @@ pub fn ScrollView::component(self : ScrollView) -> Component {
 
 ///|
 /// 当前滚动位置(逻辑行)。
-pub fn ScrollView::scroll_top(self : ScrollView) -> Int {
+pub fn ScrollView::scroll_top(self : ScrollView) -> Int32 {
   get(self.handle, "scrollTop")
 }
 
@@ -300,7 +300,7 @@ pub fn ScrollView::is_following_end(self : ScrollView) -> Bool {
 }
 
 ///|
-pub fn ScrollView::scroll_by(self : ScrollView, lines : Int) -> Unit {
+pub fn ScrollView::scroll_by(self : ScrollView, lines : Int32) -> Unit {
   let _ : Value = call(self.handle, "scrollBy", [Value::cast_from(lines)])
 }
 
@@ -327,7 +327,7 @@ pub fn editor_new(
   tui : Tui,
   on_submit : (String) -> Unit,
   theme : Theme,
-  thinking? : String = "off",
+  thinking~ : String = "off",
 ) -> Editor {
   Editor::{
     handle: js_editor_new(
@@ -358,7 +358,7 @@ fn thinking_role(level : String) -> String {
 /// 设置顶部边框渲染:`render(width)` 返回整行;返回空串则用默认边框。
 pub fn Editor::set_border_provider(
   self : Editor,
-  render : (Int, Int) -> String,
+  render : (Int32, Int32) -> String,
 ) -> Unit {
   js_editor_border_provider(self.handle, render)
 }
@@ -394,7 +394,7 @@ extern "js" fn js_callback_text(callback : (String) -> String) -> Value = "(call
 /// 绑定顶部边框渲染函数。
 extern "js" fn js_editor_border_provider(
   handle : Value,
-  render : (Int, Int) -> String,
+  render : (Int32, Int32) -> String,
 ) -> Unit = "(editor, render) => { editor.borderProvider = render; }"
 
 ///|
@@ -463,20 +463,20 @@ pub fn Editor::is_showing_autocomplete(self : Editor) -> Bool {
 
 ///|
 /// 可见宽度(东亚宽字符按 2 列计),用于对齐与截断。
-pub fn visible_width(value : String) -> Int {
+pub fn visible_width(value : String) -> Int32 {
   ns_get("visibleWidth").apply([Value::cast_from(value)])
 }
 
 ///|
 /// 按可见宽度截断(超宽加省略号)。
-pub fn truncate_to_width(value : String, width : Int) -> String {
+pub fn truncate_to_width(value : String, width : Int32) -> String {
   let args : Array[Value] = [Value::cast_from(value), Value::cast_from(width)]
   ns_get("truncateToWidth").apply(args)
 }
 
 ///|
 /// 按可见宽度换行,保留 ANSI 样式。
-pub fn wrap_text(value : String, width : Int) -> Array[String] {
+pub fn wrap_text(value : String, width : Int32) -> Array[String] {
   let args : Array[Value] = [Value::cast_from(value), Value::cast_from(width)]
   let lines : FixedArray[String] = ns_get("wrapTextWithAnsi").apply(args)
   Array::makei(lines.length(), index => lines[index])

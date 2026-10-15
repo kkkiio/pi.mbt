@@ -230,7 +230,7 @@ pub fn strikethrough(text : String) -> String {
 
 ///|
 /// 右侧补空格到 `width`(按可见宽度计算,ANSI 不计入)。
-pub fn pad_right(text : String, width : Int) -> String {
+pub fn pad_right(text : String, width : Int32) -> String {
   let padding = width - visible_width(text)
   if padding <= 0 {
     text
@@ -241,7 +241,7 @@ pub fn pad_right(text : String, width : Int) -> String {
 
 ///|
 /// 整行左内边距。
-pub fn pad_left(text : String, columns : Int) -> String {
+pub fn pad_left(text : String, columns : Int32) -> String {
   if columns <= 0 {
     text
   } else {
@@ -254,20 +254,20 @@ pub fn pad_left(text : String, columns : Int) -> String {
 pub fn bg_line(
   hex_bg : (String) -> String,
   text : String,
-  width : Int,
+  width : Int32,
 ) -> String {
   hex_bg(pad_right(text, width))
 }
 
 ///|
 /// 纯背景色的空行。
-pub fn bg_blank(hex_bg : (String) -> String, width : Int) -> String {
+pub fn bg_blank(hex_bg : (String) -> String, width : Int32) -> String {
   hex_bg(" ".repeat(if width > 0 { width } else { 0 }))
 }
 
 ///|
 /// 相对时间(毫秒 → "3s" / "1m20s")。
-pub fn format_elapsed(milliseconds : Int) -> String {
+pub fn format_elapsed(milliseconds : Int32) -> String {
   let seconds = milliseconds / 1000
   if seconds < 60 {
     "\{seconds}s"
@@ -285,7 +285,7 @@ pub fn format_elapsed(milliseconds : Int) -> String {
 ///|
 /// 紧凑数字,对齐 pi `formatTokens`:
 /// <1k 原样、<10k 一位小数 k、<1M 整数 k、<10M 一位小数 M、否则整数 M。
-pub fn format_count(value : Int) -> String {
+pub fn format_count(value : Int32) -> String {
   if value < 1000 {
     value.to_string()
   } else if value < 10000 {

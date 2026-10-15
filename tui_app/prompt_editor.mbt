@@ -15,7 +15,7 @@ pub struct PromptEditor {
 pub fn prompt_editor_new(
   tui : Tui,
   theme : Theme,
-  thinking? : String = "off",
+  thinking~ : String = "off",
 ) -> PromptEditor {
   let handler : Ref[(String) -> Unit] = Ref(fn(_text) { () })
   let editor = editor_new(
@@ -65,7 +65,7 @@ pub fn PromptEditor::set_text(self : PromptEditor, text : String) -> Unit {
 /// 设置输入框上边框渲染(用于嵌入运行状态)。
 pub fn PromptEditor::set_border_provider(
   self : PromptEditor,
-  render : (Int, Int) -> String,
+  render : (Int32, Int32) -> String,
 ) -> Unit {
   self.editor.set_border_provider(render)
 }

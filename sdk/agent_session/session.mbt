@@ -1,76 +1,4 @@
 ///|
-/// pi wraps a compaction summary in these markers when it projects the summary
-/// into the model context (`COMPACTION_SUMMARY_PREFIX` / `_SUFFIX`).
-const COMPACTION_SUMMARY_PREFIX : String = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n"
-
-///|
-const COMPACTION_SUMMARY_SUFFIX : String = "\n</summary>"
-
-///|
-/// 从 journal 条目投影出模型上下文。压缩条目把此前的历史换成"总结 + 保留尾部"
-/// (pi 的 `buildContextEntries` + `sessionEntryToContextMessages`):总结作为一条
-/// user 消息注入,被摘要掉的历史不再进上下文。
-///
-/// `context_edit` 条目剔除它指向的目标(pi 的 `projectContextEntry` 在
-/// `replacement === null` 时返回空)。edits 从选中的条目里收集,所以被最新
-/// 压缩丢掉的那一段里的 edit 不再生效。
-fn project_messages(
-  entries : ArrayView[SessionEntry],
-) -> Array[@agent_loop.AgentMessage] {
-  let messages : Array[@agent_loop.AgentMessage] = []
-  let mut compaction_index : Int? = None
-  for i, entry in entries {
-    if entry.content is Compaction(_) {
-      compaction_index = Some(i)
-    }
-  }
-  let selected = match compaction_index {
-    None => entries.to_owned()
-    Some(i) => {
-      guard entries[i].content is Compaction(first_kept_entry_id~, ..) else {
-        abort("expected compaction")
-      }
-      let selected = [entries[i]]
-      let mut keep = false
-      for j in 0..<i {
-        keep = keep || entries[j].id == first_kept_entry_id
-        if keep {
-          selected.push(entries[j])
-        }
-      }
-      selected.append(entries[i + 1:].to_owned())
-      selected
-    }
-  }
-  let omitted : Set[String] = Set([])
-  for entry in selected {
-    if entry.content is ContextEdit(target_id~) {
-      omitted.add(target_id)
-    }
-  }
-  for i, entry in selected {
-    guard !omitted.contains(entry.id) else { continue }
-    match entry.content {
-      Compaction(_) if i > 0 => ()
-      Compaction(summary~, ..) =>
-        messages.push(
-          @agent_loop.AgentMessage::User({
-            content: [
-              @agent_loop.InputMessageContent::Text(
-                COMPACTION_SUMMARY_PREFIX + summary + COMPACTION_SUMMARY_SUFFIX,
-              ),
-            ],
-            timestamp: entry.timestamp,
-          }),
-        )
-      Message(m) => messages.push(m)
-      _ => ()
-    }
-  }
-  messages
-}
-
-///|
 pub struct AgentSession {
   journal : &SessionJournal
   llm : &@agent_loop.LLM
@@ -78,25 +6,28 @@ pub struct AgentSession {
   active_tools : Array[String]
   fanout : FanOutListener
   mut message_buffer : Array[@agent_loop.AgentMessage]
-  system_prompt : String
+  system_prompt_contributes : Array[SystemPromptContributor]
+  auto_refresh_system_prompt : Bool
   /// Agent-level auto-retry policy, read at every retryable failure.
   retry_settings : RetrySettings
+  /// Current system prompt.
+  mut system_prompt_cache : (String, Array[String])?
   /// Called after a completed assistant turn and all of its tool results, but
   /// before `turn_end`. Read at every run, so a caller may replace or wrap it.
   mut finish_turn_hook : @agent_loop.FinishTurnHook
-  /// 当前运行的中断控制器(每次 prompt 新建,结束后清空)。只有它能置位。
   mut active_run_abort_controller : @agent_loop.AbortController?
 }
 
 ///|
 pub fn AgentSession::AgentSession(
   llm : &@agent_loop.LLM,
-  system_prompt~ : String,
-  journal? : &SessionJournal = InMemorySessionJournal(),
-  tool_registry? : @tools.ToolRegistry = @tools.ToolRegistry(),
-  active_tools? : ArrayView[String] = [],
-  retry_settings? : RetrySettings = RetrySettings::default(),
-  finish_turn_hook? : @agent_loop.FinishTurnHook = (_, _, _) => None,
+  system_prompt_contributes~ : Array[SystemPromptContributor] = [],
+  journal~ : &SessionJournal = InMemorySessionJournal(),
+  tool_registry~ : @tools.ToolRegistry = @tools.ToolRegistry(),
+  active_tools~ : ArrayView[String] = [],
+  retry_settings~ : RetrySettings = RetrySettings::default(),
+  finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _, _) => None,
+  auto_refresh_system_prompt~ : Bool = false,
 ) -> AgentSession {
   AgentSession::{
     tool_registry,
@@ -104,11 +35,13 @@ pub fn AgentSession::AgentSession(
     journal,
     fanout: FanOutListener::FanOutListener(),
     llm,
-    system_prompt,
+    system_prompt_contributes,
     retry_settings,
+    system_prompt_cache: None,
     finish_turn_hook,
     active_run_abort_controller: None,
     message_buffer: project_messages(journal.get_entries()),
+    auto_refresh_system_prompt,
   }
 }
 
@@ -120,6 +53,10 @@ pub fn AgentSession::AgentSession(
 /// mirroring pi's session-level auto-retry: the failed turn's terminal Error
 /// message is dropped and the assistant generation continues — the user
 /// prompt and any prior tool work stay in place and are journaled once.
+///
+/// Like pi's `Agent.runWithLifecycle`, a runtime/listener failure closes the
+/// run with an assistant Error/Aborted message and terminal events. If a
+/// listener also rejects those events, that error escapes; cleanup still runs.
 pub async fn AgentSession::prompt(
   self : AgentSession,
   input : Array[@agent_loop.UserMessage],
@@ -135,6 +72,37 @@ pub async fn AgentSession::prompt(
       fail("unknown tool: \{name}")
     }
     tools.push(tool)
+  }
+  let system_prompt = match self.system_prompt_cache {
+    Some(c) =>
+      if self.auto_refresh_system_prompt {
+        let parts = self.system_prompt_contributes.filter_map(f => {
+          match f(self.active_tools) {
+            "" => None
+            s => Some(s)
+          }
+        })
+        if parts != c.1 {
+          let p = parts.join("\n")
+          self.system_prompt_cache = Some((p, parts))
+          p
+        } else {
+          c.0
+        }
+      } else {
+        c.0
+      }
+    None => {
+      let parts = self.system_prompt_contributes.filter_map(f => {
+        match f(self.active_tools) {
+          "" => None
+          s => Some(s)
+        }
+      })
+      let p = parts.join("\n")
+      self.system_prompt_cache = Some((p, parts))
+      p
+    }
   }
   let tool_map = tools.iter().map(t => (t.name, t)) |> Map::from_iter
   let agent_tools = tools.map(d => {
@@ -155,6 +123,7 @@ pub async fn AgentSession::prompt(
   let abort_controller = @agent_loop.AbortController::new()
   self.active_run_abort_controller = Some(abort_controller)
   defer {
+    self.message_buffer = project_messages(self.journal.get_entries())
     self.active_run_abort_controller = None
   }
   let mut retry_attempt = 0
@@ -174,7 +143,13 @@ pub async fn AgentSession::prompt(
   }
   let mut pending_prompts = input
   for ;; {
+    let mut assistant_metadata : @agent_loop.AssistantMessage? = None
     let sink : async (@agent_loop.AgentEvent) -> Unit = event => {
+      match event {
+        MessageStart(Assistant(message)) | MessageEnd(Assistant(message)) =>
+          assistant_metadata = Some(message)
+        _ => ()
+      }
       // Persist complete messages at their terminal events. User and
       // assistant messages are complete at MessageEnd (assistant streaming
       // events in between carry in-flight snapshots whose stop_reason is
@@ -199,45 +174,74 @@ pub async fn AgentSession::prompt(
         if content is Message(Assistant(_)) {
           last_assistant_entry_id = Some(stored[0].id)
         }
+        if content is Message(message) {
+          self.message_buffer.push(message)
+        }
       }
       self.fanout.on_event(AgentSessionEvent::Loop(event))
-      // 成功的 assistant 响应结束当前重试窗口并归零,所以同一次 prompt 里后续的
-      // 调用各自重新拿满预算(pi 在 message_end 上重置)。取消不报成功。
-      match event {
-        MessageEnd(Assistant(message)) if retry_attempt > 0 =>
-          match message.stop_reason {
-            Aborted => settle_retry(false, Some("Retry cancelled"))
-            Error => ()
-            _ => settle_retry(true, None)
-          }
-        _ => ()
+      // reset retry window
+      if retry_attempt > 0 && event is MessageEnd(Assistant(message)) {
+        match message.stop_reason {
+          Aborted => settle_retry(false, Some("Retry cancelled"))
+          Error => ()
+          _ => settle_retry(true, None)
+        }
       }
     }
     // 有 prompt 就是新回合;没有 prompt 就是从现有 transcript 续跑(重试走这条)。
     // 后者校验尾部,所以重试能进行本身就说明失败回合已被 `context_edit` 剔除。
-    if pending_prompts.length() > 0 {
-      @agent_loop.run_agent_loop(
-        self.llm,
-        self.system_prompt,
-        self.message_buffer.copy(),
-        agent_tools,
-        pending_prompts,
-        tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
-        abort=abort_controller.signal(),
-        event_sink=sink,
-        finish_turn_hook=self.finish_turn_hook,
-      )
-    } else {
-      @agent_loop.run_agent_loop_continue(
-        self.llm,
-        self.system_prompt,
-        self.message_buffer.copy(),
-        agent_tools,
-        tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
-        abort=abort_controller.signal(),
-        event_sink=sink,
-        finish_turn_hook=self.finish_turn_hook,
-      )
+    let mut run_escaped = false
+    try {
+      if pending_prompts.length() > 0 {
+        @agent_loop.run_agent_loop(
+          self.llm,
+          system_prompt,
+          self.message_buffer.copy(),
+          agent_tools,
+          pending_prompts,
+          tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+          abort=abort_controller.signal(),
+          event_sink=sink,
+          finish_turn_hook=self.finish_turn_hook,
+        )
+      } else {
+        @agent_loop.run_agent_loop_continue(
+          self.llm,
+          system_prompt,
+          self.message_buffer.copy(),
+          agent_tools,
+          tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+          abort=abort_controller.signal(),
+          event_sink=sink,
+          finish_turn_hook=self.finish_turn_hook,
+        )
+      }
+    } catch {
+      err => {
+        // 逃出循环的错误按构造不是 provider 失败——provider 错误由 generate
+        // 折成 error AssistantMessage 走正常终态路径,能到这里的是监听器、
+        // journal 等本地失败。合成失败照常落盘,但不参与 auto-retry。
+        run_escaped = true
+        let failure : @agent_loop.AssistantMessage = {
+          content: [@agent_loop.AssistantMessageContent::Text("", signature={})],
+          api: assistant_metadata.map(m => m.api).unwrap_or(""),
+          provider: assistant_metadata.map(m => m.provider).unwrap_or(""),
+          model: assistant_metadata.map(m => m.model).unwrap_or(""),
+          stop_reason: if abort_controller.signal().is_aborted() {
+            Aborted
+          } else {
+            Error
+          },
+          error_message: Some(err.to_string()),
+          usage: None,
+          timestamp: @env.now(),
+        }
+        // pi's handleRunFailure uses the same event path, including listeners.
+        sink(MessageStart(Assistant(failure)))
+        sink(MessageEnd(Assistant(failure)))
+        sink(TurnEnd(failure, []))
+        sink(AgentEnd([Assistant(failure)]))
+      }
     }
     self.message_buffer = project_messages(self.journal.get_entries())
     if self.message_buffer.last()
@@ -246,7 +250,8 @@ pub async fn AgentSession::prompt(
           { stop_reason: Error, error_message, .. }
         )
       ) {
-      if self.retry_settings.enabled &&
+      if !run_escaped &&
+        self.retry_settings.enabled &&
         error_message is Some(message) &&
         is_retryable_error_message(message) &&
         retry_attempt < self.retry_settings.max_retries {
@@ -336,6 +341,11 @@ pub fn AgentSession::abort(self : AgentSession) -> Unit {
 }
 
 ///|
+/// A function that contributes to the system prompt based on the active tools.
+/// The prompt should end with a newline.
+pub type SystemPromptContributor = (ArrayView[String]) -> String
+
+///|
 /// 退避竞速的结局。`@async.any` 只返回胜者的值、不告知下标,所以每个分支都要在
 /// 返回值里带上自己的编码。
 priv enum BackoffWait {
@@ -346,7 +356,7 @@ priv enum BackoffWait {
 ///|
 /// 退避睡眠与中断竞速:谁先到谁赢,输的一支被 `@async.any` 取消。
 async fn wait_backoff(
-  delay_ms : Int,
+  delay_ms : Int32,
   abort : @agent_loop.AbortSignal,
 ) -> BackoffWait {
   @async.any([
@@ -359,4 +369,68 @@ async fn wait_backoff(
       BackoffWait::Aborted
     },
   ])
+}
+
+///|
+/// 从 journal 条目投影出模型上下文。压缩条目把此前的历史换成"总结 + 保留尾部"
+/// (pi 的 `buildContextEntries` + `sessionEntryToContextMessages`):总结作为一条
+/// user 消息注入,被摘要掉的历史不再进上下文。
+///
+/// `context_edit` 条目剔除它指向的目标(pi 的 `projectContextEntry` 在
+/// `replacement === null` 时返回空)。edits 从选中的条目里收集,所以被最新
+/// 压缩丢掉的那一段里的 edit 不再生效。
+fn project_messages(
+  entries : ArrayView[SessionEntry],
+) -> Array[@agent_loop.AgentMessage] {
+  let messages : Array[@agent_loop.AgentMessage] = []
+  let mut compaction_index : Int32? = None
+  for i, entry in entries {
+    if entry.content is Compaction(_) {
+      compaction_index = Some(i)
+    }
+  }
+  let selected = match compaction_index {
+    None => entries.to_owned()
+    Some(i) => {
+      guard entries[i].content is Compaction(first_kept_entry_id~, ..) else {
+        abort("expected compaction")
+      }
+      let selected = [entries[i]]
+      let mut keep = false
+      for j in 0..<i {
+        keep = keep || entries[j].id == first_kept_entry_id
+        if keep {
+          selected.push(entries[j])
+        }
+      }
+      selected.append(entries[i + 1:].to_owned())
+      selected
+    }
+  }
+  let omitted : Set[String] = Set([])
+  for entry in selected {
+    if entry.content is ContextEdit(target_id~) {
+      omitted.add(target_id)
+    }
+  }
+  for i, entry in selected {
+    guard !omitted.contains(entry.id) else { continue }
+    match entry.content {
+      Compaction(_) if i > 0 => ()
+      Compaction(summary~, ..) =>
+        messages.push(
+          @agent_loop.AgentMessage::User({
+            content: [
+              @agent_loop.InputMessageContent::Text(
+                COMPACTION_SUMMARY_PREFIX + summary + COMPACTION_SUMMARY_SUFFIX,
+              ),
+            ],
+            timestamp: entry.timestamp,
+          }),
+        )
+      Message(m) => messages.push(m)
+      _ => ()
+    }
+  }
+  messages
 }

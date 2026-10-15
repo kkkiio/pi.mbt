@@ -69,15 +69,11 @@ CLI 契约由 `tests/cram/` 下的 `mooncram` 转录持续验证。
 ### Live Provider Test Policy
 
 真实 provider 测试放在 `tests/live/`,与离线套件分离。
+可以只断言稳定契约(如最终回复恰好为 `Paris`)，避免测试太脆弱。
 
-- 运行方式:`just eval`(若本地存在 `.env.test` 会自动加载);或显式
-  `DEEPSEEK_API_KEY=sk-... moon cram test --work-directory . tests/live`。本地 key 放在
-  git-ignored 的 `.env*` 文件里,跑 live 测试前先检查是否存在。
-- 没有 key(且没有 `.env.test`)时用例会失败,这是预期行为——live 测试是
-  opt-in,不假装离线可过。
-- 转录只断言稳定契约(如最终回复恰好为 `Paris`),不复现模型输出细节。
-- 需要验证凭证来源(auth.json vs 环境变量)时,用隔离的 `PIM_CONFIG_DIR` 并在
-  子 shell 里 `unset` 环境变量,这样才能真正证明读的是哪个来源。
+### Github Issues Tracking Policy
+
+创建 `enhancement` 时，只描述需求，不写方案。
 
 ### API Comment Policy
 
@@ -98,5 +94,8 @@ just build
 跑真实 provider 的 live 测试(需要 `DEEPSEEK_API_KEY`):
 
 ```bash
-moon cram test --work-directory . tests/live
+# 若本地存在 `.env.test` 会自动加载
+just eval
+# 或者手动设置 key
+DEEPSEEK_API_KEY=sk-... moon cram test --work-directory . tests/live
 ```

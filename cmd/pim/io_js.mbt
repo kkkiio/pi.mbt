@@ -56,7 +56,7 @@ extern "js" fn out_new() -> JsOut =
 let output : JsOut = out_new()
 
 ///|
-extern "js" fn JsOut::enqueue(self : JsOut, text : String, fd : Int) -> Unit =
+extern "js" fn JsOut::enqueue(self : JsOut, text : String, fd : Int32) -> Unit =
   #| (out, text, fd) => out.write(text, fd)
 
 ///|
@@ -86,5 +86,5 @@ pub async fn flush_output() -> Unit {
 
 ///|
 /// `process.exit`. Never returns, so every queued write must be flushed first.
-extern "js" fn proc_exit_ffi(code : Int) -> Unit =
+extern "js" fn proc_exit_ffi(code : Int32) -> Unit =
   #| (code) => process.exit(code)

@@ -25,7 +25,7 @@ extern "js" fn sanitize_label(value : String) -> String =
 
 ///|
 /// Compact count formatting uses pi's rounding (not integer truncation).
-extern "js" fn format_footer_count(value : Int) -> String =
+extern "js" fn format_footer_count(value : Int32) -> String =
   #|(value) => value < 1000 ? String(value) : value < 10000 ? `${(value / 1000).toFixed(1)}k` : value < 1000000 ? `${Math.round(value / 1000)}k` : value < 10000000 ? `${(value / 1000000).toFixed(1)}M` : `${Math.round(value / 1000000)}M`
 
 ///|
@@ -40,16 +40,16 @@ pub struct Footer {
   /// 会话名(pi 显示 ` • session`);None 时不显示。
   mut session_name : String?
   mut usage_set : Bool
-  mut input_tokens : Int
-  mut output_tokens : Int
-  mut cache_read : Int
-  mut cache_write : Int
+  mut input_tokens : Int32
+  mut output_tokens : Int32
+  mut cache_read : Int32
+  mut cache_write : Int32
   mut total_cost : Float
   /// 最近一次请求的缓存命中率(0–100),未知时为 None。
   mut cache_hit_rate : Float?
   /// 上下文占用比例(0–100)与窗口大小,未知时 None。
   mut context_percent : Float?
-  mut context_window : Int?
+  mut context_window : Int32?
   mut auto_compact : Bool
 }
 
@@ -104,7 +104,7 @@ pub fn Footer::thinking(self : Footer) -> String {
 pub fn Footer::set_usage(
   self : Footer,
   usage : @agent_loop.Usage,
-  update_cache_hit? : Bool = true,
+  update_cache_hit~ : Bool = true,
 ) -> Unit {
   self.usage_set = true
   self.input_tokens += usage.input
@@ -149,7 +149,7 @@ pub fn Footer::set_session_name(self : Footer, name : String?) -> Unit {
 pub fn Footer::set_context(
   self : Footer,
   percent : Float,
-  window : Int,
+  window : Int32,
 ) -> Unit {
   self.context_percent = Some(percent)
   self.context_window = Some(window)
@@ -157,7 +157,7 @@ pub fn Footer::set_context(
 
 ///|
 /// Set a known context window while its current occupancy is unknown.
-pub fn Footer::set_context_unknown(self : Footer, window : Int) -> Unit {
+pub fn Footer::set_context_unknown(self : Footer, window : Int32) -> Unit {
   self.context_percent = None
   self.context_window = Some(window)
 }
@@ -291,7 +291,7 @@ fn Footer::right_side(self : Footer) -> String {
 
 ///|
 /// 把 `left` 与 `right` 排成一行,右侧右对齐(至少留 2 空格);空间不足时截断右侧。
-fn align_line(left : String, right : String, width : Int) -> String {
+fn align_line(left : String, right : String, width : Int32) -> String {
   if right.is_empty() {
     return truncate_to_width(left, width)
   }

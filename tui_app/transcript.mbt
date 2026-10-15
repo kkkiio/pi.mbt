@@ -29,30 +29,30 @@ pub struct Transcript {
   mut expanded_tool_output : Bool
   /// 思考内容是否展开(默认展开,`Ctrl+T` 折叠)。
   mut expanded_thinking : Bool
-  tool_overrides : Map[Int, Bool]
+  tool_overrides : Map[Int32, Bool]
   thinking_overrides : Map[String, Bool]
   /// One latest render per message block; streaming replaces entries instead of growing the cache.
-  markdown_cache : Map[String, (String, Int, Bool, String, Array[String])]
-  generic_tool_cache : Map[Int, (Int, Bool, Bool, Array[String])]
+  markdown_cache : Map[String, (String, Int32, Bool, String, Array[String])]
+  generic_tool_cache : Map[Int32, (Int32, Bool, Bool, Array[String])]
 }
 
 ///|
-const MAX_ITEMS : Int = 400
+const MAX_ITEMS : Int32 = 400
 
 ///|
-const MAX_RETAINED_TEXT_WIDTH : Int = 65_536
+const MAX_RETAINED_TEXT_WIDTH : Int32 = 65_536
 
 ///|
 /// 折叠(未展开)时工具结果预览的行数。
-const TOOL_PREVIEW_LINES : Int = 10
+const TOOL_PREVIEW_LINES : Int32 = 10
 
 ///|
 /// 折叠(未展开)时 bash 输出预览的行数。
-const BASH_PREVIEW_LINES : Int = 5
+const BASH_PREVIEW_LINES : Int32 = 5
 
 ///|
 /// 内容左内边距(pi 的 paddingX=1)。
-const PAD : Int = 1
+const PAD : Int32 = 1
 
 ///|
 /// 创建空的聊天记录。
@@ -181,7 +181,7 @@ pub fn Transcript::push_tool_call(
   name : String,
   arguments : Json,
   id~ : String,
-  timed? : Bool = false,
+  timed~ : Bool = false,
 ) -> Unit {
   self.push_item(
     TranscriptItem::Tool(
@@ -209,7 +209,7 @@ pub fn Transcript::push_tool_result(
   text : String,
   is_error : Bool,
   id~ : String,
-  details? : Json? = None,
+  details~ : Json? = None,
 ) -> Unit {
   let mut index = self.items.length()
   while index > 0 {
@@ -289,7 +289,7 @@ pub fn Transcript::toggle_expanded_tool_output(self : Transcript) -> Unit {
 
 ///|
 /// 返回当前保留的顶层消息项数量。
-pub fn Transcript::item_count(self : Transcript) -> Int {
+pub fn Transcript::item_count(self : Transcript) -> Int32 {
   self.items.length()
 }
 
@@ -301,7 +301,7 @@ pub fn Transcript::item_count(self : Transcript) -> Int {
 /// `\n`/`\r` 时终端会把后半段写到视窗下方(dock,也就是输入框那几行)的物理行上,
 /// 而那些行的模型串没变 → 永远不会被重画 → transcript 内容残留在输入框里。
 /// 最终统一拆物理行并截到视口宽度,保护边框、标题和提示等不换行的内容。
-pub impl Widget for Transcript with fn render(self : Transcript, width : Int) -> Array[
+pub impl Widget for Transcript with fn render(self : Transcript, width : Int32) -> Array[
   String,
 ] {
   let safe_width = if width < 0 { 0 } else { width }
@@ -347,7 +347,7 @@ pub extend Transcript with Widget::{render, invalidate}
 ///|
 /// Left-click coordinates are logical document rows, retargeted by ScrollView.
 /// Recompute spans at the current width so resizing cannot leave stale hit areas.
-pub fn Transcript::click(self : Transcript, row : Int, width : Int) -> Bool {
+pub fn Transcript::click(self : Transcript, row : Int32, width : Int32) -> Bool {
   let mut top = 0
   for index, item in self.items {
     let rendered = render_item(self, item, width, index)
@@ -430,7 +430,7 @@ fn Transcript::push_item(self : Transcript, item : TranscriptItem) -> Unit {
 
 ///|
 /// 找到最后一条 assistant,没有时就创建一条。
-fn Transcript::ensure_assistant(self : Transcript) -> Int {
+fn Transcript::ensure_assistant(self : Transcript) -> Int32 {
   if self.items.is_empty() {
     self.start_assistant()
   } else {
@@ -451,8 +451,8 @@ fn Transcript::ensure_assistant(self : Transcript) -> Int {
 fn render_item(
   transcript : Transcript,
   item : TranscriptItem,
-  width : Int,
-  index : Int,
+  width : Int32,
+  index : Int32,
 ) -> Array[String] {
   let theme = transcript.theme
   match item {
@@ -548,7 +548,7 @@ fn render_item(
 fn render_user(
   transcript : Transcript,
   text : String,
-  width : Int,
+  width : Int32,
   key : String,
 ) -> Array[String] {
   let theme = transcript.theme
@@ -575,7 +575,7 @@ fn render_user(
 fn render_plain(
   text : String,
   color : (String) -> String,
-  width : Int,
+  width : Int32,
 ) -> Array[String] {
   let lines : Array[String] = []
   let content_width = available_width(width, PAD * 2)
@@ -602,8 +602,8 @@ fn render_assistant(
   blocks : Array[(String, Bool)],
   stop_reason : String?,
   error_message : String?,
-  width : Int,
-  item_index : Int,
+  width : Int32,
+  item_index : Int32,
 ) -> Array[String] {
   let theme = transcript.theme
   let lines : Array[String] = []
@@ -659,7 +659,7 @@ fn render_assistant_block(
   text : String,
   thinking : Bool,
   expanded : Bool,
-  width : Int,
+  width : Int32,
   key : String,
 ) -> Array[String] {
   if thinking && !expanded {
@@ -680,10 +680,10 @@ fn Transcript::cached_markdown(
   self : Transcript,
   key : String,
   text : String,
-  width : Int,
+  width : Int32,
   body_role~ : String,
-  body_italic? : Bool = false,
-  user? : Bool = false,
+  body_italic~ : Bool = false,
+  user~ : Bool = false,
 ) -> Array[String] {
   let true_color = terminal_true_color()
   if self.markdown_cache.get(key)
@@ -719,7 +719,7 @@ fn render_tool(
   details : Json?,
   started : Double?,
   ended : Double?,
-  width : Int,
+  width : Int32,
   expanded~ : Bool,
 ) -> Array[String] {
   if name == "bash" {
@@ -770,7 +770,7 @@ fn render_tool_generic(
   arguments : Json,
   result : String?,
   is_error : Bool,
-  width : Int,
+  width : Int32,
   expanded~ : Bool,
 ) -> Array[String] {
   let theme = transcript.theme
@@ -860,7 +860,7 @@ fn render_bash(
   details : Json?,
   started : Double?,
   ended : Double?,
-  width : Int,
+  width : Int32,
   expanded~ : Bool,
 ) -> Array[String] {
   let theme = transcript.theme
@@ -972,9 +972,9 @@ fn render_bash(
 fn result_preview(
   theme : Theme,
   text : String,
-  max_lines : Int,
+  max_lines : Int32,
   expanded : Bool,
-  width : Int,
+  width : Int32,
   tail~ : Bool,
 ) -> Array[String] {
   let all : Array[String] = []
@@ -1079,7 +1079,7 @@ extern "js" fn format_tool_duration(ms : Double) -> String =
 
 ///|
 /// 取得扣除缩进后的可用宽度。
-fn available_width(width : Int, indent : Int) -> Int {
+fn available_width(width : Int32, indent : Int32) -> Int32 {
   let available = width - indent
   if available < 1 {
     1

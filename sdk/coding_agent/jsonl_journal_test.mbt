@@ -14,9 +14,9 @@ pub fn BufferWriter::BufferWriter() -> BufferWriter {
 pub impl @io.Writer for BufferWriter with fn write_once(
   self : BufferWriter,
   bytes : Bytes,
-  offset~ : Int,
-  len~ : Int,
-) -> Int {
+  offset~ : Int32,
+  len~ : Int32,
+) -> Int32 {
   self.buf.write_bytes(bytes[offset:offset + len])
   len
 }

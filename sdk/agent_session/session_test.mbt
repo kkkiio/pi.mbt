@@ -57,7 +57,7 @@ fn ok_message() -> @agent_loop.AssistantMessage {
 /// A user message with the fixed timestamp the journal snapshots pin.
 fn user_message(
   text : String,
-  timestamp? : UInt64 = 1786903823973,
+  timestamp~ : UInt64 = 1786903823973,
 ) -> @agent_loop.UserMessage {
   { content: [@agent_loop.InputMessageContent::Text(text)], timestamp, }
 }
@@ -225,11 +225,7 @@ async test "hydrating a compacted journal projects the summary and kept tail" {
       { id: "u2", content: Message(User(user_message("after"))), },
     ]),
   )
-  let session = @agent_session.AgentSession(
-    StubLLM::{ },
-    system_prompt="",
-    journal~,
-  )
+  let session = @agent_session.AgentSession(StubLLM::{ }, journal~)
   inspect(
     context_lines(session.message_buffer),
     content=(
@@ -278,11 +274,7 @@ async test "latest compaction omits older summaries within the kept range" {
         { id: "after", content: Message(User(user_message("after"))), },
       ]),
     )
-    let session = @agent_session.AgentSession(
-      StubLLM::{ },
-      system_prompt="",
-      journal~,
-    )
+    let session = @agent_session.AgentSession(StubLLM::{ }, journal~)
     let expected_tail = if first_kept_entry_id == "kept" {
       "\nuser: kept turn\nuser: between"
     } else {
@@ -328,7 +320,7 @@ async test "session hydration keeps Error assistant messages like every other en
   )
   // The constructor hydrates `message_buffer` from the journal verbatim.
   let llm = StubLLM::{ }
-  let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
+  let session = @agent_session.AgentSession(llm, journal~)
   assert_eq(session.message_buffer.length(), 3)
   let user_count = session.message_buffer
     .filter(m => m is @agent_loop.AgentMessage::User(_))
@@ -372,7 +364,7 @@ impl @agent_loop.LLM for ScriptedLLM with fn generate(
 /// pi pins this contract in agent-session-retry-events.test.ts.
 async test "session prompt emits pi's event order" {
   let events : Array[String] = []
-  let session = @agent_session.AgentSession(ScriptedLLM::{ }, system_prompt="")
+  let session = @agent_session.AgentSession(ScriptedLLM::{ })
   session.subscribe(event => {
     guard event is Loop(e) else { return }
     events.push(
@@ -428,7 +420,7 @@ impl @agent_loop.LLM for NoStartLLM with fn generate(
 /// provider.
 async test "mid-stream events before Start are dropped" {
   let events : Array[String] = []
-  let session = @agent_session.AgentSession(NoStartLLM::{ }, system_prompt="")
+  let session = @agent_session.AgentSession(NoStartLLM::{ })
   session.subscribe(event => {
     guard event is Loop(e) else { return }
     events.push(
@@ -505,11 +497,7 @@ impl @agent_loop.LLM for InterruptibleLLM with fn generate(
 /// and the aborted message is journaled (pi: `stopReason: "aborted"`).
 async test "session interrupt ends the turn as aborted and journals it" {
   let journal = @agent_session.InMemorySessionJournal()
-  let session = @agent_session.AgentSession(
-    InterruptibleLLM::{ },
-    system_prompt="",
-    journal~,
-  )
+  let session = @agent_session.AgentSession(InterruptibleLLM::{ }, journal~)
   @async.with_task_group() <| group => {
     group.spawn_bg(async fn() {
       @async.sleep(20)
@@ -607,7 +595,6 @@ async test "session offers only its active tools to the model" {
   let seen : Array[String] = []
   let session = @agent_session.AgentSession(
     ToolCapturingLLM::{ seen, },
-    system_prompt="",
     tool_registry=registry,
     active_tools=["read"],
   )
@@ -631,7 +618,6 @@ async test "activating an unregistered tool fails at prompt time" {
   registry.register_tool(fake_tool("bash"))
   let session = @agent_session.AgentSession(
     StubLLM::{ },
-    system_prompt="",
     tool_registry=registry,
     active_tools=["bash", "web_search"],
   )
@@ -772,7 +758,6 @@ async test "interrupt during a running tool cancels it and records aborted resul
   ])
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     journal~,
     tool_registry=registry,
     active_tools=["slow", "marker"],
@@ -844,12 +829,22 @@ fn probe_tools(log : Array[String]) -> @tools.ToolRegistry {
 }
 
 ///|
-/// 每个事件一行 JSON(与 `--mode json` 同一个 `ToJson`),过滤掉流式增量。
-fn event_lines(events : Array[@agent_session.AgentSessionEvent]) -> String {
-  events
-  .filter(event => !(event is Loop(MessageUpdate(_))))
-  .map(event => event.to_json().stringify())
-  .join("\n")
+/// 每个事件一行 JSON(与 `--mode json` 同一个投影),过滤掉流式增量。
+///
+/// 投影可能 raise(snapshot 不合约的 `toolcall_start`),而闭包类型没有 raise,
+/// 所以这里用循环把 raise 留在函数体里。
+fn event_lines(
+  events : Array[@agent_session.AgentSessionEvent],
+) -> String raise {
+  let out = StringBuilder()
+  for event in events {
+    guard !(event is Loop(MessageUpdate(_))) else { continue }
+    if !out.is_empty() {
+      out.write_string("\n")
+    }
+    out.write_string(@agent_session.to_pi_json(event).stringify())
+  }
+  out.to_string()
 }
 
 ///|
@@ -921,12 +916,195 @@ async test "retry delay honours the cap and saturates on a huge attempt" {
 }
 
 ///|
+/// Observe the actual next model request, not the session's private buffer.
+struct ContextCapturingLLM {
+  inner : @faux.FauxLLM
+  contexts : Array[Array[@agent_loop.AgentMessage]]
+}
+
+///|
+impl @agent_loop.LLM for ContextCapturingLLM with fn generate(
+  self : ContextCapturingLLM,
+  ctx : @agent_loop.Context,
+  sink~ : async (@agent_loop.GenerationEvent) -> Unit,
+  abort~ : @agent_loop.AbortSignal,
+) -> @agent_loop.AssistantMessage {
+  self.contexts.push(ctx.messages.to_owned())
+  self.inner.generate(ctx, sink~, abort~)
+}
+
+///|
+/// pi's handleRunFailure closes a listener failure with an error/aborted turn.
+/// The next prompt keeps the journaled user, but not the interrupted partial.
+async test "listener failures close the run and preserve the next model context" {
+  for phase in ["start", "update", "turn_end", "aborted_update"] {
+    let inner = @faux.FauxLLM::FauxLLM(chunk_size=3)
+    inner.set_responses([
+      @faux.faux_message([@faux.faux_text("discarded response")]),
+      @faux.faux_message([@faux.faux_text("next answer")]),
+    ])
+    let llm = ContextCapturingLLM::{ inner, contexts: [], }
+    let journal = @agent_session.InMemorySessionJournal()
+    let session = @agent_session.AgentSession(llm, journal~)
+    let mut failed = false
+    let recovery_events : Array[String] = []
+    session.subscribe(event => {
+      let should_fail = match event {
+        Loop(MessageStart(Assistant(_))) => phase == "start"
+        Loop(MessageUpdate(TextDelta(..))) =>
+          phase == "update" || phase == "aborted_update"
+        Loop(TurnEnd(_, _)) => phase == "turn_end"
+        _ => false
+      }
+      if !failed && should_fail {
+        failed = true
+        if phase == "aborted_update" {
+          session.abort()
+        }
+        @async.sleep(0)
+        fail("listener exploded")
+      }
+      if failed {
+        match event {
+          Loop(MessageStart(Assistant(_))) => recovery_events.push("start")
+          Loop(MessageEnd(Assistant(_))) => recovery_events.push("end")
+          Loop(TurnEnd(_, _)) => recovery_events.push("turn_end")
+          Loop(AgentEnd(_)) => recovery_events.push("agent_end")
+          _ => ()
+        }
+      }
+    })
+    session.prompt([user_message("first request")])
+    assert_eq(recovery_events, ["start", "end", "turn_end", "agent_end"])
+    let entries = journal.get_entries()
+    let expected_count = if phase == "turn_end" { 3 } else { 2 }
+    assert_eq(entries.length(), expected_count)
+    guard entries[expected_count - 1].content is Message(Assistant(failure)) else {
+      fail("expected terminal assistant failure")
+    }
+    assert_true(
+      failure.error_message.unwrap_or("").contains("listener exploded"),
+    )
+    assert_eq(failure.api, "faux")
+    assert_eq(failure.provider, "faux")
+    assert_eq(failure.model, "faux-1")
+    assert_eq(context_lines([Assistant(failure)]), "assistant: ")
+    if phase == "aborted_update" {
+      assert_true(failure.stop_reason is Aborted)
+    } else {
+      assert_true(failure.stop_reason is Error)
+    }
+    session.prompt([user_message("second request")])
+    assert_eq(
+      context_lines(llm.contexts[1]),
+      if phase == "turn_end" {
+        "user: first request\nassistant: discarded response\nassistant: \nuser: second request"
+      } else {
+        "user: first request\nassistant: \nuser: second request"
+      },
+    )
+  }
+}
+
+///|
+/// Like pi, an exception while delivering the synthetic failure still escapes.
+/// Cleanup must leave the same session reusable with exactly its saved history.
+async test "a listener that also rejects recovery leaves the session reusable" {
+  for reject_end in [false, true] {
+    let inner = @faux.FauxLLM::FauxLLM()
+    inner.set_responses([
+      @faux.faux_message([@faux.faux_text("unfinished")]),
+      @faux.faux_message([@faux.faux_text("next answer")]),
+    ])
+    let llm = ContextCapturingLLM::{ inner, contexts: [], }
+    let journal = @agent_session.InMemorySessionJournal()
+    let session = @agent_session.AgentSession(llm, journal~)
+    let mut reject = true
+    session.subscribe(event => {
+      guard reject else { return }
+      match event {
+        Loop(MessageUpdate(TextDelta(..))) => fail("initial listener failure")
+        Loop(MessageStart(Assistant(m))) if m.stop_reason is Error &&
+          !reject_end => fail("recovery listener failure")
+        Loop(MessageEnd(Assistant(m))) if m.stop_reason is Error && reject_end =>
+          fail("recovery listener failure")
+        _ => ()
+      }
+    })
+    let error = try {
+      session.prompt([user_message("first request")])
+      ""
+    } catch {
+      err => err.to_string()
+    }
+    assert_true(error.contains("recovery listener failure"))
+    assert_eq(journal.get_entries().length(), if reject_end { 2 } else { 1 })
+    reject = false
+    session.prompt([user_message("second request")])
+    assert_eq(
+      context_lines(llm.contexts[1]),
+      if reject_end {
+        "user: first request\nassistant: \nuser: second request"
+      } else {
+        "user: first request\nuser: second request"
+      },
+    )
+  }
+}
+
+///|
+/// A listener that throws after the turn already succeeded escapes the loop;
+/// the session still closes the run with a synthetic Error turn, but that
+/// failure is local — provider errors always arrive through the normal
+/// MessageEnd path — so a retryable-looking error text must not start
+/// auto-retry. Before the fix this emitted auto_retry_start, journaled a
+/// context_edit, waited out a backoff, and only then failed the continue.
+async test "a failure that escapes the run does not auto-retry" {
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([@faux.faux_message([@faux.faux_text("completed answer")])])
+  let journal = @agent_session.InMemorySessionJournal()
+  let session = @agent_session.AgentSession(
+    llm,
+    journal~,
+    retry_settings=fast_retry_settings(),
+  )
+  let retry_events : Array[@agent_session.AgentSessionEvent] = []
+  let mut failed = false
+  session.subscribe(event => {
+    match event {
+      AutoRetryStart(..) | AutoRetryEnd(..) => retry_events.push(event)
+      Loop(TurnEnd(_, _)) if !failed => {
+        failed = true
+        fail("socket hang up")
+      }
+      _ => ()
+    }
+  })
+  session.prompt([user_message("go")])
+  assert_eq(retry_events.length(), 0)
+  assert_eq(llm.pending_responses(), 0)
+  // [user, assistant(completed), assistant(synthetic error)]: the failure is
+  // journaled like pi's handleRunFailure, with no context_edit and no second
+  // provider call.
+  let entries = journal.get_entries()
+  assert_eq(entries.length(), 3)
+  guard entries[1].content is Message(Assistant(completed)) else {
+    fail("expected the completed assistant turn")
+  }
+  assert_true(completed.stop_reason is @agent_loop.StopReason::Stop)
+  guard entries[2].content is Message(Assistant(failure)) else {
+    fail("expected terminal assistant failure")
+  }
+  assert_true(failure.error_message.unwrap_or("").contains("socket hang up"))
+}
+
+///|
 /// `enabled: false` suppresses retries entirely: the first retryable failure
 /// ends the run with no `auto_retry_start` and no second provider call.
 async test "retry settings can disable auto-retry" {
   let llm = @faux.FauxLLM::FauxLLM()
   llm.set_responses([error_message("429 rate limit"), ok_message()])
-  let session = @agent_session.AgentSession(llm, system_prompt="", retry_settings={
+  let session = @agent_session.AgentSession(llm, retry_settings={
     enabled: false,
     max_retries: 3,
     base_delay_ms: 2000,
@@ -971,7 +1149,6 @@ async test "auto-retry window resets after each successful response" {
   ])
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     tool_registry=registry,
     active_tools=["probe"],
     retry_settings=fast_retry_settings(),
@@ -1042,7 +1219,6 @@ async test "a completing tool call returns and records its result" {
   ])
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     journal~,
     tool_registry=registry,
     active_tools=["probe"],
@@ -1093,10 +1269,9 @@ async test "finish turn hook on a session ends the run after the tool batch" {
     ),
     @faux.faux_message([@faux.faux_text("should not run")]),
   ])
-  let hook_calls : Array[Int] = []
+  let hook_calls : Array[Int32] = []
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     journal~,
     tool_registry=registry,
     active_tools=["probe"],
@@ -1152,7 +1327,6 @@ async test "a session can replace and wrap its finish turn hook" {
   let calls : Array[String] = []
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     tool_registry=registry,
     active_tools=["probe"],
     finish_turn_hook=(_, _, _) => {
@@ -1187,14 +1361,9 @@ async test "interrupt cancels retry backoff without starting another attempt" {
     llm.set_responses(responses)
     let journal = @agent_session.InMemorySessionJournal()
     let retry_settings = { ..fast_retry_settings(), base_delay_ms: 200, }
-    let session = @agent_session.AgentSession(
-      llm,
-      system_prompt="",
-      journal~,
-      retry_settings~,
-    )
+    let session = @agent_session.AgentSession(llm, journal~, retry_settings~)
     let started = @async.Semaphore::Semaphore(1, initial_value=0)
-    let ends : Array[(Int, Bool, String?)] = []
+    let ends : Array[(Int32, Bool, String?)] = []
     session.subscribe(event => {
       match event {
         AutoRetryStart(attempt=number, ..) if number == attempt =>
@@ -1237,11 +1406,10 @@ async test "interrupt during a retried generation reports a cancelled retry" {
   llm.set_responses([error_message("429 rate limit"), ok_message()])
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     retry_settings=fast_retry_settings(),
   )
   let mut starts = 0
-  let ends : Array[(Int, Bool, String?)] = []
+  let ends : Array[(Int32, Bool, String?)] = []
   session.subscribe(event => {
     match event {
       Loop(MessageStart(Assistant(_))) => {
@@ -1267,10 +1435,9 @@ async test "a completed retry reports success and releases its abort watcher" {
   llm.set_responses([error_message("429 rate limit"), ok_message()])
   let session = @agent_session.AgentSession(
     llm,
-    system_prompt="",
     retry_settings=fast_retry_settings(),
   )
-  let ends : Array[(Int, Bool, String?)] = []
+  let ends : Array[(Int32, Bool, String?)] = []
   session.subscribe(event => {
     if event is AutoRetryEnd(attempt~, success~, final_error~) {
       ends.push((attempt, success, final_error))
@@ -1293,11 +1460,7 @@ async test "a context edit omits its target from the projection only" {
       { id: "x1", content: ContextEdit(target_id="a1"), },
     ]),
   )
-  let session = @agent_session.AgentSession(
-    StubLLM::{ },
-    system_prompt="",
-    journal~,
-  )
+  let session = @agent_session.AgentSession(StubLLM::{ }, journal~)
   inspect(session.message_buffer |> context_lines, content="user: request")
   assert_eq(journal.get_entries().length(), 3)
   match journal.get_entries()[1].content {
@@ -1321,15 +1484,11 @@ async test "a reloaded session projects the same context as the live one" {
     @faux.faux_message([@faux.faux_text("done")]),
   ])
   let journal = @agent_session.InMemorySessionJournal()
-  let session = @agent_session.AgentSession(llm, system_prompt="", journal~)
+  let session = @agent_session.AgentSession(llm, journal~)
   session.prompt([user_message("go")])
   let live = context_lines(session.message_buffer)
   inspect(live, content="user: go\nassistant: done")
-  let reloaded = @agent_session.AgentSession(
-    StubLLM::{ },
-    system_prompt="",
-    journal~,
-  )
+  let reloaded = @agent_session.AgentSession(StubLLM::{ }, journal~)
   assert_eq(context_lines(reloaded.message_buffer), live)
   // The failed turn stays in the record: user, error turn, its edit, the retry.
   assert_eq(journal.get_entries().length(), 4)

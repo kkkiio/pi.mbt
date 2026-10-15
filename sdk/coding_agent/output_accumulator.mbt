@@ -3,14 +3,14 @@ pub(all) struct TruncationResult {
   content : String
   truncated : Bool
   truncated_by : String?
-  total_lines : Int
-  total_bytes : Int
-  output_lines : Int
-  output_bytes : Int
+  total_lines : Int32
+  total_bytes : Int32
+  output_lines : Int32
+  output_bytes : Int32
   last_line_partial : Bool
   first_line_exceeds_limit : Bool
-  max_lines : Int
-  max_bytes : Int
+  max_lines : Int32
+  max_bytes : Int32
 } derive(Eq, @debug.Debug)
 
 ///|
@@ -27,7 +27,7 @@ pub impl ToJson for TruncationResult with fn to_json(self : TruncationResult) ->
     "content": self.content,
     "truncated": self.truncated,
     "truncatedBy": match self.truncated_by {
-      Some(value) => value.to_json()
+      Some(value) => Json(value)
       None => null
     },
     "totalLines": self.total_lines,
@@ -63,7 +63,7 @@ pub impl ToJson for OutputSnapshot with fn to_json(self : OutputSnapshot) -> Jso
     "content": self.content,
     "truncation": self.truncation,
     "fullOutputPath": match self.full_output_path {
-      Some(value) => value.to_json()
+      Some(value) => Json(value)
       None => null
     },
   }
@@ -79,20 +79,20 @@ pub extend OutputSnapshot with ToJson::{to_json}
 /// only a rolling tail, while output that exceeds either limit is preserved in
 /// a temporary file as its original bytes.
 pub struct OutputAccumulator {
-  max_lines : Int
-  max_bytes : Int
-  max_rolling_bytes : Int
+  max_lines : Int32
+  max_bytes : Int32
+  max_rolling_bytes : Int32
   temp_file_prefix : String
   raw_chunks : Array[Bytes]
   mut tail : Bytes
   mut tail_starts_at_line_boundary : Bool
   mut pending_utf8 : Bytes
   mut decoder_started : Bool
-  mut total_raw_bytes : Int
-  mut total_decoded_bytes : Int
-  mut completed_lines : Int
-  mut total_lines : Int
-  mut current_line_bytes : Int
+  mut total_raw_bytes : Int32
+  mut total_decoded_bytes : Int32
+  mut completed_lines : Int32
+  mut total_lines : Int32
+  mut current_line_bytes : Int32
   mut has_open_line : Bool
   mut finished : Bool
   mut temp_file_path : String?
@@ -111,10 +111,10 @@ fn create_temp_output_file(prefix : String) -> (String, FsFile) raise FsError {
 
 ///|
 pub fn OutputAccumulator::OutputAccumulator(
-  max_lines~ : Int,
-  max_bytes~ : Int,
-  max_rolling_bytes? : Int = @cmp.maximum(max_bytes * 2, 1),
-  temp_file_prefix? : String = "pim-output",
+  max_lines~ : Int32,
+  max_bytes~ : Int32,
+  max_rolling_bytes~ : Int32 = @cmp.maximum(max_bytes * 2, 1),
+  temp_file_prefix~ : String = "pim-output",
 ) -> OutputAccumulator {
   {
     max_lines,
@@ -292,7 +292,7 @@ pub fn OutputAccumulator::finish(self : OutputAccumulator) -> Unit raise {
 ///|
 pub fn OutputAccumulator::snapshot(
   self : OutputAccumulator,
-  persist_if_truncated? : Bool = false,
+  persist_if_truncated~ : Bool = false,
 ) -> OutputSnapshot raise {
   let mut snapshot_bytes = self.tail
   if !self.tail_starts_at_line_boundary {
@@ -407,7 +407,9 @@ pub fn OutputAccumulator::close_temp_file(self : OutputAccumulator) -> Unit {
 }
 
 ///|
-pub fn OutputAccumulator::get_last_line_bytes(self : OutputAccumulator) -> Int {
+pub fn OutputAccumulator::get_last_line_bytes(
+  self : OutputAccumulator,
+) -> Int32 {
   self.current_line_bytes
 }
 

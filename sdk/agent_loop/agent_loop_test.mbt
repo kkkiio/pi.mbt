@@ -12,13 +12,13 @@ struct EndHookLLM {
   /// still streaming, which the provider then closes out with an Aborted
   /// message.
   abort_before_return : @agent_loop.AbortController?
-  mut cursor : Int
+  mut cursor : Int32
 }
 
 ///|
 fn EndHookLLM::new(
   responses : Array[@agent_loop.AssistantMessage],
-  abort_before_return? : @agent_loop.AbortController? = None,
+  abort_before_return~ : @agent_loop.AbortController? = None,
 ) -> EndHookLLM {
   { responses, abort_before_return, cursor: 0, }
 }
@@ -139,7 +139,7 @@ async test "finish turn end: stops the run and skips the next steering poll" {
   let messages : Array[@agent_loop.AgentMessage] = []
   let ordering : Array[String] = []
   let events : Array[@agent_loop.AgentEvent] = []
-  let steer_polls : Array[Int] = []
+  let steer_polls : Array[Int32] = []
   let _ = @agent_loop.run_agent_loop(
     llm,
     "",
@@ -315,7 +315,7 @@ async test "finish turn end: leaves queued steering unconsumed" {
   let messages : Array[@agent_loop.AgentMessage] = []
   let events : Array[@agent_loop.AgentEvent] = []
   let queued : Array[@agent_loop.UserMessage] = [end_hook_user("steering")]
-  let steer_calls : Array[Int] = []
+  let steer_calls : Array[Int32] = []
   let _ = @agent_loop.run_agent_loop(
     llm,
     "",
