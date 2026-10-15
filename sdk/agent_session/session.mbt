@@ -179,20 +179,18 @@ pub async fn AgentSession::prompt(
         }
       }
       self.fanout.on_event(AgentSessionEvent::Loop(event))
-      // 成功的 assistant 响应结束当前重试窗口并归零,所以同一次 prompt 里后续的
-      // 调用各自重新拿满预算(pi 在 message_end 上重置)。取消不报成功。
-      match event {
-        MessageEnd(Assistant(message)) if retry_attempt > 0 =>
+      // reset retry window
+      if retry_attempt > 0 && event is MessageEnd(Assistant(message)) {
           match message.stop_reason {
             Aborted => settle_retry(false, Some("Retry cancelled"))
             Error => ()
             _ => settle_retry(true, None)
           }
-        _ => ()
       }
     }
     // 有 prompt 就是新回合;没有 prompt 就是从现有 transcript 续跑(重试走这条)。
     // 后者校验尾部,所以重试能进行本身就说明失败回合已被 `context_edit` 剔除。
+    let mut run_escaped = false
     try {
       if pending_prompts.length() > 0 {
         @agent_loop.run_agent_loop(
@@ -220,6 +218,10 @@ pub async fn AgentSession::prompt(
       }
     } catch {
       err => {
+        // 逃出循环的错误按构造不是 provider 失败——provider 错误由 generate
+        // 折成 error AssistantMessage 走正常终态路径,能到这里的是监听器、
+        // journal 等本地失败。合成失败照常落盘,但不参与 auto-retry。
+        run_escaped = true
         let failure : @agent_loop.AssistantMessage = {
           content: [@agent_loop.AssistantMessageContent::Text("", signature={})],
           api: assistant_metadata.map(m => m.api).unwrap_or(""),
@@ -248,7 +250,8 @@ pub async fn AgentSession::prompt(
           { stop_reason: Error, error_message, .. }
         )
       ) {
-      if self.retry_settings.enabled &&
+      if !run_escaped &&
+        self.retry_settings.enabled &&
         error_message is Some(message) &&
         is_retryable_error_message(message) &&
         retry_attempt < self.retry_settings.max_retries {

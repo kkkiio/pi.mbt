@@ -1053,6 +1053,52 @@ async test "a listener that also rejects recovery leaves the session reusable" {
 }
 
 ///|
+/// A listener that throws after the turn already succeeded escapes the loop;
+/// the session still closes the run with a synthetic Error turn, but that
+/// failure is local — provider errors always arrive through the normal
+/// MessageEnd path — so a retryable-looking error text must not start
+/// auto-retry. Before the fix this emitted auto_retry_start, journaled a
+/// context_edit, waited out a backoff, and only then failed the continue.
+async test "a failure that escapes the run does not auto-retry" {
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([@faux.faux_message([@faux.faux_text("completed answer")])])
+  let journal = @agent_session.InMemorySessionJournal()
+  let session = @agent_session.AgentSession(
+    llm,
+    journal~,
+    retry_settings=fast_retry_settings(),
+  )
+  let retry_events : Array[@agent_session.AgentSessionEvent] = []
+  let mut failed = false
+  session.subscribe(event => {
+    match event {
+      AutoRetryStart(..) | AutoRetryEnd(..) => retry_events.push(event)
+      Loop(TurnEnd(_, _)) if !failed => {
+        failed = true
+        fail("socket hang up")
+      }
+      _ => ()
+    }
+  })
+  session.prompt([user_message("go")])
+  assert_eq(retry_events.length(), 0)
+  assert_eq(llm.pending_responses(), 0)
+  // [user, assistant(completed), assistant(synthetic error)]: the failure is
+  // journaled like pi's handleRunFailure, with no context_edit and no second
+  // provider call.
+  let entries = journal.get_entries()
+  assert_eq(entries.length(), 3)
+  guard entries[1].content is Message(Assistant(completed)) else {
+    fail("expected the completed assistant turn")
+  }
+  assert_true(completed.stop_reason is @agent_loop.StopReason::Stop)
+  guard entries[2].content is Message(Assistant(failure)) else {
+    fail("expected terminal assistant failure")
+  }
+  assert_true(failure.error_message.unwrap_or("").contains("socket hang up"))
+}
+
+///|
 /// `enabled: false` suppresses retries entirely: the first retryable failure
 /// ends the run with no `auto_retry_start` and no second provider call.
 async test "retry settings can disable auto-retry" {
