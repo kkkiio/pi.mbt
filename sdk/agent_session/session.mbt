@@ -181,11 +181,11 @@ pub async fn AgentSession::prompt(
       self.fanout.on_event(AgentSessionEvent::Loop(event))
       // reset retry window
       if retry_attempt > 0 && event is MessageEnd(Assistant(message)) {
-          match message.stop_reason {
-            Aborted => settle_retry(false, Some("Retry cancelled"))
-            Error => ()
-            _ => settle_retry(true, None)
-          }
+        match message.stop_reason {
+          Aborted => settle_retry(false, Some("Retry cancelled"))
+          Error => ()
+          _ => settle_retry(true, None)
+        }
       }
     }
     // 有 prompt 就是新回合;没有 prompt 就是从现有 transcript 续跑(重试走这条)。
