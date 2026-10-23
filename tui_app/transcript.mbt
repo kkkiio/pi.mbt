@@ -26,7 +26,8 @@ pub struct Transcript {
   theme : Theme
   mut items : Array[TranscriptItem]
   /// 工具输出是否展开(默认折叠,`Ctrl+O` 切换)。
-  mut expanded_tool_output : Bool
+  /// 全局折叠/展开(`Ctrl+O`):作用于所有可折叠内容(工具输出、技能正文)。
+  mut expanded : Bool
   /// 思考内容是否展开(默认展开,`Ctrl+T` 折叠)。
   mut expanded_thinking : Bool
   tool_overrides : Map[Int32, Bool]
@@ -62,7 +63,7 @@ pub fn Transcript::new(theme : Theme) -> Transcript {
   {
     theme,
     items: [],
-    expanded_tool_output: false,
+    expanded: false,
     expanded_thinking: true,
     tool_overrides: Map([]),
     thinking_overrides: Map([]),
@@ -256,12 +257,9 @@ pub fn Transcript::push_tool_result(
 }
 
 ///|
-/// 设置是否展开工具输出(`Ctrl+O`)。
-pub fn Transcript::set_expanded_tool_output(
-  self : Transcript,
-  expanded : Bool,
-) -> Unit {
-  self.expanded_tool_output = expanded
+/// 设置全局折叠/展开(`Ctrl+O`)。收起时清掉单项点击留下的例外。
+pub fn Transcript::set_expanded(self : Transcript, expanded : Bool) -> Unit {
+  self.expanded = expanded
   self.tool_overrides.clear()
 }
 
@@ -282,9 +280,9 @@ pub fn Transcript::toggle_expanded_thinking(self : Transcript) -> Unit {
 }
 
 ///|
-/// 切换工具输出的展开状态(`Ctrl+O`)。
-pub fn Transcript::toggle_expanded_tool_output(self : Transcript) -> Unit {
-  self.set_expanded_tool_output(!self.expanded_tool_output)
+/// 切换全局折叠/展开(`Ctrl+O`)。
+pub fn Transcript::toggle_expanded(self : Transcript) -> Unit {
+  self.set_expanded(!self.expanded)
 }
 
 ///|
@@ -360,9 +358,7 @@ pub fn Transcript::click(self : Transcript, row : Int32, width : Int32) -> Bool 
     if row >= top && row < top + rendered.length() {
       match item {
         TranscriptItem::Tool(name, args, Some(_), error, _, _, _, ..) => {
-          let expanded = self.tool_overrides
-            .get(index)
-            .unwrap_or(self.expanded_tool_output)
+          let expanded = self.tool_overrides.get(index).unwrap_or(self.expanded)
           let header = render_tool(
             self,
             name,
@@ -466,7 +462,7 @@ fn render_item(
       let compact = hints
         .map(fn(pair) { theme.f_dim(pair.0) + " " + theme.f_muted(pair.1) })
         .join(theme.f_muted(" · "))
-      let content = if transcript.expanded_tool_output {
+      let content = if transcript.expanded {
         [
           ("Esc", "to interrupt"),
           ("Ctrl+C", "to clear"),
@@ -511,7 +507,7 @@ fn render_item(
     ) => {
       let expanded = transcript.tool_overrides
         .get(index)
-        .unwrap_or(transcript.expanded_tool_output)
+        .unwrap_or(transcript.expanded)
       let true_color = terminal_true_color()
       if name != "bash" &&
         transcript.generic_tool_cache.get(index)
@@ -544,6 +540,25 @@ fn render_item(
 }
 
 ///|
+/// Mirrors pi's `SkillInvocationMessageComponent`: collapsed shows the label,
+/// the skill name and the expand hint; expanded adds the references line and
+/// the body. The user's own text follows as its own paragraph.
+fn skill_invocation_text(
+  invocation : @coding_agent.SkillInvocation,
+  expanded~ : Bool,
+) -> String {
+  let mut text = if expanded {
+    "[skill]\n\n\{invocation.name}\n\n\{invocation.references}\n\n\{invocation.body}"
+  } else {
+    "[skill] \{invocation.name} (ctrl+o to expand)"
+  }
+  if invocation.args != "" {
+    text = "\{text}\n\n\{invocation.args}"
+  }
+  text
+}
+
+///|
 /// 用户消息:整块 `userMessageBg` 背景,上下各留一行 padding(pi `Box(padX=1,padY=1)`)。
 fn render_user(
   transcript : Transcript,
@@ -552,6 +567,14 @@ fn render_user(
   key : String,
 ) -> Array[String] {
   let theme = transcript.theme
+  // A `/skill:` invocation is journaled as the `<skill>` block the model saw.
+  // Collapsed, show the command the user typed; expanded (`Ctrl+O`, the same
+  // switch that expands tool output), add the body the block carried.
+  let text = match @coding_agent.parse_skill_block(text) {
+    Some(invocation) =>
+      skill_invocation_text(invocation, expanded=transcript.expanded)
+    None => text
+  }
   let bg = fn(text : String) { theme.bg_user(text) }
   let lines : Array[String] = []
   lines.push(bg_blank(bg, width))

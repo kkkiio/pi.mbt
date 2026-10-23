@@ -193,3 +193,85 @@ pub fn parse_frontmatter(
   }
   { name, description, disable_model_invocation, }
 }
+
+///|
+/// Drop a leading `---` … `---` frontmatter block, returning the body. Text
+/// without a closed block is returned unchanged.
+fn strip_frontmatter(text : String) -> String {
+  let lines = [..text.split("\n")]
+  guard lines is [first, .. rest] && first.trim() == "---" else { return text }
+  let mut end = 0
+  while end < rest.length() && rest[end].trim() != "---" {
+    end = end + 1
+  }
+  guard end < rest.length() else { return text }
+  rest[end + 1:].to_owned().join("\n")
+}
+
+///|
+/// Expand a `/skill:<name> [args]` command into the `<skill>` block the model
+/// receives (pi's `_expandSkillCommand`). Anything else — a non-command, an
+/// unknown skill name, an unreadable file — passes through unchanged.
+pub fn expand_skill_command(text : String, cwd~ : String) -> String {
+  guard text.has_prefix("/skill:") else { return text }
+  let rest = text[7:]
+  let (name, args) = match rest.split_once(" ") {
+    Some((name, args)) => (name.trim().to_owned(), args.trim().to_owned())
+    None => (rest.trim().to_owned(), "")
+  }
+  let mut found : Skill? = None
+  for skill in discover_skills("\{cwd}/.agents/skills") {
+    if skill.name == name {
+      found = Some(skill)
+      break
+    }
+  }
+  guard found is Some(skill) else { return text }
+  let content = read_text_file(skill.path) catch { _ => return text }
+  let body = strip_frontmatter(content).trim()
+  let block = "<skill name=\"\{skill.name}\" location=\"\{skill.path}\">\nReferences are relative to \{parent_dir(skill.path)}.\n\n\{body}\n</skill>"
+  if args == "" {
+    block
+  } else {
+    "\{block}\n\n\{args}"
+  }
+}
+
+///|
+/// A `/skill:` block as `expand_skill_command` writes it: what the model saw,
+/// and therefore what a journal replay shows.
+pub struct SkillInvocation {
+  name : String
+  location : String
+  /// The `References are relative to <dir>.` line the block carries.
+  references : String
+  body : String
+  /// Text the user appended after the command, if any.
+  args : String
+} derive(Debug)
+
+///|
+pub extend SkillInvocation with @debug.Debug::{to_repr}
+
+///|
+/// Parse a `<skill …>` block back into its parts. Any other text returns
+/// `None`, so callers can render blocks specially and leave everything else
+/// alone.
+pub fn parse_skill_block(text : String) -> SkillInvocation? {
+  let prefix = "<skill name=\""
+  guard text.has_prefix(prefix) else { return None }
+  let rest = text[prefix.length():]
+  guard rest.split_once("\" location=\"") is Some((name, rest)) else {
+    return None
+  }
+  guard rest.split_once("\">\n") is Some((location, rest)) else { return None }
+  guard rest.split_once("\n\n") is Some((references, rest)) else { return None }
+  guard rest.split_once("\n</skill>") is Some((body, tail)) else { return None }
+  Some({
+    name: name.to_owned(),
+    location: location.to_owned(),
+    references: references.to_owned(),
+    body: body.to_owned(),
+    args: tail.trim().to_owned(),
+  })
+}

@@ -31,6 +31,8 @@ pub fn discover_skills(String) -> Array[Skill]
 
 pub fn escape(String) -> String
 
+pub fn expand_skill_command(String, cwd~ : String) -> String
+
 pub fn fetch_active_entries(String) -> Array[@agent_session.SessionEntry] raise Failure
 
 pub fn fetch_entries(String) -> Array[@agent_session.SessionEntry] raise Failure
@@ -52,6 +54,8 @@ pub fn open_append_file(String, permission? : Int32) -> FsFile raise FsError
 pub fn open_lazy_file(String, append? : Bool, permission? : Int32) -> LazyFile
 
 pub fn parse_frontmatter(String, String) -> SkillFrontmatter
+
+pub fn parse_skill_block(String) -> SkillInvocation?
 
 pub fn path_exists(String) -> Bool
 
@@ -233,6 +237,15 @@ pub struct SkillFrontmatter {
   disable_model_invocation : Bool
 } derive(@debug.Debug)
 pub fn SkillFrontmatter::to_repr(Self) -> @debug.Repr
+
+pub struct SkillInvocation {
+  name : String
+  location : String
+  references : String
+  body : String
+  args : String
+} derive(@debug.Debug)
+pub fn SkillInvocation::to_repr(Self) -> @debug.Repr
 
 pub(all) struct TruncationResult {
   content : String

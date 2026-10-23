@@ -311,7 +311,7 @@ pub struct ThemeColors {
 pub struct Transcript {
   theme : Theme
   mut items : Array[TranscriptItem]
-  mut expanded_tool_output : Bool
+  mut expanded : Bool
   mut expanded_thinking : Bool
   tool_overrides : Map[Int32, Bool]
   thinking_overrides : Map[String, Bool]
@@ -333,11 +333,11 @@ pub fn Transcript::push_tool_result(Self, String, String, Bool, id~ : String, de
 pub fn Transcript::push_user(Self, String) -> Unit
 pub fn Transcript::render(Self, Int32) -> Array[String]
 pub fn Transcript::set_assistant_content(Self, Array[(String, Bool)]) -> Unit
+pub fn Transcript::set_expanded(Self, Bool) -> Unit
 pub fn Transcript::set_expanded_thinking(Self, Bool) -> Unit
-pub fn Transcript::set_expanded_tool_output(Self, Bool) -> Unit
 pub fn Transcript::start_assistant(Self) -> Unit
+pub fn Transcript::toggle_expanded(Self) -> Unit
 pub fn Transcript::toggle_expanded_thinking(Self) -> Unit
-pub fn Transcript::toggle_expanded_tool_output(Self) -> Unit
 pub impl Widget for Transcript
 
 type TranscriptItem
@@ -387,7 +387,7 @@ pub fn TuiApp::on_interrupt(Self, () -> Unit) -> Unit
 pub fn TuiApp::on_submit(Self, (String) -> Unit) -> Unit
 pub fn TuiApp::push_error(Self, String) -> Unit
 pub fn TuiApp::push_note(Self, String) -> Unit
-pub fn TuiApp::push_user(Self, String) -> Unit
+pub fn TuiApp::push_user(Self, String, display? : String) -> Unit
 pub fn TuiApp::render(Self) -> Unit
 pub fn TuiApp::replay_user(Self, String) -> Unit
 pub fn TuiApp::request_exit(Self) -> Unit
