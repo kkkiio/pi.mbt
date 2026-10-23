@@ -50,7 +50,10 @@ fn default_vm_launcher() -> VmLauncher {
       codemode_worker_path(),
       start_obj,
       wasm,
-      fn(text) { deliver_worker_message(events, text) },
+      fn(text) {
+        deliver_worker_message(events, text)
+        pump_scheduler()
+      },
       fn(text) {
         events.failure({
           kind: Sandbox,
@@ -58,6 +61,7 @@ fn default_vm_launcher() -> VmLauncher {
           message: text,
           stack: None,
         })
+        pump_scheduler()
       },
     )
     guard spawned.is_ok() else { raise CodemodeSandboxError(spawned.error()) }
@@ -78,6 +82,15 @@ fn store_json(store : Map[String, String]) -> Map[String, Json] {
     map[key] = Json(value)
   }
   map
+}
+
+///|
+/// JS 事件回调里触发的协程工作(spawn 工具任务、唤醒等待的协程)只进
+/// 调度器的就绪队列,必须有 reschedule 才会跑——那一步是 internal 的。
+/// run_async_main 是 spawn + reschedule,借它泵一轮;空协程零开销。
+/// 缺了这步,就绪任务会挨饿到下一次偶发调度(复现:x64 CI 上饿死 300s)。
+fn pump_scheduler() -> Unit {
+  @async.run_async_main(async fn() { @async.pause() })
 }
 
 ///|
