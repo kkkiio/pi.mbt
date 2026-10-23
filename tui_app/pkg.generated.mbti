@@ -1,0 +1,433 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/tui_app"
+
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/agent_session",
+  "KKKIIO/pi/sdk/coding_agent",
+  "moonbitlang/async/aqueue",
+  "moonbitlang/async/semaphore",
+  "moonbitlang/core/ref",
+}
+
+// Values
+pub fn bg_blank((String) -> String, Int32) -> String
+
+pub fn bg_line((String) -> String, String, Int32) -> String
+
+pub fn bold(String) -> String
+
+pub fn chat_viewport_new(document~ : Component, pending~ : Component, editor~ : Component, footer~ : Component, scrollbar? : String, theme? : Theme?) -> ChatViewport
+
+pub fn component_of((Int32) -> Array[String]) -> Component
+
+pub fn editor_new(Tui, (String) -> Unit, Theme, thinking? : String) -> Editor
+
+pub fn format_count(Int32) -> String
+
+pub fn format_elapsed(Int32) -> String
+
+pub fn inverse(String) -> String
+
+pub fn is_key_release(String) -> Bool
+
+pub fn italic(String) -> String
+
+pub async fn load_module() -> Unit
+
+pub fn matches_key(String, String) -> Bool
+
+pub fn[W : Widget] mount(W) -> Component
+
+pub fn mount_ref(&Widget) -> Component
+
+pub fn pad_left(String, Int32) -> String
+
+pub fn pad_right(String, Int32) -> String
+
+pub fn prompt_editor_new(Tui, Theme, thinking? : String) -> PromptEditor
+
+pub fn render_markdown_themed(Theme, String, Int32, padding_x? : Int32, padding_y? : Int32, body_role? : String, body_italic? : Bool, preserve_ordered_markers? : Bool, preserve_backslash_escapes? : Bool) -> Array[String]
+
+pub async fn run(&@agent_loop.LLM, String, String, String, String?, resume_path? : String?) -> Unit
+
+pub fn scroll_view(Component, follow_end? : Bool, primary? : Bool, overscroll? : String, scrollbar? : String, scrollbar_track_style? : ((String) -> String)?, scrollbar_thumb_style? : ((String) -> String)?) -> ScrollView
+
+pub fn spacer(lines? : Int32) -> Component
+
+pub fn stack_child(Component, basis? : Int32?, grow? : Int32, shrink? : Int32, min_size? : Int32) -> StackChild
+
+pub fn stdin_is_tty() -> Bool
+
+pub fn stdout_is_tty() -> Bool
+
+pub fn strikethrough(String) -> String
+
+pub async fn terminal_new() -> Terminal
+
+pub fn text(String, padding_x? : Int32, padding_y? : Int32) -> Component
+
+pub fn truncate_to_width(String, Int32) -> String
+
+pub fn truncated_text(String, max_lines? : Int32, padding_x? : Int32) -> Component
+
+pub async fn tui_new(Terminal, theme? : Theme?, show_hardware_cursor? : Bool, mouse? : Bool, wheel_scroll_lines? : Int32, copy_on_select? : Bool, scroll_to_end_indicator? : (() -> String)?) -> Tui
+
+pub fn underline(String) -> String
+
+pub fn visible_width(String) -> Int32
+
+pub fn vstack(Array[StackChild]) -> Component
+
+pub fn vstack_auto(Array[Component]) -> Component
+
+pub fn wrap_text(String, Int32) -> Array[String]
+
+// Errors
+
+// Types and methods
+pub struct ChatViewport {
+  root : Component
+  transcript : ScrollView
+}
+pub fn ChatViewport::root(Self) -> Component
+pub fn ChatViewport::transcript(Self) -> ScrollView
+
+pub struct Component {
+  handle : Value
+}
+pub fn Component::on_click(Self, (Int32, Int32) -> Bool) -> Unit
+
+pub struct Editor {
+  handle : Value
+}
+pub fn Editor::add_to_history(Self, String) -> Unit
+pub fn Editor::component(Self) -> Component
+pub fn Editor::get_text(Self) -> String
+pub fn Editor::is_showing_autocomplete(Self) -> Bool
+pub fn Editor::set_border_provider(Self, (Int32, Int32) -> String) -> Unit
+pub fn Editor::set_slash_commands(Self, Array[(String, String)], String) -> Unit
+pub fn Editor::set_text(Self, String) -> Unit
+
+pub struct Footer {
+  theme : Theme
+  model : String
+  cwd : String
+  thinking : String
+  mut branch : String?
+  mut session_name : String?
+  mut usage_set : Bool
+  mut input_tokens : Int32
+  mut output_tokens : Int32
+  mut cache_read : Int32
+  mut cache_write : Int32
+  mut total_cost : Float
+  mut cache_hit_rate : Float?
+  mut context_percent : Float?
+  mut context_window : Int32?
+  mut auto_compact : Bool
+}
+pub fn Footer::cwd(Self) -> String
+pub fn Footer::model(Self) -> String
+pub fn Footer::new(Theme, String, String, String) -> Self
+pub fn Footer::reset_usage(Self) -> Unit
+pub fn Footer::set_auto_compact(Self, Bool) -> Unit
+pub fn Footer::set_branch(Self, String?) -> Unit
+pub fn Footer::set_context(Self, Float, Int32) -> Unit
+pub fn Footer::set_context_unknown(Self, Int32) -> Unit
+pub fn Footer::set_session_name(Self, String?) -> Unit
+pub fn Footer::set_usage(Self, @agent_loop.Usage, update_cache_hit? : Bool) -> Unit
+pub fn Footer::thinking(Self) -> String
+
+pub struct Object(Value)
+#alias("_[_]")
+pub fn[K, V] Object::get(Self, K) -> V
+pub fn Object::new() -> Self
+#alias("_[_]=_")
+pub fn[K, V] Object::set(Self, K, V) -> Unit
+pub fn Object::to_value(Self) -> Value
+
+pub struct PendingList {
+  theme : Theme
+  mut lines : Array[String]
+}
+pub fn PendingList::invalidate(Self) -> Unit
+pub fn PendingList::new(Theme, lines? : Array[String]) -> Self
+pub fn PendingList::render(Self, Int32) -> Array[String]
+pub impl Widget for PendingList
+
+pub enum Phase {
+  Idle
+  Working(String)
+  Retrying(Int32, Int32, Double)
+}
+
+pub struct PromptEditor {
+  editor : Editor
+  handler : @ref.Ref[(String) -> Unit]
+}
+pub fn PromptEditor::add_to_history(Self, String) -> Unit
+pub fn PromptEditor::component(Self) -> Component
+pub fn PromptEditor::is_showing_autocomplete(Self) -> Bool
+pub fn PromptEditor::set_border_provider(Self, (Int32, Int32) -> String) -> Unit
+pub fn PromptEditor::set_on_submit(Self, (String) -> Unit) -> Unit
+pub fn PromptEditor::set_slash_commands(Self, Array[(String, String)], String) -> Unit
+pub fn PromptEditor::set_submit_enabled(Self, Bool) -> Unit
+pub fn PromptEditor::set_text(Self, String) -> Unit
+pub fn PromptEditor::text(Self) -> String
+
+pub struct ScrollView {
+  handle : Value
+}
+pub fn ScrollView::component(Self) -> Component
+pub fn ScrollView::is_following_end(Self) -> Bool
+pub fn ScrollView::scroll_by(Self, Int32) -> Unit
+pub fn ScrollView::scroll_to_end(Self) -> Unit
+pub fn ScrollView::scroll_to_start(Self) -> Unit
+pub fn ScrollView::scroll_top(Self) -> Int32
+
+pub struct SessionHost {
+  llm : &@agent_loop.LLM
+  cwd : String
+  session_dir : String?
+  mut session : @agent_session.AgentSession
+  mut close_journal : () -> Unit
+  mut session_path : String?
+}
+pub fn SessionHost::attach(Self, TuiApp) -> Unit
+pub fn SessionHost::close(Self) -> Unit
+pub fn SessionHost::interrupt(Self) -> Unit
+pub fn SessionHost::load_session(Self, String, TuiApp) -> Unit
+pub fn SessionHost::new(&@agent_loop.LLM, String, String?) -> Self raise @coding_agent.FsError
+pub fn SessionHost::new_session(Self) -> Unit raise @coding_agent.FsError
+pub async fn SessionHost::prompt(Self, String, TuiApp) -> Unit
+pub fn SessionHost::resume_session(Self, String, TuiApp) -> Unit
+
+pub struct StackChild {
+  component : Component
+  basis : Int32?
+  grow : Int32
+  shrink : Int32
+  min_size : Int32
+}
+
+pub struct StatusLine {
+  theme : Theme
+  thinking : String
+  mut current : Phase
+  mut spinner_index : Int32
+}
+pub fn StatusLine::is_working(Self) -> Bool
+pub fn StatusLine::new(Theme, thinking? : String) -> Self
+pub fn StatusLine::phase(Self) -> Phase
+pub fn StatusLine::render_border(Self, Int32, hidden_lines? : Int32) -> String?
+pub fn StatusLine::set_idle(Self) -> Unit
+pub fn StatusLine::set_retry(Self, Int32, Int32, Int32) -> Unit
+pub fn StatusLine::set_working(Self, String) -> Unit
+pub fn StatusLine::tick(Self) -> Unit
+
+pub struct Terminal {
+  handle : Value
+}
+pub async fn Terminal::drain_input(Self, max_ms? : Int32) -> Unit
+pub fn Terminal::set_progress(Self, Bool) -> Unit
+pub fn Terminal::set_title(Self, String) -> Unit
+
+pub struct Theme {
+  name : String
+  colors : ThemeColors
+}
+pub fn Theme::bg(Self, String, String) -> String
+pub fn Theme::bg_tool_error(Self, String) -> String
+pub fn Theme::bg_tool_pending(Self, String) -> String
+pub fn Theme::bg_tool_success(Self, String) -> String
+pub fn Theme::bg_user(Self, String) -> String
+pub fn Theme::color(Self, String) -> String
+pub fn Theme::f_accent(Self, String) -> String
+pub fn Theme::f_bash(Self, String) -> String
+pub fn Theme::f_border(Self, String) -> String
+pub fn Theme::f_border_muted(Self, String) -> String
+pub fn Theme::f_custom_label(Self, String) -> String
+pub fn Theme::f_dim(Self, String) -> String
+pub fn Theme::f_error(Self, String) -> String
+pub fn Theme::f_md_border(Self, String) -> String
+pub fn Theme::f_md_code(Self, String) -> String
+pub fn Theme::f_md_code_block(Self, String) -> String
+pub fn Theme::f_md_link(Self, String) -> String
+pub fn Theme::f_muted(Self, String) -> String
+pub fn Theme::f_success(Self, String) -> String
+pub fn Theme::f_text(Self, String) -> String
+pub fn Theme::f_thinking(Self, String) -> String
+pub fn Theme::f_warning(Self, String) -> String
+pub fn Theme::fg(Self, String, String) -> String
+pub fn Theme::load(String) -> Self raise Failure
+pub fn Theme::theme_name(Self) -> String
+pub fn Theme::tool_bg(Self, String?, Bool) -> (String) -> String
+
+pub struct ThemeColors {
+  text : String
+  muted : String
+  dim : String
+  accent : String
+  border : String
+  border_muted : String
+  success : String
+  error : String
+  warning : String
+  thinking_text : String
+  custom_message_label : String
+  md_link : String
+  md_code : String
+  md_code_block : String
+  md_code_block_border : String
+  user_message_bg : String
+  tool_pending_bg : String
+  tool_success_bg : String
+  tool_error_bg : String
+  bash_mode : String
+  selected_bg : String
+  scrollbar_track : String
+  scrollbar_thumb : String
+  search_match_bg : String
+  search_match_text : String
+  user_message_text : String
+  tool_title : String
+  tool_output : String
+  md_heading : String
+  md_link_url : String
+  md_quote : String
+  md_quote_border : String
+  md_hr : String
+  md_list_bullet : String
+  thinking_off : String
+  thinking_minimal : String
+  thinking_low : String
+  thinking_medium : String
+  thinking_high : String
+  thinking_xhigh : String
+  thinking_max : String
+}
+
+pub struct Transcript {
+  theme : Theme
+  mut items : Array[TranscriptItem]
+  mut expanded_tool_output : Bool
+  mut expanded_thinking : Bool
+  tool_overrides : Map[Int32, Bool]
+  thinking_overrides : Map[String, Bool]
+  markdown_cache : Map[String, (String, Int32, Bool, String, Array[String])]
+  generic_tool_cache : Map[Int32, (Int32, Bool, Bool, Array[String])]
+}
+pub fn Transcript::append_text(Self, String) -> Unit
+pub fn Transcript::append_thinking(Self, String) -> Unit
+pub fn Transcript::click(Self, Int32, Int32) -> Bool
+pub fn Transcript::finish_assistant(Self, String, String?) -> Unit
+pub fn Transcript::invalidate(Self) -> Unit
+pub fn Transcript::item_count(Self) -> Int32
+pub fn Transcript::new(Theme) -> Self
+pub fn Transcript::push_error(Self, String) -> Unit
+pub fn Transcript::push_note(Self, String) -> Unit
+pub fn Transcript::push_startup(Self) -> Unit
+pub fn Transcript::push_tool_call(Self, String, Json, id~ : String, timed? : Bool) -> Unit
+pub fn Transcript::push_tool_result(Self, String, String, Bool, id~ : String, details? : Json?) -> Unit
+pub fn Transcript::push_user(Self, String) -> Unit
+pub fn Transcript::render(Self, Int32) -> Array[String]
+pub fn Transcript::set_assistant_content(Self, Array[(String, Bool)]) -> Unit
+pub fn Transcript::set_expanded_thinking(Self, Bool) -> Unit
+pub fn Transcript::set_expanded_tool_output(Self, Bool) -> Unit
+pub fn Transcript::start_assistant(Self) -> Unit
+pub fn Transcript::toggle_expanded_thinking(Self) -> Unit
+pub fn Transcript::toggle_expanded_tool_output(Self) -> Unit
+pub impl Widget for Transcript
+
+type TranscriptItem
+
+pub struct Tui {
+  handle : Value
+}
+pub fn Tui::add_child(Self, Component) -> Unit
+pub fn Tui::add_input_listener(Self, (String) -> Bool) -> Unlisten
+pub fn Tui::flash(Self, String, duration_ms? : Int32) -> Unit
+pub fn Tui::is_following_output(Self) -> Bool
+pub fn Tui::render_now(Self, force? : Bool) -> Unit
+pub fn Tui::request_render(Self, force? : Bool) -> Unit
+pub fn Tui::scroll_to_bottom(Self) -> Unit
+pub fn Tui::scroll_to_top(Self) -> Unit
+pub fn Tui::set_focus(Self, Component) -> Unit
+pub fn Tui::set_layout_root(Self, Component) -> Unit
+pub fn Tui::start(Self) -> Unit
+pub fn Tui::stop(Self, preserve_screen? : Bool) -> Unit
+pub fn Tui::viewport_top(Self) -> Int32
+
+pub struct TuiApp {
+  tui : Tui
+  terminal : Terminal
+  theme : Theme
+  mut transcript : Transcript
+  status : StatusLine
+  mut footer : Footer
+  editor : PromptEditor
+  pending : @ref.Ref[PendingList]
+  submissions : @aqueue.Queue[(String, Bool)]
+  quit : @semaphore.Semaphore
+  mut running : Bool
+  mut shutting_down : Bool
+  mut interrupt_handler : () -> Unit
+  mut last_ctrl_c_ms : Double
+}
+pub fn TuiApp::assistant_delta(Self, String, Bool) -> Unit
+pub fn TuiApp::assistant_end(Self, String, String?) -> Unit
+pub fn TuiApp::assistant_start(Self) -> Unit
+pub fn TuiApp::begin_retry(Self, Int32, Int32, Int32) -> Unit
+pub fn TuiApp::begin_work(Self, String) -> Unit
+pub fn TuiApp::flash(Self, String) -> Unit
+pub fn TuiApp::is_shutting_down(Self) -> Bool
+pub async fn TuiApp::load(String, String, String) -> Self
+pub fn TuiApp::on_interrupt(Self, () -> Unit) -> Unit
+pub fn TuiApp::on_submit(Self, (String) -> Unit) -> Unit
+pub fn TuiApp::push_error(Self, String) -> Unit
+pub fn TuiApp::push_note(Self, String) -> Unit
+pub fn TuiApp::push_user(Self, String) -> Unit
+pub fn TuiApp::render(Self) -> Unit
+pub fn TuiApp::replay_user(Self, String) -> Unit
+pub fn TuiApp::request_exit(Self) -> Unit
+pub fn TuiApp::reset(Self) -> Unit
+pub fn TuiApp::reset_transcript(Self) -> Unit
+pub fn TuiApp::set_idle(Self) -> Unit
+pub fn TuiApp::set_session_name(Self, String?) -> Unit
+pub fn TuiApp::set_usage(Self, @agent_loop.Usage, update_cache_hit? : Bool) -> Unit
+pub fn TuiApp::start(Self) -> Unit
+pub fn TuiApp::stop(Self) -> Unit
+pub fn TuiApp::submit(Self, String) -> Unit
+pub async fn TuiApp::take_submission(Self) -> String
+pub fn TuiApp::tick(Self) -> Unit
+pub fn TuiApp::tool_call(Self, String, Json, id~ : String, timed? : Bool) -> Unit
+pub fn TuiApp::tool_result(Self, String, String, Bool, id~ : String, details? : Json?) -> Unit
+pub async fn TuiApp::wait_for_exit(Self) -> Unit
+
+pub struct Unlisten {
+  handle : Value
+}
+pub fn Unlisten::unlisten(Self) -> Unit
+
+#external
+pub type Value
+pub fn[Arg, Result] Value::apply(Self, Array[Arg]) -> Result
+pub fn[Arg, Result] Value::apply_with_string(Self, String, Array[Arg]) -> Result
+pub fn[T] Value::cast(Self) -> T
+pub fn[T] Value::cast_from(T) -> Self
+pub fn[T] Value::get_with_string(Self, String) -> T
+pub fn Value::is_array(Self) -> Bool
+pub fn Value::is_undefined(Self) -> Bool
+pub fn[Arg, Result] Value::new(Self, Array[Arg]) -> Result
+pub fn[Arg, Result] Value::new_with_string(Self, String, Array[Arg]) -> Result
+pub fn[T] Value::set_with_string(Self, String, T) -> Unit
+pub fn Value::to_string(Self) -> String
+
+// Type aliases
+
+// Traits
+pub trait Widget {
+  fn render(Self, Int32) -> Array[String]
+  fn invalidate(Self) -> Unit
+}

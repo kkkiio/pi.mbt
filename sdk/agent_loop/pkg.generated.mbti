@@ -1,0 +1,224 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/agent_loop"
+
+import {
+  "moonbitlang/async/cond_var",
+  "moonbitlang/core/builtin",
+  "moonbitlang/core/debug",
+}
+
+// Values
+pub async fn run_agent_loop(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], ArrayView[UserMessage], tool_executor~ : async (ToolCall, (Array[InputMessageContent], Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], abort? : AbortSignal, event_sink? : async (AgentEvent) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage], AbortSignal) -> AgentTurnDecision?) -> Unit
+
+pub async fn run_agent_loop_continue(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], tool_executor~ : async (ToolCall, (Array[InputMessageContent], Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], abort? : AbortSignal, event_sink? : async (AgentEvent) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage], AbortSignal) -> AgentTurnDecision?) -> Unit
+
+pub fn usage_json(Usage?) -> Json
+
+// Errors
+
+// Types and methods
+pub struct AbortController {
+  signal : AbortSignal
+}
+pub fn AbortController::abort(Self) -> Unit
+pub fn AbortController::new() -> Self
+pub fn AbortController::signal(Self) -> AbortSignal
+
+pub struct AbortSignal {
+  mut flag : Bool
+  cond : @cond_var.Cond
+}
+pub fn AbortSignal::is_aborted(Self) -> Bool
+pub fn AbortSignal::never() -> Self
+pub async fn AbortSignal::wait_abort(Self) -> Unit
+
+pub(all) enum AgentEvent {
+  AgentStart
+  TurnStart
+  MessageStart(AgentMessage)
+  MessageUpdate(GenerationEvent)
+  MessageEnd(AgentMessage)
+  ToolExecutionStart(ToolCall)
+  ToolExecutionEnd(ToolResultMessage)
+  TurnEnd(AssistantMessage, ArrayView[ToolResultMessage])
+  AgentEnd(ArrayView[AgentMessage])
+}
+
+pub(all) enum AgentMessage {
+  User(UserMessage)
+  Assistant(AssistantMessage)
+  ToolResult(ToolResultMessage)
+}
+pub fn AgentMessage::to_json(Self) -> Json
+pub impl ToJson for AgentMessage
+
+pub(all) enum AgentTurnDecision {
+  End
+}
+
+pub(all) struct AssistantMessage {
+  content : Array[AssistantMessageContent]
+  api : String
+  provider : String
+  model : String
+  stop_reason : StopReason
+  error_message : String?
+  usage : Usage?
+  timestamp : UInt64
+} derive(@debug.Debug)
+pub fn AssistantMessage::to_json(Self) -> Json
+pub fn AssistantMessage::to_repr(Self) -> @debug.Repr
+pub impl ToJson for AssistantMessage
+
+pub(all) enum AssistantMessageContent {
+  Text(String, signature~ : Json)
+  Thinking(String, signature~ : Json)
+  ToolCall(ToolCall, signature~ : Json)
+  HostedToolCall(HostedTool, signature~ : Json)
+} derive(@debug.Debug)
+pub fn AssistantMessageContent::to_json(Self) -> Json
+pub fn AssistantMessageContent::to_repr(Self) -> @debug.Repr
+pub impl ToJson for AssistantMessageContent
+
+pub(all) enum ConstrainedSampling {
+  JsonSchema(strict~ : Bool)
+  Grammar(format~ : GrammarFormat, definition~ : String, input_property~ : String)
+}
+
+pub(all) struct Context {
+  system_prompt : String
+  messages : ArrayView[AgentMessage]
+  tools : ArrayView[ToolDefinition]
+}
+
+pub(all) struct FunctionTool {
+  name : String
+  description : String
+  parameters : Json
+  constrained_sampling : ConstrainedSampling
+}
+
+pub(all) enum GenerationEvent {
+  Start(partial~ : AssistantMessage)
+  TextStart(content_index~ : Int32, partial~ : AssistantMessage)
+  TextDelta(content_index~ : Int32, delta~ : String, partial~ : AssistantMessage)
+  TextEnd(content_index~ : Int32, content~ : String, partial~ : AssistantMessage)
+  ThinkingStart(content_index~ : Int32, partial~ : AssistantMessage)
+  ThinkingDelta(content_index~ : Int32, delta~ : String, partial~ : AssistantMessage)
+  ThinkingEnd(content_index~ : Int32, content~ : String, partial~ : AssistantMessage)
+  ToolCallStart(content_index~ : Int32, partial~ : AssistantMessage)
+  ToolCallDelta(content_index~ : Int32, delta~ : String, partial~ : AssistantMessage)
+  ToolCallEnd(content_index~ : Int32, tool_call~ : ToolCall, partial~ : AssistantMessage)
+} derive(@debug.Debug)
+pub fn GenerationEvent::to_repr(Self) -> @debug.Repr
+
+pub(all) enum GrammarFormat {
+  Lark
+  Regex
+}
+
+pub(all) enum HostedTool {
+  WebSearch
+} derive(@debug.Debug)
+pub fn HostedTool::to_json(Self) -> Json
+pub fn HostedTool::to_repr(Self) -> @debug.Repr
+pub impl ToJson for HostedTool
+
+pub(all) enum InputMessageContent {
+  Text(String)
+  Image(Bytes)
+}
+pub fn InputMessageContent::to_json(Self) -> Json
+pub impl ToJson for InputMessageContent
+
+pub(all) enum StopReason {
+  Pending
+  Stop
+  Length
+  ToolUse
+  Aborted
+  Error
+} derive(@debug.Debug)
+pub fn StopReason::output(Self, &Logger) -> Unit
+pub fn StopReason::to_json(Self) -> Json
+pub fn StopReason::to_repr(Self) -> @debug.Repr
+pub fn StopReason::to_string(Self) -> String
+pub impl Show for StopReason
+pub impl ToJson for StopReason
+
+pub(all) struct ToolCall {
+  id : String
+  name : String
+  arguments : Json
+} derive(@debug.Debug)
+pub fn ToolCall::to_json(Self) -> Json
+pub fn ToolCall::to_repr(Self) -> @debug.Repr
+pub impl ToJson for ToolCall
+
+pub(all) enum ToolDefinition {
+  Hosted(HostedTool)
+  Function(FunctionTool)
+}
+
+pub(all) struct ToolResult {
+  content : Array[InputMessageContent]
+  details : Json
+  is_error : Bool
+  usage : Usage?
+}
+pub fn ToolResult::to_json(Self) -> Json
+pub impl ToJson for ToolResult
+
+pub(all) struct ToolResultMessage {
+  tool_call_id : String
+  tool_name : String
+  content : Array[InputMessageContent]
+  details : Json?
+  usage : Usage?
+  is_error : Bool
+  timestamp : UInt64
+}
+
+pub(all) struct Usage {
+  input : Int32
+  output : Int32
+  cache_read : Int32
+  cache_write : Int32
+  cache_write_1h : Int32?
+  reasoning : Int32?
+  total_tokens : Int32
+  cost : UsageCost
+} derive(@debug.Debug)
+pub fn Usage::to_json(Self) -> Json
+pub fn Usage::to_repr(Self) -> @debug.Repr
+pub impl ToJson for Usage
+
+pub(all) struct UsageCost {
+  input : Float
+  output : Float
+  cache_read : Float
+  cache_write : Float
+  total : Float
+} derive(@debug.Debug)
+pub fn UsageCost::to_json(Self) -> Json
+pub fn UsageCost::to_repr(Self) -> @debug.Repr
+pub impl ToJson for UsageCost
+
+pub(all) struct UserMessage {
+  content : Array[InputMessageContent]
+  timestamp : UInt64
+}
+pub fn UserMessage::to_json(Self) -> Json
+pub impl ToJson for UserMessage
+
+// Type aliases
+pub type FinishTurnHook = async (ArrayView[AgentMessage], ArrayView[ToolResultMessage], AbortSignal) -> AgentTurnDecision?
+
+pub type ToolExecUpdateCallback = (Array[InputMessageContent], Json) -> Unit
+
+pub using @builtin {type Json as ToolResultDetail}
+
+// Traits
+pub(open) trait LLM {
+  async fn generate(Self, Context, sink~ : async (GenerationEvent) -> Unit, abort~ : AbortSignal) -> AssistantMessage
+}

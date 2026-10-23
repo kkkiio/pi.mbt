@@ -1,0 +1,19 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/cmd/pim"
+
+// Values
+pub async fn flush_output() -> Unit
+
+pub fn write_stderr(String) -> Unit
+
+pub fn write_stdout(String) -> Unit
+
+// Errors
+type AuthConfigError
+
+// Types and methods
+type OutputMode derive(Eq)
+
+// Type aliases
+
+// Traits
