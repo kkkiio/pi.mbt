@@ -275,3 +275,31 @@ pub fn parse_skill_block(text : String) -> SkillInvocation? {
     args: tail.trim().to_owned(),
   })
 }
+
+///|
+/// The inverse of `parse_skill_block`: the text `expand_skill_command` would
+/// have produced. Keeping both in one place is what lets a reader rebuild a
+/// block it had to bound or rewrite.
+pub fn SkillInvocation::block_text(self : SkillInvocation) -> String {
+  let block = "<skill name=\"\{self.name}\" location=\"\{self.location}\">\n\{self.references}\n\n\{self.body}\n</skill>"
+  if self.args == "" {
+    block
+  } else {
+    "\{block}\n\n\{self.args}"
+  }
+}
+
+///|
+/// The same invocation with a different body, for callers that must bound it.
+pub fn SkillInvocation::with_body(
+  self : SkillInvocation,
+  body : String,
+) -> SkillInvocation {
+  {
+    name: self.name,
+    location: self.location,
+    references: self.references,
+    body,
+    args: self.args,
+  }
+}

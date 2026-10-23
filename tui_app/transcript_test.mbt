@@ -722,3 +722,24 @@ async test "expanding reveals the skill body" {
     render_rows(transcript, 60).join("\n").contains("Long skill body."),
   )
 }
+
+///|
+/// A skill block larger than the retained-text bound is still bounded by
+/// structure: the closing tag and args survive, so the collapsed row renders
+/// and `Ctrl+O` still reveals the body.
+async test "a huge skill block still renders collapsed" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  let body = "y".repeat(70_000)
+  transcript.push_user(
+    "<skill name=\"big\" location=\"/tmp/skills/big/SKILL.md\">\nReferences are relative to /tmp/skills/big.\n\n\{body}\n</skill>\n\nargs",
+  )
+  let collapsed = render_rows(transcript, 60).join("\n")
+  assert_true(collapsed.contains("[skill] big (ctrl+o to expand)"))
+  assert_true(collapsed.contains("args"))
+  assert_false(collapsed.contains("<skill name"))
+  transcript.set_expanded(true)
+  let expanded = render_rows(transcript, 60).join("\n")
+  assert_true(expanded.contains("References are relative to /tmp/skills/big."))
+  assert_true(expanded.contains("yyy"))
+}

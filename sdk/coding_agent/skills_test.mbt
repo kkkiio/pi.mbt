@@ -219,3 +219,19 @@ test "parse_skill_block ignores other text" {
   assert_true(@coding_agent.parse_skill_block("/skill:write-doc hi") is None)
   assert_true(@coding_agent.parse_skill_block("<skill name=\"x\">") is None)
 }
+
+///|
+/// `parse_skill_block` and `block_text` are inverses, so a reader can rebuild a
+/// block it had to bound without inventing the format again.
+test "parse_skill_block round-trips through block_text" {
+  let cwd = @coding_agent.create_temp_dir("pim-skill-roundtrip-")
+  defer @coding_agent.remove_dir(cwd)
+  ignore(write_skill(cwd, "write-doc", "Body text."))
+  for command in ["/skill:write-doc", "/skill:write-doc extract it"] {
+    let expanded = @coding_agent.expand_skill_command(command, cwd~)
+    guard @coding_agent.parse_skill_block(expanded) is Some(invocation) else {
+      fail("expected a parsed block for \{command}")
+    }
+    assert_eq(invocation.block_text(), expanded)
+  }
+}

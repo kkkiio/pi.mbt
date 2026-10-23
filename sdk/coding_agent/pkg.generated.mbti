@@ -245,7 +245,9 @@ pub struct SkillInvocation {
   body : String
   args : String
 } derive(@debug.Debug)
+pub fn SkillInvocation::block_text(Self) -> String
 pub fn SkillInvocation::to_repr(Self) -> @debug.Repr
+pub fn SkillInvocation::with_body(Self, String) -> Self
 
 pub(all) struct TruncationResult {
   content : String

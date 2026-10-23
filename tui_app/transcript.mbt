@@ -1113,11 +1113,25 @@ fn available_width(width : Int32, indent : Int32) -> Int32 {
 
 ///|
 /// 限制单条文本的保留大小,避免流式输出无限增长。
+///
+/// 技能块按结构截断:整段截断会切掉 `</skill>`,渲染时解析失败,折叠行就退化成
+/// 原始 XML。这里只截断正文,头部、引用行与 args 保持完整。
 fn keep_text(text : String) -> String {
   if visible_width(text) <= MAX_RETAINED_TEXT_WIDTH {
-    text
-  } else {
-    truncate_to_width(text, MAX_RETAINED_TEXT_WIDTH)
+    return text
+  }
+  match @coding_agent.parse_skill_block(text) {
+    Some(invocation) => {
+      let skeleton = invocation.with_body("").block_text()
+      let remaining = MAX_RETAINED_TEXT_WIDTH - visible_width(skeleton)
+      let body = if remaining > 0 {
+        truncate_to_width(invocation.body, remaining)
+      } else {
+        ""
+      }
+      invocation.with_body(body).block_text()
+    }
+    None => truncate_to_width(text, MAX_RETAINED_TEXT_WIDTH)
   }
 }
 
