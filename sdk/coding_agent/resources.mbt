@@ -12,14 +12,23 @@ pub struct Skill {
   name : String
   description : String
   path : String
+  /// `disable-model-invocation: true` in `SKILL.md` frontmatter: keep the
+  /// skill out of the system prompt so only an explicit `/skill:<name>`
+  /// command can load it.
+  disable_model_invocation : Bool
 } derive(Debug)
 
 ///|
 pub extend Skill with @debug.Debug::{to_repr}
 
 ///|
-fn Skill::Skill(name~ : String, description~ : String, path~ : String) -> Skill {
-  { name, description, path, }
+fn Skill::Skill(
+  name~ : String,
+  description~ : String,
+  path~ : String,
+  disable_model_invocation~ : Bool,
+) -> Skill {
+  { name, description, path, disable_model_invocation, }
 }
 
 ///|
@@ -117,8 +126,15 @@ fn add_skill_file(skills : Array[Skill], path : String) -> Unit {
     }
     stem => stem
   }
-  let (name, description) = parse_frontmatter(text, fallback)
-  skills.push(Skill(name~, description~, path~))
+  let frontmatter = parse_frontmatter(text, fallback)
+  skills.push(
+    Skill(
+      name=frontmatter.name,
+      description=frontmatter.description,
+      path~,
+      disable_model_invocation=frontmatter.disable_model_invocation,
+    ),
+  )
 }
 
 ///|
@@ -134,16 +150,30 @@ fn skill_fallback_name(path : String) -> String {
 }
 
 ///|
-/// Parse `name:` and `description:` from a markdown frontmatter block.
+/// The `SKILL.md` frontmatter fields pim understands. Unknown keys are ignored.
+pub struct SkillFrontmatter {
+  name : String
+  description : String
+  disable_model_invocation : Bool
+} derive(Debug)
+
+///|
+pub extend SkillFrontmatter with @debug.Debug::{to_repr}
+
+///|
+/// Parse `name:`, `description:`, and `disable-model-invocation:` from a
+/// markdown frontmatter block. Missing fields fall back to `fallback_name`,
+/// an empty description, and `false`.
 pub fn parse_frontmatter(
   text : String,
   fallback_name : String,
-) -> (String, String) {
+) -> SkillFrontmatter {
   let mut name = fallback_name
   let mut description = ""
+  let mut disable_model_invocation = false
   let lines = [..text.split("\n")]
   guard lines is [first, .. rest] && first.trim() == "---" else {
-    return (name, description)
+    return { name, description, disable_model_invocation, }
   }
   for line in rest {
     if line.trim() == "---" {
@@ -155,9 +185,11 @@ pub fn parse_frontmatter(
       match key {
         "name" => if value != "" { name = "\{value}" }
         "description" => description = "\{value}"
+        "disable-model-invocation" =>
+          disable_model_invocation = value.to_lower() == "true"
         _ => ()
       }
     }
   }
-  (name, description)
+  { name, description, disable_model_invocation, }
 }
