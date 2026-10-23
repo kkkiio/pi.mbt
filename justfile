@@ -8,6 +8,7 @@ check:
 
 fmt:
     moon fmt
+    moon info
 
 build:
     moon build
