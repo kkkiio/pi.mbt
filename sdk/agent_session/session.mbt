@@ -1,20 +1,13 @@
 ///|
+/// Journal-backed session over an `Agent`: it persists every loop event, owns
+/// the auto-retry window and fans events out to subscribers. Transcript, tools
+/// and the system prompt live on `agent`.
 pub struct AgentSession {
   journal : &SessionJournal
-  llm : &@agent_loop.LLM
-  tool_registry : @tools.ToolRegistry
-  active_tools : Array[String]
+  agent : Agent
   fanout : FanOutListener
-  mut message_buffer : Array[@agent_loop.AgentMessage]
-  system_prompt_contributes : Array[SystemPromptContributor]
-  auto_refresh_system_prompt : Bool
   /// Agent-level auto-retry policy, read at every retryable failure.
   retry_settings : RetrySettings
-  /// Current system prompt.
-  mut system_prompt_cache : (String, Array[String])?
-  /// Called after a completed assistant turn and all of its tool results, but
-  /// before `turn_end`. Read at every run, so a caller may replace or wrap it.
-  mut finish_turn_hook : @agent_loop.FinishTurnHook
   mut active_run_abort_controller : @agent_loop.AbortController?
 }
 
@@ -29,19 +22,21 @@ pub fn AgentSession::AgentSession(
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _, _) => None,
   auto_refresh_system_prompt~ : Bool = false,
 ) -> AgentSession {
-  AgentSession::{
-    tool_registry,
-    active_tools: active_tools.to_owned(),
-    journal,
-    fanout: FanOutListener::FanOutListener(),
+  let agent = Agent::Agent(
     llm,
-    system_prompt_contributes,
+    system_prompt_contributes~,
+    tool_registry~,
+    active_tools~,
+    messages=project_messages(journal.get_entries()),
+    finish_turn_hook~,
+    auto_refresh_system_prompt~,
+  )
+  AgentSession::{
+    journal,
+    agent,
+    fanout: FanOutListener::FanOutListener(),
     retry_settings,
-    system_prompt_cache: None,
-    finish_turn_hook,
     active_run_abort_controller: None,
-    message_buffer: project_messages(journal.get_entries()),
-    auto_refresh_system_prompt,
   }
 }
 
@@ -66,64 +61,14 @@ pub async fn AgentSession::prompt(
       "Agent is already processing. Use 'steer' or 'followUp' to queue the message.",
     ) // TODO: support steer/follow_up
   }
-  let tools : Array[@tools.ToolDefinition] = []
-  for name in self.active_tools {
-    guard self.tool_registry.get_tool(name) is Some(tool) else {
-      fail("unknown tool: \{name}")
-    }
-    tools.push(tool)
+  // Surface configuration errors before the run closes them as failures.
+  for name in self.agent.active_tool_names() {
+    guard self.agent.has_tool(name) else { fail("unknown tool: \{name}") }
   }
-  let system_prompt = match self.system_prompt_cache {
-    Some(c) =>
-      if self.auto_refresh_system_prompt {
-        let parts = self.system_prompt_contributes.filter_map(f => {
-          match f(self.active_tools) {
-            "" => None
-            s => Some(s)
-          }
-        })
-        if parts != c.1 {
-          let p = parts.join("\n")
-          self.system_prompt_cache = Some((p, parts))
-          p
-        } else {
-          c.0
-        }
-      } else {
-        c.0
-      }
-    None => {
-      let parts = self.system_prompt_contributes.filter_map(f => {
-        match f(self.active_tools) {
-          "" => None
-          s => Some(s)
-        }
-      })
-      let p = parts.join("\n")
-      self.system_prompt_cache = Some((p, parts))
-      p
-    }
-  }
-  let tool_map = tools.iter().map(t => (t.name, t)) |> Map::from_iter
-  let agent_tools = tools.map(d => {
-    if d.callable_definition is Some(c) {
-      @agent_loop.Function({
-        name: d.name,
-        description: c.description,
-        parameters: c.parameters,
-        constrained_sampling: c.constrained_sampling,
-      })
-    } else {
-      match d.name {
-        WEB_SEARCH_TOOL_NAME => @agent_loop.Hosted(@agent_loop.WebSearch)
-        _ => fail("unknown hosted tool \\{d.name}")
-      }
-    }
-  })
   let abort_controller = @agent_loop.AbortController::new()
   self.active_run_abort_controller = Some(abort_controller)
   defer {
-    self.message_buffer = project_messages(self.journal.get_entries())
+    self.agent.set_messages(project_messages(self.journal.get_entries()))
     self.active_run_abort_controller = None
   }
   let mut retry_attempt = 0
@@ -143,13 +88,7 @@ pub async fn AgentSession::prompt(
   }
   let mut pending_prompts = input
   for ;; {
-    let mut assistant_metadata : @agent_loop.AssistantMessage? = None
     let sink : async (@agent_loop.AgentEvent) -> Unit = event => {
-      match event {
-        MessageStart(Assistant(message)) | MessageEnd(Assistant(message)) =>
-          assistant_metadata = Some(message)
-        _ => ()
-      }
       // Persist complete messages at their terminal events. User and
       // assistant messages are complete at MessageEnd (assistant streaming
       // events in between carry in-flight snapshots whose stop_reason is
@@ -174,9 +113,6 @@ pub async fn AgentSession::prompt(
         if content is Message(Assistant(_)) {
           last_assistant_entry_id = Some(stored[0].id)
         }
-        if content is Message(message) {
-          self.message_buffer.push(message)
-        }
       }
       self.fanout.on_event(AgentSessionEvent::Loop(event))
       // reset retry window
@@ -190,61 +126,15 @@ pub async fn AgentSession::prompt(
     }
     // 有 prompt 就是新回合;没有 prompt 就是从现有 transcript 续跑(重试走这条)。
     // 后者校验尾部,所以重试能进行本身就说明失败回合已被 `context_edit` 剔除。
-    let mut run_escaped = false
-    try {
-      if pending_prompts.length() > 0 {
-        @agent_loop.run_agent_loop(
-          self.llm,
-          system_prompt,
-          self.message_buffer.copy(),
-          agent_tools,
-          pending_prompts,
-          tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
-          abort=abort_controller.signal(),
-          event_sink=sink,
-          finish_turn_hook=self.finish_turn_hook,
-        )
-      } else {
-        @agent_loop.run_agent_loop_continue(
-          self.llm,
-          system_prompt,
-          self.message_buffer.copy(),
-          agent_tools,
-          tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
-          abort=abort_controller.signal(),
-          event_sink=sink,
-          finish_turn_hook=self.finish_turn_hook,
-        )
-      }
-    } catch {
-      err => {
-        // 逃出循环的错误按构造不是 provider 失败——provider 错误由 generate
-        // 折成 error AssistantMessage 走正常终态路径,能到这里的是监听器、
-        // journal 等本地失败。合成失败照常落盘,但不参与 auto-retry。
-        run_escaped = true
-        let failure : @agent_loop.AssistantMessage = {
-          content: [@agent_loop.AssistantMessageContent::Text("", signature={})],
-          api: assistant_metadata.map(m => m.api).unwrap_or(""),
-          provider: assistant_metadata.map(m => m.provider).unwrap_or(""),
-          model: assistant_metadata.map(m => m.model).unwrap_or(""),
-          stop_reason: if abort_controller.signal().is_aborted() {
-            Aborted
-          } else {
-            Error
-          },
-          error_message: Some(err.to_string()),
-          usage: None,
-          timestamp: @env.now(),
-        }
-        // pi's handleRunFailure uses the same event path, including listeners.
-        sink(MessageStart(Assistant(failure)))
-        sink(MessageEnd(Assistant(failure)))
-        sink(TurnEnd(failure, []))
-        sink(AgentEnd([Assistant(failure)]))
-      }
-    }
-    self.message_buffer = project_messages(self.journal.get_entries())
-    if self.message_buffer.last()
+    // `run` raises only when the synthesized failure cannot be delivered either;
+    // that error then escapes the session, matching pi.
+    let run_escaped = self.agent.run(
+      pending_prompts,
+      abort=abort_controller.signal(),
+      on_event=sink,
+    )
+    self.agent.set_messages(project_messages(self.journal.get_entries()))
+    if self.agent.messages().last()
       is Some(
         @agent_loop.AgentMessage::Assistant(
           { stop_reason: Error, error_message, .. }
@@ -275,7 +165,7 @@ pub async fn AgentSession::prompt(
             ]),
           )
         }
-        self.message_buffer = project_messages(self.journal.get_entries())
+        self.agent.set_messages(project_messages(self.journal.get_entries()))
         if wait_backoff(delay_ms, abort_controller.signal()) is Aborted {
           // 退避窗口里被中断:这一轮不再发起。
           settle_retry(false, Some("Retry cancelled"))
@@ -303,34 +193,37 @@ pub fn AgentSession::subscribe(
 }
 
 ///|
-/// Replace the finish-turn hook, mirroring pi's `agent.finishTurn = ...`. A
-/// wrapper can read the current hook first and delegate to it, which is how pi
-/// layers a further policy on top of the app's.
+/// The transcript the session projects from its journal.
+pub fn AgentSession::messages(
+  self : AgentSession,
+) -> ArrayView[@agent_loop.AgentMessage] {
+  self.agent.messages()
+}
+
+///|
+/// Delegates to the inner agent.
 pub fn AgentSession::set_finish_turn_hook(
   self : AgentSession,
   hook : @agent_loop.FinishTurnHook,
 ) -> Unit {
-  self.finish_turn_hook = hook
+  self.agent.set_finish_turn_hook(hook)
 }
 
 ///|
+/// Delegates to the inner agent.
 pub fn AgentSession::set_active_tools(
   self : AgentSession,
   names : ArrayView[String],
 ) -> Unit raise {
-  for name in names {
-    guard self.tool_registry.get_tool(name) is Some(_) else {
-      fail("unknown tool: \{name}")
-    }
-  }
-  names.blit_to(self.active_tools)
+  self.agent.set_active_tools(names)
 }
 
 ///|
+/// Delegates to the inner agent.
 pub fn AgentSession::active_tool_names(
   self : AgentSession,
 ) -> ArrayView[String] {
-  self.active_tools
+  self.agent.active_tool_names()
 }
 
 ///|

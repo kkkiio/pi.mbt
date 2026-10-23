@@ -12,14 +12,23 @@ pub struct Skill {
   name : String
   description : String
   path : String
+  /// `disable-model-invocation: true` in `SKILL.md` frontmatter: keep the
+  /// skill out of the system prompt so only an explicit `/skill:<name>`
+  /// command can load it.
+  disable_model_invocation : Bool
 } derive(Debug)
 
 ///|
 pub extend Skill with @debug.Debug::{to_repr}
 
 ///|
-fn Skill::Skill(name~ : String, description~ : String, path~ : String) -> Skill {
-  { name, description, path, }
+fn Skill::Skill(
+  name~ : String,
+  description~ : String,
+  path~ : String,
+  disable_model_invocation~ : Bool,
+) -> Skill {
+  { name, description, path, disable_model_invocation, }
 }
 
 ///|
@@ -117,8 +126,15 @@ fn add_skill_file(skills : Array[Skill], path : String) -> Unit {
     }
     stem => stem
   }
-  let (name, description) = parse_frontmatter(text, fallback)
-  skills.push(Skill(name~, description~, path~))
+  let frontmatter = parse_frontmatter(text, fallback)
+  skills.push(
+    Skill(
+      name=frontmatter.name,
+      description=frontmatter.description,
+      path~,
+      disable_model_invocation=frontmatter.disable_model_invocation,
+    ),
+  )
 }
 
 ///|
@@ -134,16 +150,30 @@ fn skill_fallback_name(path : String) -> String {
 }
 
 ///|
-/// Parse `name:` and `description:` from a markdown frontmatter block.
+/// The `SKILL.md` frontmatter fields pim understands. Unknown keys are ignored.
+pub struct SkillFrontmatter {
+  name : String
+  description : String
+  disable_model_invocation : Bool
+} derive(Debug)
+
+///|
+pub extend SkillFrontmatter with @debug.Debug::{to_repr}
+
+///|
+/// Parse `name:`, `description:`, and `disable-model-invocation:` from a
+/// markdown frontmatter block. Missing fields fall back to `fallback_name`,
+/// an empty description, and `false`.
 pub fn parse_frontmatter(
   text : String,
   fallback_name : String,
-) -> (String, String) {
+) -> SkillFrontmatter {
   let mut name = fallback_name
   let mut description = ""
+  let mut disable_model_invocation = false
   let lines = [..text.split("\n")]
   guard lines is [first, .. rest] && first.trim() == "---" else {
-    return (name, description)
+    return { name, description, disable_model_invocation, }
   }
   for line in rest {
     if line.trim() == "---" {
@@ -155,9 +185,121 @@ pub fn parse_frontmatter(
       match key {
         "name" => if value != "" { name = "\{value}" }
         "description" => description = "\{value}"
+        "disable-model-invocation" =>
+          disable_model_invocation = value.to_lower() == "true"
         _ => ()
       }
     }
   }
-  (name, description)
+  { name, description, disable_model_invocation, }
+}
+
+///|
+/// Drop a leading `---` … `---` frontmatter block, returning the body. Text
+/// without a closed block is returned unchanged.
+fn strip_frontmatter(text : String) -> String {
+  let lines = [..text.split("\n")]
+  guard lines is [first, .. rest] && first.trim() == "---" else { return text }
+  let mut end = 0
+  while end < rest.length() && rest[end].trim() != "---" {
+    end = end + 1
+  }
+  guard end < rest.length() else { return text }
+  rest[end + 1:].to_owned().join("\n")
+}
+
+///|
+/// Expand a `/skill:<name> [args]` command into the `<skill>` block the model
+/// receives (pi's `_expandSkillCommand`). Anything else — a non-command, an
+/// unknown skill name, an unreadable file — passes through unchanged.
+pub fn expand_skill_command(text : String, cwd~ : String) -> String {
+  guard text.has_prefix("/skill:") else { return text }
+  let rest = text[7:]
+  let (name, args) = match rest.split_once(" ") {
+    Some((name, args)) => (name.trim().to_owned(), args.trim().to_owned())
+    None => (rest.trim().to_owned(), "")
+  }
+  let mut found : Skill? = None
+  for skill in discover_skills("\{cwd}/.agents/skills") {
+    if skill.name == name {
+      found = Some(skill)
+      break
+    }
+  }
+  guard found is Some(skill) else { return text }
+  let content = read_text_file(skill.path) catch { _ => return text }
+  let body = strip_frontmatter(content).trim()
+  let block = "<skill name=\"\{skill.name}\" location=\"\{skill.path}\">\nReferences are relative to \{parent_dir(skill.path)}.\n\n\{body}\n</skill>"
+  if args == "" {
+    block
+  } else {
+    "\{block}\n\n\{args}"
+  }
+}
+
+///|
+/// A `/skill:` block as `expand_skill_command` writes it: what the model saw,
+/// and therefore what a journal replay shows.
+pub struct SkillInvocation {
+  name : String
+  location : String
+  /// The `References are relative to <dir>.` line the block carries.
+  references : String
+  body : String
+  /// Text the user appended after the command, if any.
+  args : String
+} derive(Debug)
+
+///|
+pub extend SkillInvocation with @debug.Debug::{to_repr}
+
+///|
+/// Parse a `<skill …>` block back into its parts. Any other text returns
+/// `None`, so callers can render blocks specially and leave everything else
+/// alone.
+pub fn parse_skill_block(text : String) -> SkillInvocation? {
+  let prefix = "<skill name=\""
+  guard text.has_prefix(prefix) else { return None }
+  let rest = text[prefix.length():]
+  guard rest.split_once("\" location=\"") is Some((name, rest)) else {
+    return None
+  }
+  guard rest.split_once("\">\n") is Some((location, rest)) else { return None }
+  guard rest.split_once("\n\n") is Some((references, rest)) else { return None }
+  guard rest.split_once("\n</skill>") is Some((body, tail)) else { return None }
+  Some({
+    name: name.to_owned(),
+    location: location.to_owned(),
+    references: references.to_owned(),
+    body: body.to_owned(),
+    args: tail.trim().to_owned(),
+  })
+}
+
+///|
+/// The inverse of `parse_skill_block`: the text `expand_skill_command` would
+/// have produced. Keeping both in one place is what lets a reader rebuild a
+/// block it had to bound or rewrite.
+pub fn SkillInvocation::block_text(self : SkillInvocation) -> String {
+  let block = "<skill name=\"\{self.name}\" location=\"\{self.location}\">\n\{self.references}\n\n\{self.body}\n</skill>"
+  if self.args == "" {
+    block
+  } else {
+    "\{block}\n\n\{self.args}"
+  }
+}
+
+///|
+/// The same invocation with a different body, for callers that must bound it.
+pub fn SkillInvocation::with_body(
+  self : SkillInvocation,
+  body : String,
+) -> SkillInvocation {
+  {
+    name: self.name,
+    location: self.location,
+    references: self.references,
+    body,
+    args: self.args,
+  }
 }

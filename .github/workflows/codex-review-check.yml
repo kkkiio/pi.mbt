@@ -20,8 +20,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  codex-review:
-    name: Codex Review
+  codex-review-gate:
+    name: Codex Review Gate
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:

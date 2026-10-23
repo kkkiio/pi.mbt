@@ -149,7 +149,8 @@ pub fn TuiApp::start(self : TuiApp) -> Unit {
       None => ""
     }
   })
-  self.editor.set_slash_commands(slash_commands(), self.footer.cwd())
+  let cwd = self.footer.cwd()
+  self.editor.set_slash_commands(slash_commands(cwd), cwd)
   let viewport = chat_viewport_new(
     document=transcript_component,
     pending=pending_component,
@@ -165,14 +166,20 @@ pub fn TuiApp::start(self : TuiApp) -> Unit {
 }
 
 ///|
-/// slash 命令补全项(名称 + 描述),与 `run.mbt` 的命令解析保持一致。
-fn slash_commands() -> Array[(String, String)] {
-  [
+/// slash 命令补全项(名称 + 描述),与 `run.mbt` 的解析、`submit` 的展开保持一致。
+/// 技能也注册成 `skill:<name>`,包括 `disable-model-invocation` 的技能——它们只是
+/// 不进系统提示,显式命令仍然可用(pi 的 `enableSkillCommands` 行为)。
+fn slash_commands(cwd : String) -> Array[(String, String)] {
+  let commands = [
     ("new", "Start a new session"),
     ("resume", "Resume a session from this directory"),
     ("quit", "Exit pim"),
     ("exit", "Exit pim"),
   ]
+  for skill in @coding_agent.discover_skills("\{cwd}/.agents/skills") {
+    commands.push(("skill:\{skill.name}", skill.description))
+  }
+  commands
 }
 
 ///|
@@ -214,14 +221,10 @@ fn TuiApp::on_input(self : TuiApp, data : String) -> Bool {
   }
   // app.tools.expand == ctrl+o:展开/折叠工具输出。
   if matches_key(data, "ctrl+o") {
-    self.transcript.toggle_expanded_tool_output()
+    self.transcript.toggle_expanded()
     self.push_note(
       "Tool output: " +
-      (if self.transcript.expanded_tool_output {
-        "expanded"
-      } else {
-        "collapsed"
-      }),
+      (if self.transcript.expanded { "expanded" } else { "collapsed" }),
     )
     self.tui.request_render()
     return true
@@ -305,14 +308,25 @@ pub fn TuiApp::submit(self : TuiApp, text : String) -> Unit {
     return
   }
   let was_queued = self.running
-  self.push_user(trimmed)
-  let _ = self.submissions.try_put((trimmed, was_queued)) catch { _ => false }
+  // 展开后的文本就是发给模型、写进 journal 的那份;transcript 也存它,渲染时
+  // 折叠成一行,于是实时与 `/resume` 回放显示一致。历史与排队仍保留用户原文的
+  // 命令,取回来编辑时不会变成 `<skill>` 块。
+  let prompt = @coding_agent.expand_skill_command(
+    trimmed,
+    cwd=self.footer.cwd(),
+  )
+  self.push_user(trimmed, display=prompt)
+  let _ = self.submissions.try_put((prompt, was_queued)) catch { _ => false }
 }
 
 ///|
 /// 本地回显一条用户消息。agent 忙时同时进"排队中"列表。
-pub fn TuiApp::push_user(self : TuiApp, text : String) -> Unit {
-  self.transcript.push_user(text)
+pub fn TuiApp::push_user(
+  self : TuiApp,
+  text : String,
+  display~ : String = "",
+) -> Unit {
+  self.transcript.push_user(if display == "" { text } else { display })
   self.editor.add_to_history(text)
   if self.running {
     self.pending.val.lines.push(text)

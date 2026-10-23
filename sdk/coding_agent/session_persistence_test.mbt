@@ -249,19 +249,17 @@ async test "tool details and usage survive journal resume" {
     name: "probe",
     label: "probe",
     prompt_guidelines: [],
-    callable_definition: Some({
-      description: "metadata probe",
-      parameters: {},
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: (_, _, _) => {
-        content: [Text("tool output")],
-        details,
-        usage: Some(usage),
-        is_error: false,
-      },
-    }),
+    description: "metadata probe",
+    parameters: {},
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (_, _, _) => {
+      content: [Text("tool output")],
+      details,
+      usage: Some(usage),
+      is_error: false,
+    },
   })
   let llm = @faux.FauxLLM::FauxLLM()
   llm.set_responses([
@@ -341,4 +339,30 @@ async test "tool details and usage survive journal resume" {
   assert_eq(restored.usage.map(usage => usage.to_json()), Some(usage.to_json()))
   @coding_agent.remove_file(path)
   @coding_agent.remove_dir(dir)
+}
+
+///|
+/// Journals written before hosted tools were removed can still hold a
+/// `hostedToolCall` block. Dropping that block keeps the session resumable
+/// instead of failing the whole file on an assistant-content type this version
+/// no longer has.
+async test "resuming a journal with a legacy hosted tool call" {
+  let dir = @coding_agent.create_temp_dir("pim-legacy-hosted-")
+  let path = "\{dir}/s1.jsonl"
+  let fixture =
+    #|{"type":"session","version":3,"id":"legacy","timestamp":"2024-02-29T23:59:59.999Z","cwd":"/tmp"}
+    #|{"type":"message","id":"u1","parentId":null,"timestamp":"2024-02-29T23:59:59.999Z","message":{"role":"user","content":"search for it","timestamp":1}}
+    #|{"type":"message","id":"a1","parentId":"u1","timestamp":"2024-03-01T00:00:00.001Z","message":{"role":"assistant","content":[{"type":"text","text":"found it"},{"type":"hostedToolCall","tool":"web_search","signature":{"id":"ws_1"}}],"api":"openai-responses","provider":"openai","model":"gpt","stopReason":"stop","timestamp":2}}
+    #|
+  @coding_agent.write_bytes_file(path, @utf8.encode(fixture))
+  let entries = @coding_agent.fetch_active_entries(path)
+  assert_eq(entries.length(), 2)
+  guard entries[1].content is Message(Assistant(message)) else {
+    fail("expected the assistant message to decode")
+  }
+  assert_eq(message.content.length(), 1)
+  guard message.content[0] is Text(text, ..) else {
+    fail("expected the legacy block to be dropped, keeping the text block")
+  }
+  assert_eq(text, "found it")
 }

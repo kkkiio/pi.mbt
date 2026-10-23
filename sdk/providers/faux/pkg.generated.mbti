@@ -1,0 +1,38 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/providers/faux"
+
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+}
+
+// Values
+pub fn faux_message(Array[@agent_loop.AssistantMessageContent], stop_reason? : @agent_loop.StopReason, error_message? : String?, api? : String, provider? : String, model? : String, timestamp? : UInt64) -> @agent_loop.AssistantMessage
+
+pub fn faux_text(String) -> @agent_loop.AssistantMessageContent
+
+pub fn faux_thinking(String) -> @agent_loop.AssistantMessageContent
+
+pub fn faux_tool_call(String, Json, id? : String) -> @agent_loop.AssistantMessageContent
+
+// Errors
+
+// Types and methods
+pub struct FauxLLM {
+  api : String
+  provider : String
+  model : String
+  mut responses : Array[@agent_loop.AssistantMessage]
+  mut cursor : Int32
+  chunk_delay_ms : Int32
+  chunk_size : Int32
+}
+pub fn FauxLLM::FauxLLM(api? : String, provider? : String, model? : String, chunk_delay_ms? : Int32, chunk_size? : Int32) -> Self
+pub fn FauxLLM::append_responses(Self, ArrayView[@agent_loop.AssistantMessage]) -> Unit
+pub async fn FauxLLM::generate(Self, @agent_loop.Context, sink~ : async (@agent_loop.GenerationEvent) -> Unit, abort~ : @agent_loop.AbortSignal) -> @agent_loop.AssistantMessage
+pub fn FauxLLM::pending_responses(Self) -> Int32
+pub fn FauxLLM::set_responses(Self, ArrayView[@agent_loop.AssistantMessage]) -> Unit
+pub impl @agent_loop.LLM for FauxLLM
+
+// Type aliases
+
+// Traits

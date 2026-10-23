@@ -1,0 +1,120 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/agent_session"
+
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/tools",
+  "moonbitlang/core/json",
+}
+
+// Values
+pub fn agent_event_to_pi_json(@agent_loop.AgentEvent) -> Json raise
+
+pub fn format_journal_timestamp(UInt64) -> String
+
+pub fn is_retryable_error_message(String) -> Bool
+
+pub fn to_pi_json(AgentSessionEvent) -> Json raise
+
+// Errors
+
+// Types and methods
+pub struct Agent {
+  llm : &@agent_loop.LLM
+  tool_registry : @tools.ToolRegistry
+  active_tools : Array[String]
+  system_prompt_contributes : Array[(ArrayView[String]) -> String]
+  auto_refresh_system_prompt : Bool
+  mut system_prompt_cache : (String, Array[String])?
+  mut messages : Array[@agent_loop.AgentMessage]
+  mut finish_turn_hook : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?
+}
+pub fn Agent::Agent(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], messages? : ArrayView[@agent_loop.AgentMessage], finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool) -> Self
+pub fn Agent::active_tool_names(Self) -> ArrayView[String]
+pub fn Agent::has_tool(Self, String) -> Bool
+pub fn Agent::messages(Self) -> ArrayView[@agent_loop.AgentMessage]
+pub async fn Agent::run(Self, ArrayView[@agent_loop.UserMessage], abort~ : @agent_loop.AbortSignal, on_event~ : async (@agent_loop.AgentEvent) -> Unit) -> Bool
+pub fn Agent::set_active_tools(Self, ArrayView[String]) -> Unit raise
+pub fn Agent::set_finish_turn_hook(Self, async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?) -> Unit
+pub fn Agent::set_messages(Self, ArrayView[@agent_loop.AgentMessage]) -> Unit
+pub fn Agent::system_prompt(Self) -> String
+
+pub struct AgentSession {
+  journal : &SessionJournal
+  agent : Agent
+  fanout : FanOutListener
+  retry_settings : RetrySettings
+  mut active_run_abort_controller : @agent_loop.AbortController?
+}
+pub fn AgentSession::AgentSession(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], journal? : &SessionJournal, tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], retry_settings? : RetrySettings, finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool) -> Self
+pub fn AgentSession::abort(Self) -> Unit
+pub fn AgentSession::active_tool_names(Self) -> ArrayView[String]
+pub fn AgentSession::messages(Self) -> ArrayView[@agent_loop.AgentMessage]
+pub async fn AgentSession::prompt(Self, Array[@agent_loop.UserMessage]) -> Unit
+pub fn AgentSession::set_active_tools(Self, ArrayView[String]) -> Unit raise
+pub fn AgentSession::set_finish_turn_hook(Self, async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?) -> Unit
+pub fn AgentSession::subscribe(Self, async (AgentSessionEvent) -> Unit) -> Unit
+
+pub enum AgentSessionEvent {
+  Loop(@agent_loop.AgentEvent)
+  AutoRetryStart(attempt~ : Int32, max_attempts~ : Int32, delay_ms~ : Int32, error_message~ : String)
+  AutoRetryEnd(attempt~ : Int32, success~ : Bool, final_error~ : String?)
+}
+
+pub struct FanOutListener {
+  listeners : Array[async (AgentSessionEvent) -> Unit]
+}
+pub fn FanOutListener::FanOutListener() -> Self
+pub async fn FanOutListener::on_event(Self, AgentSessionEvent) -> Unit
+
+type InMemorySessionJournal
+pub fn InMemorySessionJournal::InMemorySessionJournal(now? : () -> UInt64) -> Self
+pub async fn InMemorySessionJournal::append(Self, ArrayView[NewSessionEntry]) -> Array[SessionEntry]
+pub fn InMemorySessionJournal::generate_id(Self) -> String
+pub fn InMemorySessionJournal::get_entries(Self) -> ArrayView[SessionEntry]
+pub impl SessionJournal for InMemorySessionJournal
+
+pub(all) struct NewSessionEntry {
+  id : String
+  content : SessionEntryContent
+}
+
+pub(all) struct RetrySettings {
+  enabled : Bool
+  max_retries : Int32
+  base_delay_ms : Int32
+  max_agent_delay_ms : Int32
+}
+pub fn RetrySettings::default() -> Self
+pub fn RetrySettings::delay_ms(Self, Int32) -> Int32
+
+pub(all) struct SessionEntry {
+  id : String
+  parent_id : String?
+  timestamp : UInt64
+  content : SessionEntryContent
+}
+pub fn SessionEntry::auxiliary_usage(Self) -> @agent_loop.Usage?
+pub fn SessionEntry::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SessionEntry::to_json(Self) -> Json
+pub impl ToJson for SessionEntry
+pub impl @json.FromJson for SessionEntry
+
+pub(all) enum SessionEntryContent {
+  Message(@agent_loop.AgentMessage)
+  ModelChange(provider~ : String, model_id~ : String)
+  Compaction(summary~ : String, first_kept_entry_id~ : String, tokens_before~ : Int32, details~ : Json?, usage~ : @agent_loop.Usage?)
+  Custom(custom_type~ : String, data~ : Json?)
+  Metadata(Json)
+  ContextEdit(target_id~ : String)
+}
+
+// Type aliases
+pub type SystemPromptContributor = (ArrayView[String]) -> String
+
+// Traits
+pub(open) trait SessionJournal {
+  fn generate_id(Self) -> String
+  async fn append(Self, ArrayView[NewSessionEntry]) -> Array[SessionEntry]
+  fn get_entries(Self) -> ArrayView[SessionEntry]
+}

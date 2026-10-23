@@ -112,7 +112,7 @@ async test "tool previews count visual rows and preserve expanded output" {
         assert_true(line.contains(foreground))
       }
     }
-    transcript.set_expanded_tool_output(true)
+    transcript.set_expanded(true)
     let expanded = render_rows(transcript, 11)
     let rows = expanded.map(row => row.trim().to_owned())
     assert_eq(rows.filter(row => row == "012345678").length(), limit + 2)
@@ -144,7 +144,7 @@ async test "tool rows respect narrow widths and wide unicode with ANSI" {
     )
   }
   for expanded in [false, true] {
-    transcript.set_expanded_tool_output(expanded)
+    transcript.set_expanded(expanded)
     for width in [0, 1, 2, 8, 40] {
       let _ = render_rows(transcript, width)
     }
@@ -456,7 +456,7 @@ async test "individual clicks preserve other blocks and global toggles reset ove
   let expanded = render_rows(tools, 60).join("\n")
   assert_true(expanded.contains("HEAD first"))
   assert_false(expanded.contains("HEAD second"))
-  tools.set_expanded_tool_output(false)
+  tools.set_expanded(false)
   assert_false(render_rows(tools, 60).join("\n").contains("HEAD first"))
   // Reflow before clicking the second result; do not use the old wide-row position.
   let narrow = render_rows(tools, 16)
@@ -535,7 +535,7 @@ async test "bash preview and expansion retain whitespace-sensitive output" {
       },
     )
     for expanded in [false, true] {
-      transcript.set_expanded_tool_output(expanded)
+      transcript.set_expanded(expanded)
       let rows = render_rows(transcript, 80)
       assert_eq(rows.length(), if truncated { 9 } else { 7 })
       assert_eq(rows[3], "   value" + " ".repeat(72))
@@ -611,7 +611,7 @@ async test "large generic arguments are bounded and cached calls refresh after r
   assert_eq(render_rows(transcript, 40), pending)
   transcript.push_tool_result("write", "saved", false, id="write")
   assert_true(render_rows(transcript, 40).join("\n").contains("saved"))
-  transcript.set_expanded_tool_output(true)
+  transcript.set_expanded(true)
   let expanded = render_rows(transcript, 40)
   assert_true(expanded.length() > pending.length())
   assert_true(expanded.length() <= 60)
@@ -625,7 +625,7 @@ async test "large generic arguments are bounded and cached calls refresh after r
   }
   assert_true(transcript.click(result_row, 40))
   assert_true(render_rows(transcript, 40).length() < expanded.length())
-  transcript.set_expanded_tool_output(true)
+  transcript.set_expanded(true)
   let narrow = render_rows(transcript, 12)
   assert_true(narrow.length() <= 60)
   assert_eq(render_rows(transcript, 12), narrow)
@@ -673,9 +673,73 @@ async test "bash partial line warning reports retained and total bytes" {
     }),
   )
   for expanded in [false, true] {
-    transcript.set_expanded_tool_output(expanded)
+    transcript.set_expanded(expanded)
     let rows = render_rows(transcript, 80).join("\n")
     assert_true(rows.contains("showing last 2.0KB of 8.0KB (partial line)"))
     assert_false(rows.contains("1 lines shown"))
   }
+}
+
+///|
+/// A journaled skill invocation renders like pi's collapsed component: label,
+/// name, expand hint, then the user's own text as a separate paragraph.
+async test "skill invocation renders collapsed with the expand hint" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_user(
+    "<skill name=\"write-doc\" location=\"/tmp/skills/write-doc/SKILL.md\">\nReferences are relative to /tmp/skills/write-doc.\n\nLong skill body.\n</skill>\n\nextract report.pdf",
+  )
+  let rendered = render_rows(transcript, 60).join("\n")
+  assert_true(rendered.contains("[skill] write-doc (ctrl+o to expand)"))
+  assert_true(rendered.contains("extract report.pdf"))
+  assert_false(rendered.contains("<skill name"))
+  assert_false(rendered.contains("Long skill body."))
+  assert_false(rendered.contains("References are relative to"))
+}
+
+///|
+/// `Ctrl+O` is one switch for every collapsible item: expanding it also reveals
+/// the skill body a `/skill:` invocation carried.
+async test "expanding reveals the skill body" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  transcript.push_user(
+    "<skill name=\"write-doc\" location=\"/tmp/skills/write-doc/SKILL.md\">\nReferences are relative to /tmp/skills/write-doc.\n\nLong skill body.\n</skill>",
+  )
+  assert_false(
+    render_rows(transcript, 60).join("\n").contains("Long skill body."),
+  )
+  transcript.set_expanded(true)
+  let expanded = render_rows(transcript, 60).join("\n")
+  assert_true(expanded.contains("[skill]"))
+  assert_true(expanded.contains("write-doc"))
+  assert_true(
+    expanded.contains("References are relative to /tmp/skills/write-doc."),
+  )
+  assert_true(expanded.contains("Long skill body."))
+  transcript.set_expanded(false)
+  assert_false(
+    render_rows(transcript, 60).join("\n").contains("Long skill body."),
+  )
+}
+
+///|
+/// A skill block larger than the retained-text bound is still bounded by
+/// structure: the closing tag and args survive, so the collapsed row renders
+/// and `Ctrl+O` still reveals the body.
+async test "a huge skill block still renders collapsed" {
+  @tui_app.load_module()
+  let transcript = @tui_app.Transcript::new(@tui_app.Theme::load("light"))
+  let body = "y".repeat(70_000)
+  transcript.push_user(
+    "<skill name=\"big\" location=\"/tmp/skills/big/SKILL.md\">\nReferences are relative to /tmp/skills/big.\n\n\{body}\n</skill>\n\nargs",
+  )
+  let collapsed = render_rows(transcript, 60).join("\n")
+  assert_true(collapsed.contains("[skill] big (ctrl+o to expand)"))
+  assert_true(collapsed.contains("args"))
+  assert_false(collapsed.contains("<skill name"))
+  transcript.set_expanded(true)
+  let expanded = render_rows(transcript, 60).join("\n")
+  assert_true(expanded.contains("References are relative to /tmp/skills/big."))
+  assert_true(expanded.contains("yyy"))
 }

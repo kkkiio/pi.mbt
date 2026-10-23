@@ -10,32 +10,29 @@ pub fn new_bash_tool_definition(
     name: BASH_TOOL_NAME,
     label: BASH_TOOL_NAME,
     prompt_guidelines: ["Use bash for file operations like ls, rg, find"],
-    callable_definition: {
-      description: "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last \{DEFAULT_MAX_LINES} lines or \{DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
-      parameters: {
-        "type": "object",
-        "properties": {
-          "command": {
-            "type": "string",
-            "description": "The bash command to execute",
-          },
-          "timeout": {
-            "type": "integer",
-            "description": "Optional timeout in seconds",
-            "minimum": 1,
-          },
+    description: "Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last \{DEFAULT_MAX_LINES} lines or \{DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.",
+    parameters: {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The bash command to execute",
         },
-        "required": ["command"],
-        "additionalProperties": false,
+        "timeout": {
+          "type": "integer",
+          "description": "Optional timeout in seconds",
+          "minimum": 1,
+        },
       },
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: (_, input, on_update) => {
-        execute_bash_tool(cwd, input, on_update~, exec~)
-      },
-    }
-    |> Some,
+      "required": ["command"],
+      "additionalProperties": false,
+    },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (_, input, on_update) => {
+      execute_bash_tool(cwd, input, on_update~, exec~)
+    },
   }
 }
 

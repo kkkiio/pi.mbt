@@ -318,9 +318,14 @@ fn parse_agent_message(
       }
       let contents = []
       for i, item in items {
-        contents.push(
-          parse_assistant_content(item, path.add_key("content").add_index(i)),
-        )
+        match
+          parse_assistant_content(item, path.add_key("content").add_index(i)) {
+          Some(content) => contents.push(content)
+          // Legacy `hostedToolCall` blocks (pre-removal `web_search`) are kept
+          // readable: dropping them loads the rest of the journal instead of
+          // rejecting a session this version can no longer describe.
+          None => ()
+        }
       }
       guard fields.get("api") is Some(String(api)) else {
         decode_error(path, "Assistant message: missing api")
@@ -420,7 +425,7 @@ fn parse_input_content(
 fn parse_assistant_content(
   json : Json,
   path : @json.JsonPath,
-) -> @agent_loop.AssistantMessageContent raise @json.JsonDecodeError {
+) -> @agent_loop.AssistantMessageContent? raise @json.JsonDecodeError {
   guard json is Object(fields) else {
     decode_error(path, "AssistantMessageContent: expected object")
   }
@@ -428,17 +433,23 @@ fn parse_assistant_content(
     decode_error(path, "AssistantMessageContent: missing type")
   }
   match content_type {
+    "hostedToolCall" => None
     "text" => {
       guard fields.get("text") is Some(String(text)) else {
         decode_error(path, "Text content: missing text")
       }
-      Text(text, signature=parse_signature(fields.get("textSignature")))
+      Some(Text(text, signature=parse_signature(fields.get("textSignature"))))
     }
     "thinking" => {
       guard fields.get("thinking") is Some(String(text)) else {
         decode_error(path, "Thinking content: missing thinking")
       }
-      Thinking(text, signature=parse_signature(fields.get("thinkingSignature")))
+      Some(
+        Thinking(
+          text,
+          signature=parse_signature(fields.get("thinkingSignature")),
+        ),
+      )
     }
     "toolCall" => {
       guard fields.get("id") is Some(String(id)) else {
@@ -448,16 +459,13 @@ fn parse_assistant_content(
         decode_error(path, "ToolCall content: missing name")
       }
       let arguments = fields.get("arguments").unwrap_or(Json::empty_object())
-      ToolCall(
-        { id, name, arguments, },
-        signature=parse_signature(fields.get("thoughtSignature")),
+      Some(
+        ToolCall(
+          { id, name, arguments, },
+          signature=parse_signature(fields.get("thoughtSignature")),
+        ),
       )
     }
-    "hostedToolCall" =>
-      HostedToolCall(
-        @agent_loop.HostedTool::WebSearch,
-        signature=parse_signature(fields.get("signature")),
-      )
     _ =>
       decode_error(
         path,

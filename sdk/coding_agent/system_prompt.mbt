@@ -117,13 +117,20 @@ pub fn skills_system_prompt_contributor(
 }
 
 ///|
+/// Format the `<available_skills>` block. Skills with
+/// `disable_model_invocation = true` are omitted: they stay loadable through an
+/// explicit `/skill:<name>` command but must not be selected automatically.
 pub fn skills_system_prompt(skills : ArrayView[Skill]) -> String {
-  if skills.length() > 0 {
+  let visible = skills
+    .iter()
+    .filter(skill => !skill.disable_model_invocation)
+    .to_array()
+  if visible.length() > 0 {
     let builder = StringBuilder()
     builder <+
       #|<available_skills>
       #|
-    for skill in skills {
+    for skill in visible {
       builder <+
         $|  <skill>
         $|    <name>\{escape(skill.name)}</name>

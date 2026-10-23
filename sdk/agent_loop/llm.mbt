@@ -22,13 +22,8 @@ pub(all) struct Context {
 }
 
 ///|
-pub(all) enum ToolDefinition {
-  Hosted(HostedTool)
-  Function(FunctionTool)
-}
-
-///|
-pub(all) struct FunctionTool {
+/// A tool the model may call. 
+pub(all) struct ToolDefinition {
   name : String
   description : String
   parameters : Json

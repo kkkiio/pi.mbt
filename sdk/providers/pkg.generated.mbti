@@ -1,0 +1,62 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/providers"
+
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "moonbitlang/async/io",
+  "moonbitlang/core/json",
+}
+
+// Values
+pub async fn[R : @io.Reader] read_responses_sse_stream(R, sink~ : async (@agent_loop.GenerationEvent) -> Unit, api~ : String, provider~ : String, model~ : String, custom_tool_input_properties? : Map[String, String], now? : () -> UInt64, abort? : @agent_loop.AbortSignal) -> @agent_loop.AssistantMessage
+
+pub fn transform_messages(ArrayView[@agent_loop.AgentMessage], now? : () -> UInt64) -> Array[@agent_loop.AgentMessage]
+
+// Errors
+
+// Types and methods
+type DeepSeekProvider
+pub fn DeepSeekProvider::DeepSeekProvider(api_key~ : String) -> Self
+pub fn DeepSeekProvider::new_llm(Self, String, thinking? : String) -> &@agent_loop.LLM raise
+pub impl LLMProvider for DeepSeekProvider
+
+type DeepSeekResponsesAPILLM
+pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(String, model_id? : String, thinking? : String) -> Self
+pub async fn DeepSeekResponsesAPILLM::generate(Self, @agent_loop.Context, sink~ : async (@agent_loop.GenerationEvent) -> Unit, abort~ : @agent_loop.AbortSignal) -> @agent_loop.AssistantMessage
+pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM
+
+pub struct ResponseOutputContent {
+  text : String?
+  refusal : String?
+} derive(@json.FromJson)
+pub fn ResponseOutputContent::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+
+pub struct ResponseOutputMessage {
+  id : String
+  content : Array[ResponseOutputContent]
+  role : String
+  status : String
+  phase : String?
+} derive(@json.FromJson)
+pub fn ResponseOutputMessage::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+
+pub struct ResponseReasoningItem {
+  id : String
+  summary : Array[ResponseTextPart]
+  content : Array[ResponseTextPart]?
+  encrypted_content : String?
+  status : String?
+} derive(@json.FromJson)
+pub fn ResponseReasoningItem::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+
+pub struct ResponseTextPart {
+  text : String
+} derive(@json.FromJson)
+pub fn ResponseTextPart::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+
+// Type aliases
+
+// Traits
+pub(open) trait LLMProvider {
+  fn new_llm(Self, String, thinking? : String) -> &@agent_loop.LLM raise
+}

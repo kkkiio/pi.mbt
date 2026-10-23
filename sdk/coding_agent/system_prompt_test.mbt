@@ -43,12 +43,7 @@ impl @agent_loop.LLM for PromptCapturingLLM with fn generate(
   self.requests.push({
     "prompt": prompt,
     "tools": [
-      for tool in context.tools => {
-        match tool {
-          @agent_loop.Function(definition) => Json(definition.name)
-          @agent_loop.Hosted(WebSearch) => Json("web_search")
-        }
-      }
+      for tool in context.tools => Json(tool.name)
     ],
   })
   let message = @faux.faux_message([@faux.faux_text("ok")])
@@ -68,20 +63,18 @@ async test "coding session keeps a stable prompt as active tools change" {
   @coding_agent.write_bytes_file(path, b"Keep project guidance.")
   defer @coding_agent.remove_file(path)
   let llm = PromptCapturingLLM::{ cwd, prompts: [], requests: [], }
-  let session = @coding_agent.new_coding_session(llm, cwd~, active_tools=[
-    "web_search",
-  ])
+  let session = @coding_agent.new_coding_session(llm, cwd~, active_tools=[])
   session.prompt([user_message("initial")])
   session.set_active_tools(["bash"])
   session.prompt([user_message("enable bash")])
-  session.set_active_tools(["web_search"])
+  session.set_active_tools([])
   session.prompt([user_message("disable bash")])
   assert_eq(llm.prompts[0], llm.prompts[1])
   assert_eq(llm.prompts[1], llm.prompts[2])
   json_inspect(llm.requests, content=[
     {
       "prompt": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n<project_context>\n\nProject-specific instructions and guidelines:\n<project_instructions path=\"/work/AGENTS.md\">\n\nKeep project guidance.\n\n</project_instructions>\n</project_context>\n\nCurrent working directory: /work\n",
-      "tools": ["web_search"],
+      "tools": [],
     },
     {
       "prompt": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n<project_context>\n\nProject-specific instructions and guidelines:\n<project_instructions path=\"/work/AGENTS.md\">\n\nKeep project guidance.\n\n</project_instructions>\n</project_context>\n\nCurrent working directory: /work\n",
@@ -89,7 +82,7 @@ async test "coding session keeps a stable prompt as active tools change" {
     },
     {
       "prompt": "You are an expert coding assistant operating inside pi, a coding agent harness. You help users by reading files, executing commands, editing code, and writing new files.\n\n<project_context>\n\nProject-specific instructions and guidelines:\n<project_instructions path=\"/work/AGENTS.md\">\n\nKeep project guidance.\n\n</project_instructions>\n</project_context>\n\nCurrent working directory: /work\n",
-      "tools": ["web_search"],
+      "tools": [],
     },
   ])
 }

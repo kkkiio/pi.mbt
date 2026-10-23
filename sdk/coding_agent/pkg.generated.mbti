@@ -1,0 +1,273 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/coding_agent"
+
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/agent_session",
+  "KKKIIO/pi/sdk/tools",
+  "moonbitlang/async/io",
+  "moonbitlang/core/debug",
+  "moonbitlang/core/json",
+  "moonbitlang/core/random",
+  "moonbitlang/core/set",
+}
+
+// Values
+pub const BASH_TOOL_NAME : String = "bash"
+
+pub fn coding_assistant_system_prompt_contributor() -> (ArrayView[String]) -> String
+
+pub fn create_dir(String) -> Unit raise FsError
+
+pub fn create_file(String, allow_existing? : Bool, permission? : Int32) -> FsFile raise FsError
+
+pub fn create_temp_dir(String) -> String raise FsError
+
+pub fn current_working_directory_system_prompt(String) -> String
+
+pub fn cwd_system_prompt_contributor(cwd~ : String) -> (ArrayView[String]) -> String
+
+pub fn discover_skills(String) -> Array[Skill]
+
+pub fn escape(String) -> String
+
+pub fn expand_skill_command(String, cwd~ : String) -> String
+
+pub fn fetch_active_entries(String) -> Array[@agent_session.SessionEntry] raise Failure
+
+pub fn fetch_entries(String) -> Array[@agent_session.SessionEntry] raise Failure
+
+pub fn home_dir() -> String
+
+pub fn is_regular_file(String) -> Bool
+
+pub fn list_sessions(String) -> Array[String] raise FsError
+
+pub fn load_agents_files(String) -> Array[ProjectContextFile]
+
+pub fn new_bash_tool_definition(cwd? : String, exec? : async (BashExecParams) -> Int32) -> @tools.ToolDefinition
+
+pub fn new_coding_session(&@agent_loop.LLM, cwd~ : String, journal? : &@agent_session.SessionJournal, active_tools? : ArrayView[String]) -> @agent_session.AgentSession
+
+pub fn open_append_file(String, permission? : Int32) -> FsFile raise FsError
+
+pub fn open_lazy_file(String, append? : Bool, permission? : Int32) -> LazyFile
+
+pub fn parse_frontmatter(String, String) -> SkillFrontmatter
+
+pub fn parse_skill_block(String) -> SkillInvocation?
+
+pub fn path_exists(String) -> Bool
+
+pub fn pick_session(ArrayView[String], String) -> SessionPick
+
+pub fn project_context_system_prompt(ArrayView[ProjectContextFile]) -> String
+
+pub fn project_context_system_prompt_contributor(cwd~ : String) -> (ArrayView[String]) -> String
+
+pub fn read_bytes_file(String) -> Bytes raise FsError
+
+pub fn read_dir(String) -> FixedArray[String] raise FsError
+
+pub fn read_text_file(String) -> String raise FsError
+
+pub fn remove_dir(String) -> Unit raise FsError
+
+pub fn remove_file(String) -> Unit raise FsError
+
+pub fn resolve_session_start(String, SessionStart) -> SessionPick raise FsError
+
+pub fn skills_system_prompt(ArrayView[Skill]) -> String
+
+pub fn skills_system_prompt_contributor(cwd~ : String) -> (ArrayView[String]) -> String
+
+pub fn tools_guidelines_system_prompt(@tools.ToolRegistry, ArrayView[String]) -> String
+
+pub fn tools_guidelines_system_prompt_contributor(@tools.ToolRegistry) -> (ArrayView[String]) -> String
+
+pub fn write_bytes_file(String, Bytes) -> Unit raise FsError
+
+pub fn write_file_atomically(String, Bytes, permission? : Int32) -> Unit raise FsError
+
+// Errors
+pub(all) suberror BashExecError {
+  TimedOut(Int32)
+  Aborted
+}
+pub fn BashExecError::output(Self, &Logger) -> Unit
+pub fn BashExecError::to_string(Self) -> String
+pub impl Show for BashExecError
+
+pub(all) suberror FsError {
+  FsError(String)
+} derive(@debug.Debug)
+pub fn FsError::output(Self, &Logger) -> Unit
+pub fn FsError::to_repr(Self) -> @debug.Repr
+pub fn FsError::to_string(Self) -> String
+pub impl Show for FsError
+
+// Types and methods
+pub(all) struct BashExecParams {
+  command : String
+  cwd : String
+  timeout : Int32?
+  on_data : ((BytesView) -> Unit)?
+  override_envs : Map[String, String]
+  inherit_env : Bool
+}
+
+type BashToolDetails
+pub fn BashToolDetails::to_json(Self) -> Json
+pub impl ToJson for BashToolDetails
+
+type BashToolInput derive(@json.FromJson)
+pub fn BashToolInput::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+
+pub struct FsFile {
+  fd : Int32
+}
+pub fn FsFile::close(Self) -> Unit
+pub async fn FsFile::write(Self, &@io.Data) -> Unit
+pub fn FsFile::write_bytes(Self, Bytes) -> Unit raise FsError
+pub async fn FsFile::write_once(Self, Bytes, offset~ : Int32, len~ : Int32) -> Int32
+pub async fn FsFile::write_reader(Self, &@io.Reader) -> Unit
+pub impl @io.Writer for FsFile
+
+pub struct JsonlSessionJournal[W] {
+  writer : W
+  entries : Array[@agent_session.SessionEntry]
+  ids : @set.Set[String]
+  rand : @random.Rand
+  cwd : String
+  header_id : String
+  created_at : UInt64
+  mut leaf_id : String?
+  start_index : Int32
+  mut flushed : Bool
+  now : () -> UInt64
+}
+pub fn[W] JsonlSessionJournal::JsonlSessionJournal(W, entries? : Array[@agent_session.SessionEntry], rand? : @random.Rand, cwd? : String, now? : () -> UInt64, fresh? : Bool) -> Self[W]
+pub async fn[W : @io.Writer] JsonlSessionJournal::append(Self[W], ArrayView[@agent_session.NewSessionEntry]) -> Array[@agent_session.SessionEntry]
+pub fn[W : @io.Writer] JsonlSessionJournal::generate_id(Self[W]) -> String
+pub fn[W : @io.Writer] JsonlSessionJournal::get_entries(Self[W]) -> ArrayView[@agent_session.SessionEntry]
+pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[W]
+
+pub struct LazyFile {
+  path : String
+  append : Bool
+  permission : Int32
+  mut file : FsFile?
+}
+pub fn LazyFile::close(Self) -> Unit
+pub async fn LazyFile::write(Self, &@io.Data) -> Unit
+pub async fn LazyFile::write_once(Self, Bytes, offset~ : Int32, len~ : Int32) -> Int32
+pub async fn LazyFile::write_reader(Self, &@io.Reader) -> Unit
+pub impl @io.Writer for LazyFile
+
+pub struct OutputAccumulator {
+  max_lines : Int32
+  max_bytes : Int32
+  max_rolling_bytes : Int32
+  temp_file_prefix : String
+  raw_chunks : Array[Bytes]
+  mut tail : Bytes
+  mut tail_starts_at_line_boundary : Bool
+  mut pending_utf8 : Bytes
+  mut decoder_started : Bool
+  mut total_raw_bytes : Int32
+  mut total_decoded_bytes : Int32
+  mut completed_lines : Int32
+  mut total_lines : Int32
+  mut current_line_bytes : Int32
+  mut has_open_line : Bool
+  mut finished : Bool
+  mut temp_file_path : String?
+  mut temp_file : FsFile?
+}
+pub fn OutputAccumulator::OutputAccumulator(max_lines~ : Int32, max_bytes~ : Int32, max_rolling_bytes? : Int32, temp_file_prefix? : String) -> Self
+pub fn OutputAccumulator::append(Self, BytesView) -> Unit raise
+pub fn OutputAccumulator::close_temp_file(Self) -> Unit
+pub fn OutputAccumulator::finish(Self) -> Unit raise
+pub fn OutputAccumulator::get_last_line_bytes(Self) -> Int32
+pub fn OutputAccumulator::snapshot(Self, persist_if_truncated? : Bool) -> OutputSnapshot raise
+
+pub(all) struct OutputSnapshot {
+  content : String
+  truncation : TruncationResult
+  full_output_path : String?
+} derive(Eq, @debug.Debug)
+pub fn OutputSnapshot::equal(Self, Self) -> Bool
+pub fn OutputSnapshot::not_equal(Self, Self) -> Bool
+pub fn OutputSnapshot::to_json(Self) -> Json
+pub fn OutputSnapshot::to_repr(Self) -> @debug.Repr
+pub impl ToJson for OutputSnapshot
+
+pub struct ProjectContextFile {
+  path : String
+  content : String
+} derive(@debug.Debug)
+pub fn ProjectContextFile::to_repr(Self) -> @debug.Repr
+
+pub(all) enum SessionPick {
+  Found(String)
+  None
+  Ambiguous(Array[String])
+} derive(Eq, @debug.Debug)
+pub fn SessionPick::equal(Self, Self) -> Bool
+pub fn SessionPick::not_equal(Self, Self) -> Bool
+pub fn SessionPick::to_repr(Self) -> @debug.Repr
+
+pub(all) enum SessionStart {
+  Fresh
+  Latest
+  Named(String)
+}
+
+pub struct Skill {
+  name : String
+  description : String
+  path : String
+  disable_model_invocation : Bool
+} derive(@debug.Debug)
+pub fn Skill::to_repr(Self) -> @debug.Repr
+
+pub struct SkillFrontmatter {
+  name : String
+  description : String
+  disable_model_invocation : Bool
+} derive(@debug.Debug)
+pub fn SkillFrontmatter::to_repr(Self) -> @debug.Repr
+
+pub struct SkillInvocation {
+  name : String
+  location : String
+  references : String
+  body : String
+  args : String
+} derive(@debug.Debug)
+pub fn SkillInvocation::block_text(Self) -> String
+pub fn SkillInvocation::to_repr(Self) -> @debug.Repr
+pub fn SkillInvocation::with_body(Self, String) -> Self
+
+pub(all) struct TruncationResult {
+  content : String
+  truncated : Bool
+  truncated_by : String?
+  total_lines : Int32
+  total_bytes : Int32
+  output_lines : Int32
+  output_bytes : Int32
+  last_line_partial : Bool
+  first_line_exceeds_limit : Bool
+  max_lines : Int32
+  max_bytes : Int32
+} derive(Eq, @debug.Debug)
+pub fn TruncationResult::equal(Self, Self) -> Bool
+pub fn TruncationResult::not_equal(Self, Self) -> Bool
+pub fn TruncationResult::to_json(Self) -> Json
+pub fn TruncationResult::to_repr(Self) -> @debug.Repr
+pub impl ToJson for TruncationResult
+
+// Type aliases
+
+// Traits

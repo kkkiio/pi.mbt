@@ -227,7 +227,7 @@ async test "hydrating a compacted journal projects the summary and kept tail" {
   )
   let session = @agent_session.AgentSession(StubLLM::{ }, journal~)
   inspect(
-    context_lines(session.message_buffer),
+    context_lines(session.messages().to_owned()),
     content=(
       #|user: The conversation history before this point was compacted into the following summary:
       #|
@@ -281,7 +281,7 @@ async test "latest compaction omits older summaries within the kept range" {
       ""
     }
     assert_eq(
-      context_lines(session.message_buffer),
+      context_lines(session.messages().to_owned()),
       "user: The conversation history before this point was compacted into the following summary:\n\n<summary>\nlatest summary\n</summary>" +
       expected_tail +
       "\nuser: after",
@@ -318,20 +318,21 @@ async test "session hydration keeps Error assistant messages like every other en
       { id: "ok1", content: Message(Assistant(ok_message())), },
     ]),
   )
-  // The constructor hydrates `message_buffer` from the journal verbatim.
+  // The constructor hydrates the agent transcript from the journal verbatim.
   let llm = StubLLM::{ }
   let session = @agent_session.AgentSession(llm, journal~)
-  assert_eq(session.message_buffer.length(), 3)
-  let user_count = session.message_buffer
+  assert_eq(session.messages().length(), 3)
+  let user_count = session
+    .messages()
     .filter(m => m is @agent_loop.AgentMessage::User(_))
     .length()
   assert_eq(user_count, 1)
-  match session.message_buffer[1] {
+  match session.messages()[1] {
     @agent_loop.AgentMessage::Assistant(message) =>
       assert_true(message.stop_reason is @agent_loop.StopReason::Error)
     _ => fail("expected the superseded Error turn to survive hydration")
   }
-  let text = match session.message_buffer[2] {
+  let text = match session.messages()[2] {
     @agent_loop.AgentMessage::Assistant(m) =>
       match m.content {
         [@agent_loop.AssistantMessageContent::Text(text, ..)] => text
@@ -533,14 +534,12 @@ fn fake_tool(name : String) -> @tools.ToolDefinition {
     name,
     label: name,
     prompt_guidelines: [],
-    callable_definition: Some({
-      description: "\{name} tool",
-      parameters: { "type": "object", "properties": {} },
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: fake_tool_execute,
-    }),
+    description: "\{name} tool",
+    parameters: { "type": "object", "properties": {} },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: fake_tool_execute,
   }
 }
 
@@ -571,12 +570,7 @@ impl @agent_loop.LLM for ToolCapturingLLM with fn generate(
   ignore(abort)
   self.seen.clear()
   for tool in ctx.tools {
-    self.seen.push(
-      match tool {
-        @agent_loop.Function(definition) => definition.name
-        @agent_loop.Hosted(WebSearch) => @agent_session.WEB_SEARCH_TOOL_NAME
-      },
-    )
+    self.seen.push(tool.name)
   }
   let message = ok_message()
   sink(@agent_loop.GenerationEvent::Start(partial=message))
@@ -591,7 +585,7 @@ async test "session offers only its active tools to the model" {
   let registry = @tools.ToolRegistry()
   registry.register_tool(fake_tool("bash"))
   registry.register_tool(fake_tool("read"))
-  registry.register_tool(@agent_session.web_search_tool)
+  registry.register_tool(fake_tool("grep"))
   let seen : Array[String] = []
   let session = @agent_session.AgentSession(
     ToolCapturingLLM::{ seen, },
@@ -601,13 +595,10 @@ async test "session offers only its active tools to the model" {
   session.prompt([user_message("hi")])
   assert_eq(seen, ["read"])
   assert_eq(session.active_tool_names(), ["read"])
-  session.set_active_tools(["bash", @agent_session.WEB_SEARCH_TOOL_NAME])
-  assert_eq(session.active_tool_names(), [
-    "bash",
-    @agent_session.WEB_SEARCH_TOOL_NAME,
-  ])
+  session.set_active_tools(["bash", "grep"])
+  assert_eq(session.active_tool_names(), ["bash", "grep"])
   session.prompt([user_message("hi", timestamp=1786903823974)])
-  assert_eq(seen, ["bash", @agent_session.WEB_SEARCH_TOOL_NAME])
+  assert_eq(seen, ["bash", "grep"])
 }
 
 ///|
@@ -619,7 +610,7 @@ async test "activating an unregistered tool fails at prompt time" {
   let session = @agent_session.AgentSession(
     StubLLM::{ },
     tool_registry=registry,
-    active_tools=["bash", "web_search"],
+    active_tools=["bash", "grep"],
   )
   let error_text = try {
     session.prompt([user_message("hi")])
@@ -627,7 +618,7 @@ async test "activating an unregistered tool fails at prompt time" {
   } catch {
     err => err.to_string()
   }
-  assert_true(error_text.contains("unknown tool: web_search"))
+  assert_true(error_text.contains("unknown tool: grep"))
 }
 
 ///|
@@ -705,33 +696,29 @@ fn abort_batch_tools(log : Array[String]) -> @tools.ToolRegistry {
     name: "slow",
     label: "slow",
     prompt_guidelines: [],
-    callable_definition: Some({
-      description: "blocks until cancelled",
-      parameters: { "type": "object", "properties": {} },
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: (_, _, on_update) => {
-        defer log.push("cleanup")
-        blocking_execute("slow", {}, on_update)
-      },
-    }),
+    description: "blocks until cancelled",
+    parameters: { "type": "object", "properties": {} },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (_, _, on_update) => {
+      defer log.push("cleanup")
+      blocking_execute("slow", {}, on_update)
+    },
   })
   registry.register_tool({
     name: "marker",
     label: "marker",
     prompt_guidelines: [],
-    callable_definition: Some({
-      description: "must not run after abort",
-      parameters: { "type": "object", "properties": {} },
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: (_, _, on_update) => {
-        log.push("marker")
-        blocking_execute("marker", {}, on_update)
-      },
-    }),
+    description: "must not run after abort",
+    parameters: { "type": "object", "properties": {} },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (_, _, on_update) => {
+      log.push("marker")
+      blocking_execute("marker", {}, on_update)
+    },
   })
   registry
 }
@@ -813,17 +800,15 @@ fn probe_tools(log : Array[String]) -> @tools.ToolRegistry {
     name: "probe",
     label: "probe",
     prompt_guidelines: [],
-    callable_definition: Some({
-      description: "completes immediately",
-      parameters: { "type": "object", "properties": {} },
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: (id, args, on_update) => {
-        log.push("probe")
-        probe_execute(id, args, on_update)
-      },
-    }),
+    description: "completes immediately",
+    parameters: { "type": "object", "properties": {} },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (id, args, on_update) => {
+      log.push("probe")
+      probe_execute(id, args, on_update)
+    },
   })
   registry
 }
@@ -1334,7 +1319,7 @@ async test "a session can replace and wrap its finish turn hook" {
       None
     },
   )
-  let inner = session.finish_turn_hook
+  let inner = session.agent.finish_turn_hook
   session.set_finish_turn_hook((messages, tool_results, abort) => {
     calls.push("outer")
     // Delegate to the hook this one replaced, then decide.
@@ -1461,7 +1446,10 @@ async test "a context edit omits its target from the projection only" {
     ]),
   )
   let session = @agent_session.AgentSession(StubLLM::{ }, journal~)
-  inspect(session.message_buffer |> context_lines, content="user: request")
+  inspect(
+    session.messages().to_owned() |> context_lines,
+    content="user: request",
+  )
   assert_eq(journal.get_entries().length(), 3)
   match journal.get_entries()[1].content {
     Message(Assistant(message)) =>
@@ -1486,10 +1474,10 @@ async test "a reloaded session projects the same context as the live one" {
   let journal = @agent_session.InMemorySessionJournal()
   let session = @agent_session.AgentSession(llm, journal~)
   session.prompt([user_message("go")])
-  let live = context_lines(session.message_buffer)
+  let live = context_lines(session.messages().to_owned())
   inspect(live, content="user: go\nassistant: done")
   let reloaded = @agent_session.AgentSession(StubLLM::{ }, journal~)
-  assert_eq(context_lines(reloaded.message_buffer), live)
+  assert_eq(context_lines(reloaded.messages().to_owned()), live)
   // The failed turn stays in the record: user, error turn, its edit, the retry.
   assert_eq(journal.get_entries().length(), 4)
 }
