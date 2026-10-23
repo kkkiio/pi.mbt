@@ -1,10 +1,6 @@
 ///|
-fn bash_tool() -> @tools.CallableDefinition raise {
-  let definition = @coding_agent.new_bash_tool_definition(cwd="/tmp")
-  guard definition.callable_definition is Some(callable) else {
-    fail("bash tool has no callable definition")
-  }
-  callable
+fn bash_tool() -> @tools.ToolDefinition {
+  @coding_agent.new_bash_tool_definition(cwd="/tmp")
 }
 
 ///|

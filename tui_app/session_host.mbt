@@ -266,7 +266,6 @@ fn replay_assistant(
       Text(text, ..) => content.push((text, false))
       Thinking(text, ..) => content.push((text, true))
       ToolCall(call, ..) => calls.push(call)
-      _ => ()
     }
   }
   app.transcript.set_assistant_content(content)

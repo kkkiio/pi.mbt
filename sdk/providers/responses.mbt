@@ -41,7 +41,6 @@ fn encode_responses_input(context : @agent_loop.Context) -> Array[Json] raise {
               input.push(Json(item))
             }
             Thinking(_, signature~) => input.push(signature)
-            HostedToolCall(_, signature~) => input.push(signature)
             ToolCall(call, signature~) => {
               guard signature
                 is { "type": String(signature_type), "id": String(item_id), .. } else {
@@ -270,7 +269,6 @@ priv enum ResponsesOutputSlot {
   Text(Int32)
   FunctionCall(Int32, String)
   CustomToolCall(Int32, String, String)
-  HostedToolCall(Int32)
 }
 
 ///|
@@ -379,10 +377,7 @@ fn parse_sse_event(
     | "response.reasoning_summary_text.done"
     | "response.output_text.done"
     | "response.function_call_arguments.done"
-    | "response.custom_tool_call_input.done"
-    | "response.web_search_call.in_progress"
-    | "response.web_search_call.searching"
-    | "response.web_search_call.completed" => None
+    | "response.custom_tool_call_input.done" => None
     "response.output_item.added" => {
       guard json
         is {
@@ -480,16 +475,6 @@ fn parse_sse_event(
           sse_delta(
             @agent_loop.ToolCallStart(content_index~, partial=in_flight()),
           )
-        }
-        "web_search_call" => {
-          acc.push(
-            @agent_loop.AssistantMessageContent::HostedToolCall(
-              @agent_loop.HostedTool::WebSearch,
-              signature=item_json,
-            ),
-          )
-          slots[output_index] = HostedToolCall(content_index)
-          None
         }
         _ => None
       }
@@ -738,18 +723,6 @@ fn parse_sse_event(
             ),
           )
         }
-        ("web_search_call", Some(HostedToolCall(content_index))) => {
-          guard acc[content_index]
-            is @agent_loop.AssistantMessageContent::HostedToolCall(name, ..) else {
-            fail("Web search output slot has invalid content")
-          }
-          acc[content_index] = @agent_loop.AssistantMessageContent::HostedToolCall(
-            name,
-            signature=item_json,
-          )
-          slots.remove(output_index)
-          None
-        }
         _ => None
       }
     }
@@ -761,7 +734,7 @@ fn parse_sse_event(
           is { "type": String(item_type), "id": String(terminal_id), .. } else {
           continue
         }
-        if item_type != "reasoning" && item_type != "web_search_call" {
+        if item_type != "reasoning" {
           continue
         }
         for index, content in acc {
@@ -773,21 +746,6 @@ fn parse_sse_event(
               if item_type == "reasoning" && terminal_id == signature_id {
                 acc[index] = @agent_loop.AssistantMessageContent::Thinking(
                   text,
-                  signature=terminal_item,
-                )
-                break
-              }
-            }
-            @agent_loop.AssistantMessageContent::HostedToolCall(
-              name,
-              signature~
-            ) => {
-              guard signature is { "id": String(signature_id), .. } else {
-                continue
-              }
-              if item_type == "web_search_call" && terminal_id == signature_id {
-                acc[index] = @agent_loop.AssistantMessageContent::HostedToolCall(
-                  name,
                   signature=terminal_item,
                 )
                 break

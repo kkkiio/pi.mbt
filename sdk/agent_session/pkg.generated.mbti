@@ -8,8 +8,6 @@ import {
 }
 
 // Values
-pub const WEB_SEARCH_TOOL_NAME : String = "web_search"
-
 pub fn agent_event_to_pi_json(@agent_loop.AgentEvent) -> Json raise
 
 pub fn format_journal_timestamp(UInt64) -> String
@@ -17,8 +15,6 @@ pub fn format_journal_timestamp(UInt64) -> String
 pub fn is_retryable_error_message(String) -> Bool
 
 pub fn to_pi_json(AgentSessionEvent) -> Json raise
-
-pub let web_search_tool : @tools.ToolDefinition
 
 // Errors
 

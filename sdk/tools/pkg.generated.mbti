@@ -11,18 +11,14 @@ pub async fn run_tool(Map[String, ToolDefinition], @agent_loop.ToolCall, (Array[
 // Errors
 
 // Types and methods
-pub(all) struct CallableDefinition {
-  description : String
-  parameters : Json
-  constrained_sampling : @agent_loop.ConstrainedSampling
-  execute : async (String, Json, (Array[@agent_loop.InputMessageContent], Json) -> Unit) -> @agent_loop.ToolResult
-}
-
 pub(all) struct ToolDefinition {
   name : String
   label : String
   prompt_guidelines : Array[String]
-  callable_definition : CallableDefinition?
+  description : String
+  parameters : Json
+  constrained_sampling : @agent_loop.ConstrainedSampling
+  execute : async (String, Json, (Array[@agent_loop.InputMessageContent], Json) -> Unit) -> @agent_loop.ToolResult
 }
 
 type ToolRegistry

@@ -93,37 +93,32 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
   let input = encode_responses_input(context)
   let custom_tool_input_properties = Map([])
   let tools : Array[Json] = []
-  for definition in context.tools {
-    match definition {
-      @agent_loop.ToolDefinition::Hosted(WebSearch) =>
-        tools.push({ "type": "web_search" })
-      @agent_loop.ToolDefinition::Function(tool) =>
-        match tool.constrained_sampling {
-          JsonSchema(strict~) =>
-            tools.push({
-              "type": "function",
-              "name": tool.name,
-              "description": tool.description,
-              "parameters": tool.parameters,
-              "strict": strict,
-            })
-          Grammar(format~, definition=grammar_definition, input_property~) => {
-            custom_tool_input_properties[tool.name] = input_property
-            tools.push({
-              "type": "custom",
-              "name": tool.name,
-              "description": tool.description,
-              "format": {
-                "type": "grammar",
-                "syntax": match format {
-                  Lark => "lark"
-                  Regex => "regex"
-                },
-                "definition": grammar_definition,
-              },
-            })
-          }
-        }
+  for tool in context.tools {
+    match tool.constrained_sampling {
+      JsonSchema(strict~) =>
+        tools.push({
+          "type": "function",
+          "name": tool.name,
+          "description": tool.description,
+          "parameters": tool.parameters,
+          "strict": strict,
+        })
+      Grammar(format~, definition=grammar_definition, input_property~) => {
+        custom_tool_input_properties[tool.name] = input_property
+        tools.push({
+          "type": "custom",
+          "name": tool.name,
+          "description": tool.description,
+          "format": {
+            "type": "grammar",
+            "syntax": match format {
+              Lark => "lark"
+              Regex => "regex"
+            },
+            "definition": grammar_definition,
+          },
+        })
+      }
     }
   }
   let body : Json = {

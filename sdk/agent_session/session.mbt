@@ -105,20 +105,11 @@ pub async fn AgentSession::prompt(
     }
   }
   let tool_map = tools.iter().map(t => (t.name, t)) |> Map::from_iter
-  let agent_tools = tools.map(d => {
-    if d.callable_definition is Some(c) {
-      @agent_loop.Function({
-        name: d.name,
-        description: c.description,
-        parameters: c.parameters,
-        constrained_sampling: c.constrained_sampling,
-      })
-    } else {
-      match d.name {
-        WEB_SEARCH_TOOL_NAME => @agent_loop.Hosted(@agent_loop.WebSearch)
-        _ => fail("unknown hosted tool \\{d.name}")
-      }
-    }
+  let agent_tools = tools.map(d => @agent_loop.ToolDefinition::{
+    name: d.name,
+    description: d.description,
+    parameters: d.parameters,
+    constrained_sampling: d.constrained_sampling,
   })
   let abort_controller = @agent_loop.AbortController::new()
   self.active_run_abort_controller = Some(abort_controller)
@@ -323,7 +314,13 @@ pub fn AgentSession::set_active_tools(
       fail("unknown tool: \{name}")
     }
   }
-  names.blit_to(self.active_tools)
+  // Copy first: `names` may alias `active_tools` itself, and `blit_to` leaves
+  // the tail in place (so an empty view would not deactivate everything).
+  let next = names.to_owned()
+  self.active_tools.clear()
+  for name in next {
+    self.active_tools.push(name)
+  }
 }
 
 ///|

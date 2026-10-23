@@ -453,11 +453,6 @@ fn parse_assistant_content(
         signature=parse_signature(fields.get("thoughtSignature")),
       )
     }
-    "hostedToolCall" =>
-      HostedToolCall(
-        @agent_loop.HostedTool::WebSearch,
-        signature=parse_signature(fields.get("signature")),
-      )
     _ =>
       decode_error(
         path,

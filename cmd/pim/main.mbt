@@ -230,8 +230,6 @@ async fn main {
         Text(text, ..) => output.write_string(text)
         ToolCall(_, ..) => fatal("unexpected tool call in reply")
         Thinking(_, ..) => ()
-        HostedToolCall(WebSearch, ..) =>
-          fatal("unexpected hosted tool call in reply")
       }
     }
     write_stdout(output.to_string())

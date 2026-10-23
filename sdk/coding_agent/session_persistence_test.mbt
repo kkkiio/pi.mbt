@@ -249,19 +249,17 @@ async test "tool details and usage survive journal resume" {
     name: "probe",
     label: "probe",
     prompt_guidelines: [],
-    callable_definition: Some({
-      description: "metadata probe",
-      parameters: {},
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: (_, _, _) => {
-        content: [Text("tool output")],
-        details,
-        usage: Some(usage),
-        is_error: false,
-      },
-    }),
+    description: "metadata probe",
+    parameters: {},
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (_, _, _) => {
+      content: [Text("tool output")],
+      details,
+      usage: Some(usage),
+      is_error: false,
+    },
   })
   let llm = @faux.FauxLLM::FauxLLM()
   llm.set_responses([

@@ -6,15 +6,11 @@ pub fn new_coding_session(
   llm : &@agent_loop.LLM,
   cwd~ : String,
   journal~ : &@agent_session.SessionJournal = @agent_session.InMemorySessionJournal(),
-  active_tools~ : ArrayView[String] = [
-    BASH_TOOL_NAME,
-    @agent_session.WEB_SEARCH_TOOL_NAME,
-  ],
+  active_tools~ : ArrayView[String] = [BASH_TOOL_NAME],
 ) -> @agent_session.AgentSession {
   let tool_registry = @tools.ToolRegistry()
   let bash_tool = new_bash_tool_definition(cwd~)
   tool_registry.register_tool(bash_tool)
-  tool_registry.register_tool(@agent_session.web_search_tool)
   let session = @agent_session.AgentSession(
     llm,
     system_prompt_contributes=[

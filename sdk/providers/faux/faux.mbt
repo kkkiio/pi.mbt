@@ -327,12 +327,6 @@ pub impl @agent_loop.LLM for FauxLLM with fn generate(
           ),
         )
       }
-      // The generation protocol has no hosted-tool streaming events; pass the
-      // block through so a scripted hosted call still reaches the loop.
-      @agent_loop.AssistantMessageContent::HostedToolCall(tool, signature~) =>
-        acc.push(
-          @agent_loop.AssistantMessageContent::HostedToolCall(tool, signature~),
-        )
     }
     index += 1
   }

@@ -533,14 +533,12 @@ fn fake_tool(name : String) -> @tools.ToolDefinition {
     name,
     label: name,
     prompt_guidelines: [],
-    callable_definition: Some({
-      description: "\{name} tool",
-      parameters: { "type": "object", "properties": {} },
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: fake_tool_execute,
-    }),
+    description: "\{name} tool",
+    parameters: { "type": "object", "properties": {} },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: fake_tool_execute,
   }
 }
 
@@ -571,12 +569,7 @@ impl @agent_loop.LLM for ToolCapturingLLM with fn generate(
   ignore(abort)
   self.seen.clear()
   for tool in ctx.tools {
-    self.seen.push(
-      match tool {
-        @agent_loop.Function(definition) => definition.name
-        @agent_loop.Hosted(WebSearch) => @agent_session.WEB_SEARCH_TOOL_NAME
-      },
-    )
+    self.seen.push(tool.name)
   }
   let message = ok_message()
   sink(@agent_loop.GenerationEvent::Start(partial=message))
@@ -591,7 +584,7 @@ async test "session offers only its active tools to the model" {
   let registry = @tools.ToolRegistry()
   registry.register_tool(fake_tool("bash"))
   registry.register_tool(fake_tool("read"))
-  registry.register_tool(@agent_session.web_search_tool)
+  registry.register_tool(fake_tool("grep"))
   let seen : Array[String] = []
   let session = @agent_session.AgentSession(
     ToolCapturingLLM::{ seen, },
@@ -601,13 +594,10 @@ async test "session offers only its active tools to the model" {
   session.prompt([user_message("hi")])
   assert_eq(seen, ["read"])
   assert_eq(session.active_tool_names(), ["read"])
-  session.set_active_tools(["bash", @agent_session.WEB_SEARCH_TOOL_NAME])
-  assert_eq(session.active_tool_names(), [
-    "bash",
-    @agent_session.WEB_SEARCH_TOOL_NAME,
-  ])
+  session.set_active_tools(["bash", "grep"])
+  assert_eq(session.active_tool_names(), ["bash", "grep"])
   session.prompt([user_message("hi", timestamp=1786903823974)])
-  assert_eq(seen, ["bash", @agent_session.WEB_SEARCH_TOOL_NAME])
+  assert_eq(seen, ["bash", "grep"])
 }
 
 ///|
@@ -619,7 +609,7 @@ async test "activating an unregistered tool fails at prompt time" {
   let session = @agent_session.AgentSession(
     StubLLM::{ },
     tool_registry=registry,
-    active_tools=["bash", "web_search"],
+    active_tools=["bash", "grep"],
   )
   let error_text = try {
     session.prompt([user_message("hi")])
@@ -627,7 +617,7 @@ async test "activating an unregistered tool fails at prompt time" {
   } catch {
     err => err.to_string()
   }
-  assert_true(error_text.contains("unknown tool: web_search"))
+  assert_true(error_text.contains("unknown tool: grep"))
 }
 
 ///|
@@ -705,33 +695,29 @@ fn abort_batch_tools(log : Array[String]) -> @tools.ToolRegistry {
     name: "slow",
     label: "slow",
     prompt_guidelines: [],
-    callable_definition: Some({
-      description: "blocks until cancelled",
-      parameters: { "type": "object", "properties": {} },
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: (_, _, on_update) => {
-        defer log.push("cleanup")
-        blocking_execute("slow", {}, on_update)
-      },
-    }),
+    description: "blocks until cancelled",
+    parameters: { "type": "object", "properties": {} },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (_, _, on_update) => {
+      defer log.push("cleanup")
+      blocking_execute("slow", {}, on_update)
+    },
   })
   registry.register_tool({
     name: "marker",
     label: "marker",
     prompt_guidelines: [],
-    callable_definition: Some({
-      description: "must not run after abort",
-      parameters: { "type": "object", "properties": {} },
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: (_, _, on_update) => {
-        log.push("marker")
-        blocking_execute("marker", {}, on_update)
-      },
-    }),
+    description: "must not run after abort",
+    parameters: { "type": "object", "properties": {} },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (_, _, on_update) => {
+      log.push("marker")
+      blocking_execute("marker", {}, on_update)
+    },
   })
   registry
 }
@@ -813,17 +799,15 @@ fn probe_tools(log : Array[String]) -> @tools.ToolRegistry {
     name: "probe",
     label: "probe",
     prompt_guidelines: [],
-    callable_definition: Some({
-      description: "completes immediately",
-      parameters: { "type": "object", "properties": {} },
-      constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
-        strict=true,
-      ),
-      execute: (id, args, on_update) => {
-        log.push("probe")
-        probe_execute(id, args, on_update)
-      },
-    }),
+    description: "completes immediately",
+    parameters: { "type": "object", "properties": {} },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (id, args, on_update) => {
+      log.push("probe")
+      probe_execute(id, args, on_update)
+    },
   })
   registry
 }

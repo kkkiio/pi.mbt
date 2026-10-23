@@ -74,7 +74,6 @@ pub(all) enum AssistantMessageContent {
   Text(String, signature~ : Json)
   Thinking(String, signature~ : Json)
   ToolCall(ToolCall, signature~ : Json)
-  HostedToolCall(HostedTool, signature~ : Json)
 } derive(@debug.Debug)
 pub fn AssistantMessageContent::to_json(Self) -> Json
 pub fn AssistantMessageContent::to_repr(Self) -> @debug.Repr
@@ -89,13 +88,6 @@ pub(all) struct Context {
   system_prompt : String
   messages : ArrayView[AgentMessage]
   tools : ArrayView[ToolDefinition]
-}
-
-pub(all) struct FunctionTool {
-  name : String
-  description : String
-  parameters : Json
-  constrained_sampling : ConstrainedSampling
 }
 
 pub(all) enum GenerationEvent {
@@ -116,13 +108,6 @@ pub(all) enum GrammarFormat {
   Lark
   Regex
 }
-
-pub(all) enum HostedTool {
-  WebSearch
-} derive(@debug.Debug)
-pub fn HostedTool::to_json(Self) -> Json
-pub fn HostedTool::to_repr(Self) -> @debug.Repr
-pub impl ToJson for HostedTool
 
 pub(all) enum InputMessageContent {
   Text(String)
@@ -155,9 +140,11 @@ pub fn ToolCall::to_json(Self) -> Json
 pub fn ToolCall::to_repr(Self) -> @debug.Repr
 pub impl ToJson for ToolCall
 
-pub(all) enum ToolDefinition {
-  Hosted(HostedTool)
-  Function(FunctionTool)
+pub(all) struct ToolDefinition {
+  name : String
+  description : String
+  parameters : Json
+  constrained_sampling : ConstrainedSampling
 }
 
 pub(all) struct ToolResult {

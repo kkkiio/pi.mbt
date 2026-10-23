@@ -1,12 +1,8 @@
 ///|
 /// The bash tool's callable definition, for driving commands directly (outside
 /// the session) and for the post-abort checks.
-fn bash_callable() -> @tools.CallableDefinition raise {
-  let definition = @coding_agent.new_bash_tool_definition(cwd="/tmp")
-  guard definition.callable_definition is Some(callable) else {
-    fail("bash tool has no callable definition")
-  }
-  callable
+fn bash_callable() -> @tools.ToolDefinition {
+  @coding_agent.new_bash_tool_definition(cwd="/tmp")
 }
 
 ///|

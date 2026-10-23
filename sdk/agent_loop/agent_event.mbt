@@ -170,7 +170,6 @@ pub(all) enum AssistantMessageContent {
   Text(String, signature~ : Json)
   Thinking(String, signature~ : Json)
   ToolCall(ToolCall, signature~ : Json)
-  HostedToolCall(HostedTool, signature~ : Json)
 } derive(Debug)
 
 ///|
@@ -205,12 +204,6 @@ pub impl ToJson for AssistantMessageContent with fn to_json(
       )
     ToolCall(tool_call, signature~) =>
       (tool_call_fields(tool_call), "thoughtSignature", signature)
-    HostedToolCall(tool, signature~) =>
-      (
-        { "type": Json("hostedToolCall"), "tool": tool.to_json() },
-        "signature",
-        signature,
-      )
   }
   match signature {
     Null => ()
@@ -223,9 +216,6 @@ pub impl ToJson for AssistantMessageContent with fn to_json(
 
 ///|
 pub extend AssistantMessageContent with ToJson::{to_json}
-
-///|
-pub extend HostedTool with ToJson::{to_json}
 
 ///|
 pub(all) struct ToolCall {
@@ -247,21 +237,6 @@ pub impl ToJson for ToolCall with fn to_json(self : ToolCall) -> Json {
 
 ///|
 pub extend ToolCall with ToJson::{to_json}
-
-///|
-pub(all) enum HostedTool {
-  WebSearch
-} derive(Debug)
-
-///|
-pub extend HostedTool with Debug::{to_repr}
-
-///|
-pub impl ToJson for HostedTool with fn to_json(self : HostedTool) -> Json {
-  match self {
-    WebSearch => Json("web_search")
-  }
-}
 
 ///|
 pub(all) struct ToolResultMessage {
