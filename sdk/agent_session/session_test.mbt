@@ -227,7 +227,7 @@ async test "hydrating a compacted journal projects the summary and kept tail" {
   )
   let session = @agent_session.AgentSession(StubLLM::{ }, journal~)
   inspect(
-    context_lines(session.message_buffer),
+    context_lines(session.messages().to_owned()),
     content=(
       #|user: The conversation history before this point was compacted into the following summary:
       #|
@@ -281,7 +281,7 @@ async test "latest compaction omits older summaries within the kept range" {
       ""
     }
     assert_eq(
-      context_lines(session.message_buffer),
+      context_lines(session.messages().to_owned()),
       "user: The conversation history before this point was compacted into the following summary:\n\n<summary>\nlatest summary\n</summary>" +
       expected_tail +
       "\nuser: after",
@@ -318,20 +318,21 @@ async test "session hydration keeps Error assistant messages like every other en
       { id: "ok1", content: Message(Assistant(ok_message())), },
     ]),
   )
-  // The constructor hydrates `message_buffer` from the journal verbatim.
+  // The constructor hydrates the agent transcript from the journal verbatim.
   let llm = StubLLM::{ }
   let session = @agent_session.AgentSession(llm, journal~)
-  assert_eq(session.message_buffer.length(), 3)
-  let user_count = session.message_buffer
+  assert_eq(session.messages().length(), 3)
+  let user_count = session
+    .messages()
     .filter(m => m is @agent_loop.AgentMessage::User(_))
     .length()
   assert_eq(user_count, 1)
-  match session.message_buffer[1] {
+  match session.messages()[1] {
     @agent_loop.AgentMessage::Assistant(message) =>
       assert_true(message.stop_reason is @agent_loop.StopReason::Error)
     _ => fail("expected the superseded Error turn to survive hydration")
   }
-  let text = match session.message_buffer[2] {
+  let text = match session.messages()[2] {
     @agent_loop.AgentMessage::Assistant(m) =>
       match m.content {
         [@agent_loop.AssistantMessageContent::Text(text, ..)] => text
@@ -1318,7 +1319,7 @@ async test "a session can replace and wrap its finish turn hook" {
       None
     },
   )
-  let inner = session.finish_turn_hook
+  let inner = session.agent.finish_turn_hook
   session.set_finish_turn_hook((messages, tool_results, abort) => {
     calls.push("outer")
     // Delegate to the hook this one replaced, then decide.
@@ -1445,7 +1446,10 @@ async test "a context edit omits its target from the projection only" {
     ]),
   )
   let session = @agent_session.AgentSession(StubLLM::{ }, journal~)
-  inspect(session.message_buffer |> context_lines, content="user: request")
+  inspect(
+    session.messages().to_owned() |> context_lines,
+    content="user: request",
+  )
   assert_eq(journal.get_entries().length(), 3)
   match journal.get_entries()[1].content {
     Message(Assistant(message)) =>
@@ -1470,10 +1474,10 @@ async test "a reloaded session projects the same context as the live one" {
   let journal = @agent_session.InMemorySessionJournal()
   let session = @agent_session.AgentSession(llm, journal~)
   session.prompt([user_message("go")])
-  let live = context_lines(session.message_buffer)
+  let live = context_lines(session.messages().to_owned())
   inspect(live, content="user: go\nassistant: done")
   let reloaded = @agent_session.AgentSession(StubLLM::{ }, journal~)
-  assert_eq(context_lines(reloaded.message_buffer), live)
+  assert_eq(context_lines(reloaded.messages().to_owned()), live)
   // The failed turn stays in the record: user, error turn, its edit, the retry.
   assert_eq(journal.get_entries().length(), 4)
 }
