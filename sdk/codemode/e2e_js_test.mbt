@@ -189,3 +189,24 @@ async test "e2e: store writes reported only on success" {
     { "set": { "k": { "n": 1 } }, "delete": ["gone"] },
   ])
 }
+
+///|
+/// image() 输出降级为文本块,不产生 provider 不支持的 Image content
+/// (responses provider 对 tool-result 图片会 fail;PR #38 review)。
+async test "e2e: image output degrades to text content" {
+  let def = e2e_definition(run_tool=e2e_run_tool)
+  let result = (def.execute)(
+    "tc-6",
+    (
+      { "code": "image('data:image/png;base64,iVBORw0KGgo=');\nreturn 'ok';" } :
+      Json),
+    fn(_c, _d) {  },
+  )
+  assert_false(result.is_error)
+  for item in result.content {
+    assert_false(item is @agent_loop.InputMessageContent::Image(_))
+  }
+  let texts = texts_of(result)
+  assert_true(texts[1].contains("image output (image/png)"))
+  assert_true(texts[1].contains("iVBORw0KGgo="))
+}

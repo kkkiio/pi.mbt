@@ -3,7 +3,6 @@ import {
   "KKKIIO/pi/sdk/tools",
   "moonbitlang/async",
   "moonbitlang/async/aqueue",
-  "moonbitlang/core/encoding/base64",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/json",
 }

@@ -18,10 +18,24 @@ pub fn new_coding_session(
   let tool_registry = @tools.ToolRegistry()
   let bash_tool = new_bash_tool_definition(cwd~)
   tool_registry.register_tool(bash_tool)
-  let active = active_tools.iter().collect()
+  let session = @agent_session.AgentSession(
+    llm,
+    system_prompt_contributes=[
+      coding_assistant_system_prompt_contributor(),
+      tools_guidelines_system_prompt_contributor(tool_registry),
+      project_context_system_prompt_contributor(cwd~),
+      skills_system_prompt_contributor(cwd~),
+      cwd_system_prompt_contributor(cwd~),
+    ],
+    journal~,
+    tool_registry~,
+    active_tools~,
+  )
+  // 嵌套工具集读 session 的活跃工具表(set_active_tools 可改),
+  // 不是构造期快照——否则 codemode 能调到已被停用的工具。
   let resolve_tools = fn() -> Array[@tools.ToolDefinition] {
     let resolved : Array[@tools.ToolDefinition] = []
-    for name in active {
+    for name in session.active_tool_names() {
       if tool_registry.get_tool(name) is Some(tool) {
         resolved.push(tool)
       }
@@ -74,19 +88,6 @@ pub fn new_coding_session(
         Some(path)
       },
     ),
-  )
-  let session = @agent_session.AgentSession(
-    llm,
-    system_prompt_contributes=[
-      coding_assistant_system_prompt_contributor(),
-      tools_guidelines_system_prompt_contributor(tool_registry),
-      project_context_system_prompt_contributor(cwd~),
-      skills_system_prompt_contributor(cwd~),
-      cwd_system_prompt_contributor(cwd~),
-    ],
-    journal~,
-    tool_registry~,
-    active_tools~,
   )
   session
 }
