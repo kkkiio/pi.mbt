@@ -1,0 +1,260 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/codemode"
+
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/tools",
+  "moonbitlang/async",
+  "moonbitlang/async/aqueue",
+  "moonbitlang/core/json",
+  "moonbitlang/core/ref",
+}
+
+// Values
+pub const CODEMODE_OPTIONS_PREFIX : String = "// @options:"
+
+pub const CODEMODE_SOURCE_GRAMMAR : String = "start: options_source | plain_source\noptions_source: OPTIONS_LINE NEWLINE SOURCE\nplain_source: SOURCE\n\nOPTIONS_LINE: /[ \\t]*\\/\\/ @options:[^\\r\\n]*/\nNEWLINE: /\\r?\\n/\nSOURCE: /[\\s\\S]+/\n"
+
+pub const CODEMODE_STORE_ENTRY_TYPE : String = "codemode-store"
+
+pub const CODEMODE_TOOL_NAME : String = "codemode"
+
+pub const DEFAULT_INPUT_SCHEMA_MAX_CHARS : Int32 = 16_000
+
+pub let codemode_parameters : Json
+
+pub fn codemode_prelude_source() -> String
+
+pub fn new_codemode_tool_definition(callable_tools~ : () -> ArrayView[@tools.ToolDefinition], run_tool~ : async (@agent_loop.ToolCall, (Array[@agent_loop.InputMessageContent], Json) -> Unit) -> @agent_loop.ToolResult, load_store? : () -> Map[String, Json], on_store_writes? : async (CodemodeStoreWrites) -> Unit, spill_output? : async (String) -> String?, launch? : (async (VmStartData, &VmEvents) -> &VmChannel)?) -> @tools.ToolDefinition
+
+pub fn parse_codemode_source(String) -> ParsedCodemodeSource raise CodemodeSourceError
+
+pub fn render_declarations(tools? : ArrayView[CodemodeTool], globals? : ArrayView[CodemodeTool]) -> String
+
+pub fn render_tool_output_type(Json?) -> String
+
+pub fn render_tool_sample(CodemodeTool, input_max_chars? : Int32) -> String
+
+pub fn render_tool_signature(CodemodeTool, input_max_chars? : Int32) -> String
+
+pub fn schema_to_type(Json, max_chars? : Int32?) -> String
+
+pub fn to_codemode_identifier(String) -> String
+
+// Errors
+pub suberror CodemodeSandboxError {
+  CodemodeSandboxError(String)
+}
+
+pub suberror CodemodeSourceError {
+  CodemodeSourceError(String)
+}
+
+// Types and methods
+pub(all) struct CodemodeCall {
+  name : String
+  mut status : CodemodeCallStatus
+  mut duration_ms : Double
+} derive(ToJson)
+pub fn CodemodeCall::to_json(Self) -> Json
+
+pub(all) enum CodemodeCallStatus {
+  Ok
+  Error
+  Cancelled
+} derive(ToJson)
+pub fn CodemodeCallStatus::to_json(Self) -> Json
+
+pub(all) enum CodemodeCallTarget {
+  Tool
+  Global
+}
+
+pub(all) struct CodemodeError {
+  kind : CodemodeErrorKind
+  name : String?
+  message : String
+  stack : String?
+} derive(ToJson)
+pub fn CodemodeError::to_json(Self) -> Json
+
+pub(all) enum CodemodeErrorKind {
+  Script
+  Timeout
+  Aborted
+  Sandbox
+} derive(ToJson)
+pub fn CodemodeErrorKind::to_json(Self) -> Json
+
+pub(all) struct CodemodeGlobalDecl {
+  name : String
+  spread : Bool
+}
+
+pub(all) struct CodemodeNestedCall {
+  id : String
+  name : String
+  args : String
+  mut status : CodemodeNestedCallStatus
+  mut duration_ms : Double?
+  mut error : String?
+}
+pub fn CodemodeNestedCall::to_json(Self) -> Json
+pub impl ToJson for CodemodeNestedCall
+
+pub(all) enum CodemodeNestedCallStatus {
+  Running
+  Ok
+  Error
+  Cancelled
+}
+pub fn CodemodeNestedCallStatus::output(Self, &Logger) -> Unit
+pub fn CodemodeNestedCallStatus::to_json(Self) -> Json
+pub fn CodemodeNestedCallStatus::to_string(Self) -> String
+pub impl Show for CodemodeNestedCallStatus
+pub impl ToJson for CodemodeNestedCallStatus
+
+pub(all) enum CodemodeOutputItem {
+  Text(text~ : String, console~ : Bool)
+  Image(data~ : String, mime_type~ : String)
+} derive(ToJson)
+pub fn CodemodeOutputItem::to_json(Self) -> Json
+
+pub(all) enum CodemodeResult {
+  Ok(value~ : Json?, output~ : Array[CodemodeOutputItem], calls~ : Array[CodemodeCall], store_writes~ : CodemodeStoreWrites)
+  Err(error~ : CodemodeError, output~ : Array[CodemodeOutputItem], calls~ : Array[CodemodeCall])
+} derive(ToJson)
+pub fn CodemodeResult::to_json(Self) -> Json
+
+pub struct CodemodeSandbox {
+  tools_by_name : Map[String, CodemodeTool]
+  globals_by_name : Map[String, CodemodeTool]
+  timeout_ms : Int32
+  memory_limit_bytes : Int32?
+  launch : async (VmStartData, &VmEvents) -> &VmChannel
+  running : Array[Execution]
+  done_notify : @aqueue.Queue[Unit]
+  mut closed : Bool
+}
+pub async fn CodemodeSandbox::close(Self) -> Unit
+pub async fn CodemodeSandbox::execute(Self, String, timeout_ms? : Int32?, store? : Map[String, Json], abort? : @agent_loop.AbortSignal) -> CodemodeResult
+pub fn CodemodeSandbox::globals(Self) -> Array[CodemodeTool]
+pub fn CodemodeSandbox::new(tools? : Array[CodemodeTool], globals? : Array[CodemodeTool], timeout_ms? : Int32, memory_limit_bytes? : Int32?) -> Self raise
+pub fn CodemodeSandbox::register_tool(Self, CodemodeTool) -> Unit raise
+pub fn CodemodeSandbox::tools(Self) -> Array[CodemodeTool]
+pub fn CodemodeSandbox::unregister_tool(Self, String) -> Bool
+pub fn CodemodeSandbox::with_launcher(launch~ : async (VmStartData, &VmEvents) -> &VmChannel, tools? : Array[CodemodeTool], globals? : Array[CodemodeTool], timeout_ms? : Int32, memory_limit_bytes? : Int32?) -> Self raise
+
+pub(all) struct CodemodeSourceOptions {
+  max_output_tokens : Int32?
+  timeout_ms : Int32?
+} derive(ToJson)
+pub fn CodemodeSourceOptions::to_json(Self) -> Json
+
+pub(all) struct CodemodeStoreEntryData {
+  set : Map[String, Json]
+  delete : Array[String]
+} derive(ToJson, @json.FromJson)
+pub fn CodemodeStoreEntryData::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodemodeStoreEntryData::to_json(Self) -> Json
+
+pub(all) struct CodemodeStoreWrites {
+  set : Map[String, Json]
+  delete : Array[String]
+} derive(ToJson)
+pub fn CodemodeStoreWrites::to_json(Self) -> Json
+
+pub(all) struct CodemodeTool {
+  name : String
+  description : String
+  input_schema : Json?
+  output_schema : Json?
+  spread : Bool
+  signature : String?
+  execute : async (Json?, CodemodeToolContext) -> Json?
+}
+pub fn CodemodeTool::new(name~ : String, execute~ : async (Json?, CodemodeToolContext) -> Json?, description? : String, input_schema? : Json?, output_schema? : Json?, spread? : Bool, signature? : String?) -> Self
+
+pub(all) struct CodemodeToolContext {
+  signal : @agent_loop.AbortSignal
+}
+
+pub(all) struct CodemodeToolDecl {
+  name : String
+  js_name : String
+  description : String
+}
+
+pub(all) struct CodemodeToolDetails {
+  calls : Array[CodemodeNestedCall]
+  full_output_path : String?
+}
+pub fn CodemodeToolDetails::to_json(Self) -> Json
+pub impl ToJson for CodemodeToolDetails
+
+pub struct Execution {
+  code : String
+  tools : Map[String, CodemodeTool]
+  globals : Map[String, CodemodeTool]
+  timeout_ms : Int32
+  abort : @agent_loop.AbortSignal
+  memory_limit_bytes : Int32?
+  store : Map[String, String]
+  launch : async (VmStartData, &VmEvents) -> &VmChannel
+  group : @ref.Ref[@async.TaskGroup[CodemodeResult]?]
+  result : @aqueue.Queue[CodemodeResult]
+  channel : @ref.Ref[&VmChannel?]
+  unsent : Array[HostToVmMessage]
+  calls : Array[CodemodeCall]
+  output : Array[CodemodeOutputItem]
+  pending : Map[Int32, PendingCall]
+  finished : @ref.Ref[Bool]
+}
+
+pub(all) enum HostToVmMessage {
+  Result(id~ : Int32, ok~ : Bool, payload~ : String?)
+} derive(ToJson)
+pub fn HostToVmMessage::to_json(Self) -> Json
+
+pub(all) struct ParsedCodemodeSource {
+  code : String
+  options : CodemodeSourceOptions
+} derive(ToJson)
+pub fn ParsedCodemodeSource::to_json(Self) -> Json
+
+pub struct PendingCall {
+  record : CodemodeCall?
+  started_at : Int64
+  controller : @agent_loop.AbortController
+  task : @async.Task[Unit]
+}
+
+pub(all) struct VmStartData {
+  code : String
+  tools : Array[CodemodeToolDecl]
+  globals : Array[CodemodeGlobalDecl]
+  memory_limit_bytes : Int32?
+  store : Map[String, String]
+}
+
+pub(all) enum VmToHostMessage {
+  Output(CodemodeOutputItem)
+  Call(id~ : Int32, target~ : CodemodeCallTarget, name~ : String, args~ : Json?)
+  Done(value~ : Json?, store_writes~ : CodemodeStoreWrites)
+  ScriptError(error~ : CodemodeError)
+  Crash(message~ : String)
+}
+
+// Type aliases
+pub type VmLauncher = async (VmStartData, &VmEvents) -> &VmChannel
+
+// Traits
+pub(open) trait VmChannel {
+  fn post(Self, HostToVmMessage) -> Unit
+  async fn stop(Self) -> Unit
+}
+
+pub(open) trait VmEvents {
+  fn message(Self, VmToHostMessage) -> Unit
+  fn failure(Self, CodemodeError) -> Unit
+}

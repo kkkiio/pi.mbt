@@ -1,0 +1,28 @@
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/tools",
+  "moonbitlang/async",
+  "moonbitlang/async/aqueue",
+  "moonbitlang/core/encoding/base64",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/json",
+}
+
+options(
+  targets: {
+    "vm_js.mbt": [ "js" ],
+    "vm_native.mbt": [ "native" ],
+    "e2e_js_test.mbt": [ "js" ],
+  },
+)
+
+supported_targets = "+js+native"
+
+// 把 QuickJS prelude(与 @earendil-works/pi-codemode 同源)嵌进产物;
+// prelude.js 由 dist/runtime/prelude-source.js 的 PRELUDE_SOURCE 提取。
+rule(
+  name: "embed-prelude",
+  command: "moon tool embed --text --name prelude_source -i $input -o $output",
+)
+
+dev_build(rule: "embed-prelude", input: "prelude.js", output: "prelude_gen.mbt")
