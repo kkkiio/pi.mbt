@@ -191,9 +191,10 @@ async test "e2e: store writes reported only on success" {
 }
 
 ///|
-/// image() 输出降级为文本块,不产生 provider 不支持的 Image content
-/// (responses provider 对 tool-result 图片会 fail;PR #38 review)。
-async test "e2e: image output degrades to text content" {
+/// image() → InputMessageContent::Image(对应 pi formatOutput)。Провайдер
+/// сам разруливает:vision-модель получит input_image,non-vision —
+/// placeholder через transform_messages(PR #38 P2 решён на main #39).
+async test "e2e: image output produces image content" {
   let def = e2e_definition(run_tool=e2e_run_tool)
   let result = (def.execute)(
     "tc-6",
@@ -203,10 +204,13 @@ async test "e2e: image output degrades to text content" {
     fn(_c, _d) {  },
   )
   assert_false(result.is_error)
+  let mut saw = false
   for item in result.content {
-    assert_false(item is @agent_loop.InputMessageContent::Image(_))
+    if item is @agent_loop.InputMessageContent::Image(data~, mime_type~) {
+      saw = true
+      assert_eq(data, "iVBORw0KGgo=")
+      assert_eq(mime_type, "image/png")
+    }
   }
-  let texts = texts_of(result)
-  assert_true(texts[1].contains("image output (image/png)"))
-  assert_true(texts[1].contains("iVBORw0KGgo="))
+  assert_true(saw)
 }

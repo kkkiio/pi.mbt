@@ -178,13 +178,12 @@ pub fn new_codemode_tool_definition(
                 },
               ),
             )
-          // provider 不支持 tool-result 图片块(responses.mbt 会 fail),
-          // 降级为文本:base64 载荷保留在正文里,计入输出预算/落盘。
+          // image() → Image content(对应 pi formatOutput)。Провайдерный
+          // слой сам решает:vision-модель получит input_image,
+          // non-vision — placeholder через transform_messages.
           CodemodeOutputItem::Image(data~, mime_type~) =>
             items.push(
-              @agent_loop.InputMessageContent::Text(
-                "image output (\{mime_type}):\n\{data}",
-              ),
+              @agent_loop.InputMessageContent::Image(data~, mime_type~),
             )
         }
       }
@@ -204,8 +203,8 @@ pub fn new_codemode_tool_definition(
             ),
           )
       }
-      // 截断:文本合并按 token 预算留头尾;全文经 spill_output 落盘
-      // (对应 pi truncateOutput;图片已降级为文本,计入同一预算)。
+      // 截断:文本合并按 token 预算留头尾,图片不受影响;全文经
+      // spill_output 落盘(对应 pi truncateOutput)。
       let mut full_output_path : String? = None
       let budget_chars = parsed.options.max_output_tokens
         .unwrap_or(DEFAULT_MAX_OUTPUT_TOKENS)
@@ -250,7 +249,15 @@ pub fn new_codemode_tool_definition(
           }
           None => text = text + "\n\n[Could not save the full output]"
         }
-        [@agent_loop.InputMessageContent::Text(text)]
+        let truncated : Array[@agent_loop.InputMessageContent] = [
+          @agent_loop.InputMessageContent::Text(text),
+        ]
+        for item in items {
+          if item is @agent_loop.InputMessageContent::Image(_) {
+            truncated.push(item)
+          }
+        }
+        truncated
       }
       {
         content: [
