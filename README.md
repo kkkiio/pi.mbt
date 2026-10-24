@@ -31,6 +31,14 @@ pim -p "What's the capital of France? Respond with only the city name."
 # Paris
 ```
 
+位置参数也是提示词;`@path` 形式的参数会把文件附进首条消息 —— 图片按
+魔数嗅探后内联(模型无视觉输入时降级为占位文本),文本文件展开为
+`<file name="...">` 引用:
+
+```bash
+pim "describe this screenshot" @shot.png @notes.txt
+```
+
 加上 `--mode json` 可以输出 JSONL 事件流:
 
 ```bash

@@ -57,7 +57,12 @@ pub impl LLMProvider for DeepSeekProvider with fn new_llm(
   model_id,
   thinking~ : String = "high",
 ) {
-  DeepSeekResponsesAPILLM(self.api_key, model_id~, thinking~)
+  DeepSeekResponsesAPILLM(
+    self.api_key,
+    model_id~,
+    thinking~,
+    supports_images=false,
+  )
 }
 
 ///|
@@ -69,6 +74,10 @@ struct DeepSeekResponsesAPILLM {
   model_id : String
   /// DeepSeek thinking effort: low / high / max.
   thinking : String
+  /// Whether the model accepts image input; DeepSeek's current models are
+  /// all text-input, so the transcript's image blocks are downgraded to
+  /// placeholder text before encoding (see `transform_messages`).
+  supports_images : Bool
 }
 
 ///|
@@ -76,8 +85,9 @@ pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(
   api_key : String,
   model_id~ : String = "deepseek-v4-flash",
   thinking~ : String = "high",
+  supports_images~ : Bool = false,
 ) -> DeepSeekResponsesAPILLM {
-  { api_key, model_id, thinking, }
+  { api_key, model_id, thinking, supports_images, }
 }
 
 ///|
@@ -90,7 +100,10 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
   abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
-  let input = encode_responses_input(context)
+  let input = encode_responses_input(
+    context,
+    supports_images=self.supports_images,
+  )
   let custom_tool_input_properties = Map([])
   let tools : Array[Json] = []
   for tool in context.tools {

@@ -224,7 +224,7 @@ fn replay(entries : Array[@agent_session.SessionEntry], app : TuiApp) -> Unit {
         for block in message.content {
           match block {
             Text(text) => app.replay_user(text)
-            _ => ()
+            Image(..) => app.replay_user("[image]")
           }
         }
       Message(Assistant(message)) => replay_assistant(message, app)
@@ -323,7 +323,7 @@ fn tool_result_text(message : @agent_loop.ToolResultMessage) -> String {
   for content in message.content {
     match content {
       Text(text) => out.write_string(text)
-      Image(_) => out.write_string("[image]")
+      Image(..) => out.write_string("[image]")
     }
   }
   out.to_string()
@@ -412,16 +412,10 @@ fn SessionHost::on_event(
 /// 跑一轮:先把状态切到工作态,再 `session.prompt`(事件由订阅回调更新视图)。
 pub async fn SessionHost::prompt(
   self : SessionHost,
-  text : String,
+  input : Array[@agent_loop.UserMessage],
   app : TuiApp,
 ) -> Unit {
   app.begin_work("thinking")
-  let input : Array[@agent_loop.UserMessage] = [
-    @agent_loop.UserMessage::{
-      content: [@agent_loop.InputMessageContent::Text(text)],
-      timestamp: @env.now(),
-    },
-  ]
   // The session emits an error turn for runtime failures. Errors while
   // delivering that turn can still escape to this UI boundary.
   self.session.prompt(input) catch {

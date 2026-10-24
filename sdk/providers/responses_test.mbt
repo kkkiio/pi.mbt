@@ -233,3 +233,96 @@ async test "responses sse stream returns promptly on abort while stalled" {
     debug_inspect(messages.length() > 0, content="true")
   }
 }
+
+///|
+/// pi's `input_image` encoding (`openai-responses-shared.ts`): a data URL in
+/// `image_url`, `detail: "auto"`, in both user message content and tool
+/// result output.
+async test "encode_responses_input encodes image blocks as input_image" {
+  let image = @agent_loop.InputMessageContent::Image(
+    data="aGVsbG8=",
+    mime_type="image/png",
+  )
+  let context : @agent_loop.Context = {
+    system_prompt: "sys",
+    messages: [
+      @agent_loop.AgentMessage::User({
+        content: [@agent_loop.InputMessageContent::Text("look"), image],
+        timestamp: 1,
+      }),
+      @agent_loop.AgentMessage::ToolResult({
+        tool_call_id: "call-1",
+        tool_name: "screenshot",
+        content: [@agent_loop.InputMessageContent::Text("ok"), image],
+        details: None,
+        usage: None,
+        is_error: false,
+        timestamp: 2,
+      }),
+    ],
+    tools: [],
+  }
+  json_inspect(
+    @providers.encode_responses_input(context, supports_images=true),
+    content=[
+      {
+        "role": "user",
+        "content": [
+          { "type": "input_text", "text": "look" },
+          {
+            "type": "input_image",
+            "detail": "auto",
+            "image_url": "data:image/png;base64,aGVsbG8=",
+          },
+        ],
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call-1",
+        "output": [
+          { "type": "input_text", "text": "ok" },
+          {
+            "type": "input_image",
+            "detail": "auto",
+            "image_url": "data:image/png;base64,aGVsbG8=",
+          },
+        ],
+      },
+    ],
+  )
+}
+
+///|
+/// The same blocks encode as the placeholder `input_text` when the model has
+/// no vision input.
+async test "encode_responses_input downgrades images for non-vision models" {
+  let context : @agent_loop.Context = {
+    system_prompt: "sys",
+    messages: [
+      @agent_loop.AgentMessage::User({
+        content: [
+          @agent_loop.InputMessageContent::Image(
+            data="aGVsbG8=",
+            mime_type="image/png",
+          ),
+        ],
+        timestamp: 1,
+      }),
+    ],
+    tools: [],
+  }
+  json_inspect(
+    @providers.encode_responses_input(context, supports_images=false),
+    content=[
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "(image omitted: model does not support images)",
+          },
+        ],
+      },
+    ],
+  )
+}

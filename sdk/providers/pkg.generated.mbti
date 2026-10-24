@@ -8,9 +8,11 @@ import {
 }
 
 // Values
+pub fn encode_responses_input(@agent_loop.Context, supports_images~ : Bool) -> Array[Json] raise
+
 pub async fn[R : @io.Reader] read_responses_sse_stream(R, sink~ : async (@agent_loop.GenerationEvent) -> Unit, api~ : String, provider~ : String, model~ : String, custom_tool_input_properties? : Map[String, String], now? : () -> UInt64, abort? : @agent_loop.AbortSignal) -> @agent_loop.AssistantMessage
 
-pub fn transform_messages(ArrayView[@agent_loop.AgentMessage], now? : () -> UInt64) -> Array[@agent_loop.AgentMessage]
+pub fn transform_messages(ArrayView[@agent_loop.AgentMessage], supports_images~ : Bool, now? : () -> UInt64) -> Array[@agent_loop.AgentMessage]
 
 // Errors
 
@@ -21,7 +23,7 @@ pub fn DeepSeekProvider::new_llm(Self, String, thinking? : String) -> &@agent_lo
 pub impl LLMProvider for DeepSeekProvider
 
 type DeepSeekResponsesAPILLM
-pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(String, model_id? : String, thinking? : String) -> Self
+pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(String, model_id? : String, thinking? : String, supports_images? : Bool) -> Self
 pub async fn DeepSeekResponsesAPILLM::generate(Self, @agent_loop.Context, sink~ : async (@agent_loop.GenerationEvent) -> Unit, abort~ : @agent_loop.AbortSignal) -> @agent_loop.AssistantMessage
 pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM
 

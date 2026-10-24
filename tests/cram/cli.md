@@ -14,7 +14,10 @@ defaults:
 
 ```mooncram
 $ moon run cmd/pim -- --help
-Usage: pim [options]
+Usage: pim [options] [args...]
+
+Arguments:
+  args...  prompt texts and @file attachments
 
 Options:
   -h, --help                   Show help information.
@@ -145,6 +148,27 @@ Error: tests/cram/testdata/auth-oauth-credential/auth.json: "deepseek" is not an
 $ PIM_CONFIG_DIR=tests/cram/testdata/auth-empty-key moon run cmd/pim -- -p hi
 Error: tests/cram/testdata/auth-empty-key/auth.json: "deepseek" is not an api_key credential (expected {"type": "api_key", "key": "sk-..."})
 [1]
+```
+
+## @file 附件
+
+位置参数里以 `@` 开头的条目是文件附件(pi `fileArgs`):图片文件按魔数
+嗅探后 base64 内联成 image 块,文本文件展开为 `<file name="abs">` 文本块;
+两者都只挂在首条消息上。不存在的路径是单行错误:
+
+```mooncram {output_stream: stderr}
+$ DEEPSEEK_API_KEY=sk-fake moon run cmd/pim -- --no-session -p hi @missing.png
+Error: File not found: */missing.png (glob)
+[1]
+```
+
+下面的离线桩断言整条约路:位置参数 `describe-this` 是提示词,
+`@pixel.png` 内联成 image 块并在请求编码前被降级成 pi 的占位文本
+(DeepSeek 无视觉输入),`@note.txt` 展开成 `<file>` 文本块:
+
+```mooncram
+$ node tests/cram/testdata/image-cli.mjs
+image-contract-ok
 ```
 
 ## 离线 JSONL 事件流
