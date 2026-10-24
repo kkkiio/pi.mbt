@@ -245,6 +245,19 @@ pub(all) enum VmToHostMessage {
   Crash(message~ : String)
 }
 
+pub(all) enum VmWireMessage {
+  Started
+  Idle
+  Output(CodemodeOutputItem)
+  Call(id~ : Int32, target~ : CodemodeCallTarget, name~ : String, args~ : Json?)
+  Done(value~ : Json?, store_writes~ : CodemodeStoreWrites)
+  ScriptError(error~ : CodemodeError)
+  Crash(message~ : String)
+}
+pub fn VmWireMessage::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn VmWireMessage::to_vm_message(Self) -> VmToHostMessage?
+pub impl @json.FromJson for VmWireMessage
+
 // Type aliases
 pub type VmLauncher = async (VmStartData, &VmEvents) -> &VmChannel
 

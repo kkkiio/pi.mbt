@@ -50,6 +50,136 @@ pub(all) enum VmToHostMessage {
 }
 
 ///|
+/// VM 线上协议消息全形状(对应 pi WorkerToHostMessage,含 started/idle)。
+/// VmToHostMessage 是它的宿主语义子集;线上 JSON 经 FromJson 解出本类型,
+/// 再由 to_vm_message 映射或忽略。外部 VM 实现可复用解码而不继承投递策略。
+pub(all) enum VmWireMessage {
+  /// deterministic 握手:VM 就绪(非 deterministic 运行不出现)
+  Started
+  /// deterministic 握手:VM 空闲(非 deterministic 运行不出现)
+  Idle
+  Output(CodemodeOutputItem)
+  Call(id~ : Int32, target~ : CodemodeCallTarget, name~ : String, args~ : Json?)
+  Done(value~ : Json?, store_writes~ : CodemodeStoreWrites)
+  ScriptError(error~ : CodemodeError)
+  Crash(message~ : String)
+}
+
+///|
+/// 线上消息转宿主语义消息;Started/Idle 返回 None。
+pub fn VmWireMessage::to_vm_message(self : VmWireMessage) -> VmToHostMessage? {
+  match self {
+    Started | Idle => None
+    Output(item) => Some(VmToHostMessage::Output(item))
+    Call(id~, target~, name~, args~) =>
+      Some(VmToHostMessage::Call(id~, target~, name~, args~))
+    Done(value~, store_writes~) =>
+      Some(VmToHostMessage::Done(value~, store_writes~))
+    ScriptError(error~) => Some(VmToHostMessage::ScriptError(error~))
+    Crash(message~) => Some(VmToHostMessage::Crash(message~))
+  }
+}
+
+///|
+/// 线上 JSON -> VmWireMessage(对应 pi protocol.ts 的 WorkerToHostMessage)。
+/// args/value/writes/error 是 String 内再嵌一层 JSON;done 按 ok 分流
+/// 成 Done/ScriptError;crash 缺 message 时回退 "Worker crashed"。
+/// 失败 raise JsonDecodeError,载荷是对应 pi "Sandbox bridge broken" 的原因。
+pub impl @json.FromJson for VmWireMessage with fn from_json(json, path) {
+  guard json is Object(map) else {
+    raise @json.JsonDecodeError((path, "worker message is not an object"))
+  }
+  match map.get("type") {
+    Some(String("call")) =>
+      match (map.get("id"), map.get("target"), map.get("name")) {
+        (Some(Number(id, ..)), Some(String(target)), Some(String(name))) =>
+          Call(
+            id=id.to_int(),
+            target=if target == "global" { Global } else { Tool },
+            name~,
+            args=nested_json(
+              map.get("args"),
+              "call args is not valid JSON",
+              path.add_key("args"),
+            ),
+          )
+        _ => raise @json.JsonDecodeError((path, "malformed call message"))
+      }
+    Some(String("output")) =>
+      match map.get("item") {
+        Some(
+          Object(
+            {
+              "type": String("image"),
+              "data": String(data),
+              "mimeType": String(mime_type),
+              ..
+            }
+          )
+        ) => Output(Image(data~, mime_type~))
+        Some(
+          Object({ "type": String("text"), "text": String(text), .. } as item)
+        ) => Output(Text(text~, console=item.get("console") is Some(True)))
+        _ => raise @json.JsonDecodeError((path, "malformed output message"))
+      }
+    Some(String("done")) =>
+      match map.get("ok") {
+        Some(True) => {
+          let value = nested_json(
+            map.get("value"),
+            "done value is not valid JSON",
+            path.add_key("value"),
+          )
+          let store_writes = match decode_store_writes(map.get("writes")) {
+            Ok(store_writes) => store_writes
+            Err(reason) =>
+              raise @json.JsonDecodeError((path.add_key("writes"), reason))
+          }
+          Done(value~, store_writes~)
+        }
+        Some(False) =>
+          match decode_script_error(map.get("error")) {
+            Ok(error) => ScriptError(error~)
+            Err(reason) =>
+              raise @json.JsonDecodeError((path.add_key("error"), reason))
+          }
+        _ => raise @json.JsonDecodeError((path, "malformed done message"))
+      }
+    Some(String("crash")) =>
+      Crash(
+        message=match map.get("message") {
+          Some(String(message)) => message
+          _ => "Worker crashed"
+        },
+      )
+    Some(String("started")) => Started
+    Some(String("idle")) => Idle
+    _ => raise @json.JsonDecodeError((path, "unknown worker message type"))
+  }
+}
+
+///|
+pub extend VmWireMessage with @json.FromJson::{from_json}
+
+///|
+/// String 内再嵌一层 JSON 的字段(args/value):非 String 按缺席处理;
+/// String 但内容非法时 raise JsonDecodeError。
+fn nested_json(
+  field : Json?,
+  reason : String,
+  path : @json.JsonPath,
+) -> Json? raise @json.JsonDecodeError {
+  match field {
+    Some(String(text)) =>
+      match try_parse(text) {
+        Some(json) => Some(json)
+        None => raise @json.JsonDecodeError((path, reason))
+      }
+    _ => None
+  }
+}
+
+///|
 /// host -> VM(对应 pi HostToWorkerMessage;去掉 seq/now/properties)。
 /// 目前只有工具结果应答;停止 VM 走 VmChannel::stop。
 pub(all) enum HostToVmMessage {
@@ -96,113 +226,26 @@ fn encode_store_json(store : Map[String, String]) -> Json {
 }
 
 ///|
-/// VM -> 宿主消息解码(对应 pi protocol.ts 的 WorkerToHostMessage;
-/// started/idle 只在 deterministic 模式出现,忽略)。text 是线上 JSON;
-/// 非法消息/载荷报 failure(Sandbox),对应 pi 的 "Sandbox bridge broken"。
-/// js 与 native 两个启动器产出同一种线上格式,共用此解码。
+/// 把 VM 发来的一条线上 JSON 文本解码并投递给宿主;started/idle 忽略。
+/// 非法消息报 failure(Sandbox),对应 pi 的 "Sandbox bridge broken"。
+/// js 与 native 两个启动器产出同一种线上格式,共用此投递。
 fn deliver_worker_message(events : &VmEvents, text : String) -> Unit {
-  let message = match try_parse(text) {
-    Some(Object(map)) => map
-    _ => {
-      events.failure({
-        kind: Sandbox,
-        name: None,
-        message: "Sandbox bridge broken: worker message is not an object",
-        stack: None,
-      })
+  let wire : VmWireMessage = match try_parse(text) {
+    Some(json) =>
+      @json.from_json(json) catch {
+        @json.JsonDecodeError::JsonDecodeError((_, reason)) => {
+          events.failure(bridge_broken(reason))
+          return
+        }
+      }
+    None => {
+      events.failure(bridge_broken("worker message is not valid JSON"))
       return
     }
   }
-  match message.get("type") {
-    Some(String("call")) =>
-      match (message.get("id"), message.get("target"), message.get("name")) {
-        (Some(Number(id, ..)), Some(String(target)), Some(String(name))) => {
-          let args = match message.get("args") {
-            Some(String(args)) =>
-              match try_parse(args) {
-                Some(args) => Some(args)
-                None => {
-                  events.failure(bridge_broken("call args is not valid JSON"))
-                  return
-                }
-              }
-            _ => None
-          }
-          events.message(
-            Call(
-              id=id.to_int(),
-              target=if target == "global" { Global } else { Tool },
-              name~,
-              args~,
-            ),
-          )
-        }
-        _ => events.failure(bridge_broken("malformed call message"))
-      }
-    Some(String("output")) =>
-      match message.get("item") {
-        Some(
-          Object(
-            {
-              "type": String("image"),
-              "data": String(data),
-              "mimeType": String(mime_type),
-              ..
-            }
-          )
-        ) => events.message(Output(Image(data~, mime_type~)))
-        Some(Object({ "type": String("text"), "text": String(text), .. })) =>
-          events.message(
-            Output(
-              Text(
-                text~,
-                console=match message.get("item") {
-                  Some(Object({ "console": True, .. })) => true
-                  _ => false
-                },
-              ),
-            ),
-          )
-        _ => events.failure(bridge_broken("malformed output message"))
-      }
-    Some(String("done")) =>
-      match message.get("ok") {
-        Some(True) => {
-          let value = match message.get("value") {
-            Some(String(value)) =>
-              match try_parse(value) {
-                Some(value) => Some(value)
-                None => {
-                  events.failure(bridge_broken("done value is not valid JSON"))
-                  return
-                }
-              }
-            _ => None
-          }
-          match decode_store_writes(message.get("writes")) {
-            Ok(store_writes) => events.message(Done(value~, store_writes~))
-            Err(reason) => events.failure(bridge_broken(reason))
-          }
-        }
-        Some(False) =>
-          match decode_script_error(message.get("error")) {
-            Ok(error) => events.message(ScriptError(error~))
-            Err(reason) => events.failure(bridge_broken(reason))
-          }
-        _ => events.failure(bridge_broken("malformed done message"))
-      }
-    Some(String("crash")) =>
-      events.message(
-        Crash(
-          message=match message.get("message") {
-            Some(String(message)) => message
-            _ => "Worker crashed"
-          },
-        ),
-      )
-    // deterministic 模式的握手消息,非 deterministic 运行不会出现
-    Some(String("started")) | Some(String("idle")) => ()
-    _ => events.failure(bridge_broken("unknown worker message type"))
+  match wire.to_vm_message() {
+    Some(message) => events.message(message)
+    None => ()
   }
 }
 
