@@ -163,8 +163,9 @@ Error: File not found: */missing.png (glob)
 ```
 
 下面的离线桩断言整条约路:位置参数 `describe-this` 是提示词,
-`@pixel.png` 内联成 image 块并在请求编码前被降级成 pi 的占位文本
-(DeepSeek 无视觉输入),`@note.txt` 展开成 `<file>` 文本块:
+`@pixel.png` 内联成 image 块并按 data-URL 编码进 `input_image`
+(`deepseek-v4-flash` 即 v4.1,支持视觉输入;无视觉模型则降级为占位文本),
+`@note.txt` 展开成 `<file>` 文本块:
 
 ```mooncram
 $ node tests/cram/testdata/image-cli.mjs

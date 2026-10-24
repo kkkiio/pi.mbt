@@ -205,10 +205,9 @@ async test "image blocks encode as input_image for vision models" {
     ],
     tools: [],
   }
-  let llm = @providers.DeepSeekResponsesAPILLM(
-    "offline",
-    model_id="vision-test",
-    supports_images=true,
+  // `DeepSeekModel::of` maps the v4.1 flash API id to a vision-capable model.
+  let llm = @providers.DeepSeekProvider(api_key="offline").new_llm(
+    "deepseek-v4-flash",
   )
   let message = llm.generate(
     context,

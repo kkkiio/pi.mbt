@@ -16,8 +16,8 @@ globalThis.fetch = async (url, options) => {
   assert.equal(body.input.length, 1);
   const content = body.input[0].content;
   // The prompt is a positional message; @pixel.png and @note.txt became <file>
-  // references plus one image attachment. DeepSeek has no vision input, so
-  // transform_messages downgraded the image block to pi's placeholder text.
+  // references plus one image attachment. deepseek-v4-flash (v4.1) is
+  // vision-capable, so the image reached the wire as a data-URL input_image.
   assert.equal(content.length, 2);
   assert.equal(content[0].type, "input_text");
   assert.match(
@@ -25,8 +25,10 @@ globalThis.fetch = async (url, options) => {
     /^<file name="[^"]*pixel\.png"><\/file>\n<file name="[^"]*note\.txt">\nhello from cram\n\n<\/file>\ndescribe-this$/,
   );
   assert.deepEqual(content[1], {
-    type: "input_text",
-    text: "(image omitted: model does not support images)",
+    type: "input_image",
+    detail: "auto",
+    image_url:
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   });
   const events = [
     ["response.created", { response: { status: "in_progress" } }],
