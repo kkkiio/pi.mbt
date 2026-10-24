@@ -32,6 +32,9 @@ pub(open) trait VmEvents {
 pub(open) trait VmChannel {
   /// 向 VM 投递一条宿主消息(目前是工具结果应答)
   fn post(Self, HostToVmMessage) -> Unit
+  /// 驱动 VM→宿主的消息泵,直到传输结束(VM 退出/对端关闭)。
+  /// 自带异步传输的实现(worker 消息回调)返回即可。
+  async fn pump(Self) -> Unit
   /// 请求 VM 停止;每次执行只调一次,可在 VM 真正退出前返回
   async fn stop(Self) -> Unit
 }
@@ -288,6 +291,8 @@ async fn Execution::run(self : Execution) -> CodemodeResult {
         channel.post(message)
       }
       self.unsent.clear()
+      // 需要泵的实现(native 管道读)在本 task 里跑到底;js worker 立即返回
+      channel.pump()
     })
     // deadline 定时器与 abort watcher(对应 pi setTimeout + signal 监听)。
     group.spawn_bg(no_wait=true, async fn() {

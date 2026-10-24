@@ -3,15 +3,30 @@ import {
   "KKKIIO/pi/sdk/tools",
   "moonbitlang/async",
   "moonbitlang/async/aqueue",
+  "moonbitlang/async/pipe",
+  "moonbitlang/async/types",
   "moonbitlang/core/encoding/utf8",
   "moonbitlang/core/json",
 }
 
+// pipe/types 只被 vm_native.mbt 用,js target 下报 unused_package(29)。
+
+warnings = "-29"
+
 options(
+  "native-stub": [
+    "vm_worker.c",
+    "vendor/quickjs/dtoa.c",
+    "vendor/quickjs/libregexp.c",
+    "vendor/quickjs/libunicode.c",
+    "vendor/quickjs/quickjs.c",
+  ],
+  "stub-cc-flags": "-D_GNU_SOURCE -DQUICKJS_NG_BUILD -funsigned-char -pthread",
   targets: {
     "vm_js.mbt": [ "js" ],
     "vm_native.mbt": [ "native" ],
     "e2e_js_test.mbt": [ "js" ],
+    "e2e_native_test.mbt": [ "native" ],
   },
 )
 

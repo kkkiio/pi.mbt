@@ -251,6 +251,7 @@ pub type VmLauncher = async (VmStartData, &VmEvents) -> &VmChannel
 // Traits
 pub(open) trait VmChannel {
   fn post(Self, HostToVmMessage) -> Unit
+  async fn pump(Self) -> Unit
   async fn stop(Self) -> Unit
 }
 

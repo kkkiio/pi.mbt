@@ -16,6 +16,11 @@ impl @codemode.VmChannel for FakeChannel with fn post(self, message) {
 }
 
 ///|
+impl @codemode.VmChannel for FakeChannel with fn pump(self) {
+  ignore(self)
+}
+
+///|
 impl @codemode.VmChannel for FakeChannel with fn stop(self) {
   self.stopped = true
 }
