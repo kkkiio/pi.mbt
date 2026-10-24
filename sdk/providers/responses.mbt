@@ -1,11 +1,17 @@
 ///|
-fn encode_responses_input(context : @agent_loop.Context) -> Array[Json] raise {
+/// Encode the replay-safe input array for a Responses request: the transcript
+/// normalized by `transform_messages` (which downgrades image blocks when
+/// `supports_images` is false) mapped to Responses input items.
+fn encode_responses_input(
+  context : @agent_loop.Context,
+  supports_images~ : Bool,
+) -> Array[Json] raise {
   let input : Array[Json] = []
   let custom_call_ids : Set[String] = Set([])
   // Replay normalization: drop errored/aborted assistant turns and answer any
   // tool call the transcript never answered, so a partial turn can neither be
   // replayed nor leave a dangling `function_call` (see `transform_messages`).
-  for message in transform_messages(context.messages) {
+  for message in transform_messages(context.messages, supports_images~) {
     match message {
       User({ content: contents, .. }) =>
         input.push({
@@ -14,7 +20,13 @@ fn encode_responses_input(context : @agent_loop.Context) -> Array[Json] raise {
             for content in contents => {
               match content {
                 Text(text) => ({ "type": "input_text", "text": text } : Json)
-                Image(_) => (fail("image input not supported") : Json)
+                Image(data~, mime_type~) =>
+                  (
+                    {
+                      "type": "input_image",
+                      "detail": "auto",
+                      "image_url": "data:\{mime_type};base64,\{data}",
+                    } : Json)
               }
             }
           ],
@@ -96,7 +108,13 @@ fn encode_responses_input(context : @agent_loop.Context) -> Array[Json] raise {
             for content in result.content => {
               match content {
                 Text(text) => ({ "type": "input_text", "text": text } : Json)
-                Image(_) => (fail("image input not supported") : Json)
+                Image(data~, mime_type~) =>
+                  (
+                    {
+                      "type": "input_image",
+                      "detail": "auto",
+                      "image_url": "data:\{mime_type};base64,\{data}",
+                    } : Json)
               }
             }
           ],

@@ -59,9 +59,12 @@ pub impl ToJson for AgentMessage with fn to_json(self : AgentMessage) -> Json {
 pub extend AgentMessage with ToJson::{to_json}
 
 ///|
+/// A content block of a user or tool result message. `Image` mirrors pi's
+/// `ImageContent`: `data` holds the base64-encoded image bytes and
+/// `mime_type` the media type.
 pub(all) enum InputMessageContent {
   Text(String)
-  Image(Bytes)
+  Image(data~ : String, mime_type~ : String)
 }
 
 ///|
@@ -91,8 +94,12 @@ pub impl ToJson for InputMessageContent with fn to_json(
 ) -> Json {
   match self {
     Text(text) => Json::object({ "type": Json("text"), "text": Json(text) })
-    Image(bytes) =>
-      Json::object({ "type": Json("image"), "length": Json(bytes.length()) })
+    Image(data~, mime_type~) =>
+      Json::object({
+        "type": Json("image"),
+        "data": Json(data),
+        "mimeType": Json(mime_type),
+      })
   }
 }
 

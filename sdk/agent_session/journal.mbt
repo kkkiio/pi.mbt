@@ -417,6 +417,8 @@ fn parse_input_content(
 ) -> @agent_loop.InputMessageContent raise @json.JsonDecodeError {
   match json {
     { "type": "text", "text": String(text), .. } => Text(text)
+    { "type": "image", "data": String(data), "mimeType": String(mime_type), .. } =>
+      Image(data~, mime_type~)
     _ => decode_error(path, "InputMessageContent: invalid shape")
   }
 }

@@ -27,6 +27,8 @@ pub fn current_working_directory_system_prompt(String) -> String
 
 pub fn cwd_system_prompt_contributor(cwd~ : String) -> (ArrayView[String]) -> String
 
+pub fn detect_supported_image_mime_type(BytesView) -> String?
+
 pub fn discover_skills(String) -> Array[Skill]
 
 pub fn escape(String) -> String
@@ -60,6 +62,8 @@ pub fn parse_skill_block(String) -> SkillInvocation?
 pub fn path_exists(String) -> Bool
 
 pub fn pick_session(ArrayView[String], String) -> SessionPick
+
+pub fn process_file_arguments(cwd~ : String, ArrayView[String]) -> ProcessedFiles raise FsError
 
 pub fn project_context_system_prompt(ArrayView[ProjectContextFile]) -> String
 
@@ -107,6 +111,14 @@ pub fn FsError::to_string(Self) -> String
 pub impl Show for FsError
 
 // Types and methods
+pub struct AttachedImage {
+  data : String
+  mime_type : String
+} derive(Eq, @debug.Debug)
+pub fn AttachedImage::equal(Self, Self) -> Bool
+pub fn AttachedImage::not_equal(Self, Self) -> Bool
+pub fn AttachedImage::to_repr(Self) -> @debug.Repr
+
 pub(all) struct BashExecParams {
   command : String
   cwd : String
@@ -201,6 +213,14 @@ pub fn OutputSnapshot::not_equal(Self, Self) -> Bool
 pub fn OutputSnapshot::to_json(Self) -> Json
 pub fn OutputSnapshot::to_repr(Self) -> @debug.Repr
 pub impl ToJson for OutputSnapshot
+
+pub struct ProcessedFiles {
+  text : String
+  images : Array[AttachedImage]
+} derive(Eq, @debug.Debug)
+pub fn ProcessedFiles::equal(Self, Self) -> Bool
+pub fn ProcessedFiles::not_equal(Self, Self) -> Bool
+pub fn ProcessedFiles::to_repr(Self) -> @debug.Repr
 
 pub struct ProjectContextFile {
   path : String

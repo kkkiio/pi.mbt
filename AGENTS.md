@@ -30,7 +30,7 @@
 ├── sdk/                      # 库代码(agent 组装与 provider 集成)
 │   ├── agent_loop/           # agent 事件循环与消息类型
 │   ├── agent_session/        # 会话、journal、listener、tool registry
-│   ├── coding_agent/         # agent 组装、system prompt、bash 工具、输出累加
+│   ├── coding_agent/         # agent 组装、system prompt、bash 工具、@file 附件、输出累加
 │   ├── providers/            # LLM provider
 │   │   └── faux/             # 脚本化假 provider(测试基建)
 │   └── tools/                # 工具定义
@@ -99,3 +99,10 @@ just eval
 # 或者手动设置 key
 DEEPSEEK_API_KEY=sk-... moon cram test --work-directory . tests/live
 ```
+
+### PR Review
+
+Github PR 配置了 codex review (on pr).
+新提交的 PR 可以 watch [codex review check](.github/workflows/codex-review-check.yml) 来等待 review 结果.
+如果有 review 意见, 可以根据意见修复, 推送后 `@codex review` 重新 review.
+如果 review 超过 3 次仍未通过, 可能是 PR 方向有误, 或者是 codex 理解不对, 停下并联系项目维护者沟通.

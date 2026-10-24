@@ -250,7 +250,15 @@ async test "resumed same-name tool calls retain their live output pairing" {
   app.reset_transcript()
   host.attach(app)
   app.submit("go")
-  host.prompt(app.take_submission(), app)
+  host.prompt(
+    [
+      @agent_loop.UserMessage::{
+        content: [@agent_loop.InputMessageContent::Text(app.take_submission())],
+        timestamp: @env.now(),
+      },
+    ],
+    app,
+  )
   let live = render_rows(app.transcript, 60)
     .map(row => row.trim().to_owned())
     .filter(row => !row.is_empty() && !row.has_prefix("Took "))

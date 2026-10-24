@@ -35,14 +35,36 @@ async fn main {
           about="thinking effort level: low, high (default), or max",
         ),
       ],
+      positionals=[
+        PositionArg(
+          "args",
+          num_args=@argparse.ValueRange(lower=0),
+          about="prompt texts and @file attachments",
+        ),
+      ],
     ),
     env=@env.get_env_vars(),
   ) catch {
     err => arg_error("\{err}")
   }
-  let prompts = match matches.values {
+  let print_values = match matches.values {
     { "print": prompts, .. } => prompts
     _ => []
+  }
+  // pi 的位置参数:`@path` 进 fileArgs,其余是 message(args.ts)。`-p` 值在
+  // 位置参数消息之前(argparse 不保留交错顺序)。
+  let prompts : Array[String] = print_values.copy()
+  let file_args : Array[String] = []
+  match matches.values {
+    { "args": args, .. } =>
+      for arg in args {
+        if arg.has_prefix("@") {
+          file_args.push(arg[1:].to_owned())
+        } else {
+          prompts.push(arg)
+        }
+      }
+    _ => ()
   }
   let mode = match matches.values {
     { "mode": [m, ..], .. } =>
@@ -54,10 +76,12 @@ async fn main {
       }
     _ => Text
   }
-  let interactive = prompts.length() == 0 &&
+  // 交互与否只看 `-p`(对应 pi 的 --print flag):位置参数在有 TTY 时是 TUI
+  // 的 initial messages,不是 print 触发器。
+  let interactive = print_values.length() == 0 &&
     @tui_app.stdin_is_tty() &&
     @tui_app.stdout_is_tty()
-  if !interactive && prompts.length() == 0 {
+  if !interactive && prompts.length() == 0 && file_args.length() == 0 {
     fatal(
       "Error: no prompt (pass -p <prompt>, or run in a terminal for the TUI)",
     )
@@ -96,6 +120,42 @@ async fn main {
   }
   let llm = deepseek.new_llm("deepseek-v4-flash", thinking~)
   let cwd = @env.current_dir().unwrap()
+  // @file 只作用于首条消息(pi `processFileArguments` + `buildInitialMessage`);
+  // 这里解析失败要在 TUI/会话副作用之前报错。
+  let attached = @coding_agent.process_file_arguments(cwd~, file_args) catch {
+    err => fatal("Error: \{err}")
+  }
+  // 首条消息 = <file> 文本块 + 第一条提示词 + 图片附件;文件全部被跳过时
+  // (空文件)没有可挂的消息,附件随之丢弃(同 pi 不发空 initial message)。
+  let messages : Array[@agent_loop.UserMessage] = []
+  if prompts.length() > 0 || attached.text != "" {
+    let content : Array[@agent_loop.InputMessageContent] = [
+      @agent_loop.InputMessageContent::Text(
+        attached.text + prompts.get(0).unwrap_or(""),
+      ),
+    ]
+    for image in attached.images {
+      content.push(
+        @agent_loop.InputMessageContent::Image(
+          data=image.data,
+          mime_type=image.mime_type,
+        ),
+      )
+    }
+    messages.push({ content, timestamp: @env.now(), })
+    // prompts 可能为空(纯 @file):切片走 clamped_view,越界返回空 view。
+    for prompt in prompts[1:] {
+      messages.push({
+        content: [@agent_loop.InputMessageContent::Text(prompt)],
+        timestamp: @env.now(),
+      })
+    }
+  }
+  if !interactive && messages.is_empty() {
+    fatal(
+      "Error: no prompt (pass -p <prompt>, or run in a terminal for the TUI)",
+    )
+  }
   let session_dir = if no_session {
     None
   } else {
@@ -150,6 +210,7 @@ async fn main {
       thinking,
       session_dir,
       resume_path~,
+      initial=messages,
     ) catch {
       err => fatal("Error: \{clean_error_message("\{err}")}")
     }
@@ -214,12 +275,7 @@ async fn main {
       }
     })
   }
-  session.prompt(
-    prompts.map(p => @agent_loop.UserMessage::{
-      content: [@agent_loop.InputMessageContent::Text(p)],
-      timestamp: @env.now(),
-    }),
-  )
+  session.prompt(messages)
   if mode is Text {
     guard last_message is Some(Assistant({ content: [_, ..] as reply, .. })) else {
       fatal("no reply from agent")

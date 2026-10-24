@@ -562,3 +562,39 @@ async test "a context_edit content replacement is rejected on read" {
   @coding_agent.remove_file(path)
   @coding_agent.remove_dir(dir)
 }
+
+///|
+/// A session containing an image must resume: a stored user image block reads
+/// back with `data` and `mimeType` intact (before the image journal branch a
+/// resume failed with a decode error).
+async test "a user image entry survives a journal round trip" {
+  let temp_dir = @coding_agent.create_temp_dir("pim-jsonl-image-")
+  let path = "\{temp_dir}/journal.jsonl"
+  @coding_agent.write_bytes_file(
+    path, b"{\"type\":\"session\",\"version\":3,\"id\":\"hdr\",\"timestamp\":\"1970-01-01T00:00:00.001Z\",\"cwd\":\"/tmp\"}\n{\"id\":\"e1\",\"parentId\":null,\"timestamp\":\"1970-01-01T00:00:00.002Z\",\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"image\",\"data\":\"aGVsbG8=\",\"mimeType\":\"image/png\"}],\"timestamp\":1}}\n",
+  )
+  let entries = @coding_agent.fetch_entries(path)
+  guard entries
+    is [
+      {
+        content: @agent_session.SessionEntryContent::Message(
+          @agent_loop.AgentMessage::User(user)
+        ),
+        ..
+      },
+    ] else {
+    abort("expected one user message entry")
+  }
+  guard user.content
+    is [@agent_loop.InputMessageContent::Image(data~, mime_type~)] else {
+    abort("expected one image block")
+  }
+  inspect(data, content="aGVsbG8=")
+  inspect(mime_type, content="image/png")
+  // Re-serialization keeps pi's ImageContent wire shape.
+  json_inspect(user.content, content=[
+    { "type": "image", "data": "aGVsbG8=", "mimeType": "image/png" },
+  ])
+  @coding_agent.remove_file(path)
+  @coding_agent.remove_dir(temp_dir)
+}

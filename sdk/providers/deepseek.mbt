@@ -57,11 +57,42 @@ pub impl LLMProvider for DeepSeekProvider with fn new_llm(
   model_id,
   thinking~ : String = "high",
 ) {
-  DeepSeekResponsesAPILLM(self.api_key, model_id~, thinking~)
+  let model = DeepSeekModel::of(model_id)
+  DeepSeekResponsesAPILLM(
+    self.api_key,
+    model_id~,
+    thinking~,
+    supports_images=model.supports_images(),
+  )
 }
 
 ///|
 pub extend DeepSeekProvider with LLMProvider::{new_llm}
+
+///|
+/// DeepSeek 模型能力表,按 API model id 查;未识别的 model id 回退 `Unknown`
+/// (按无视觉输入处理 —— image 块在编码前降级为占位文本)。
+priv enum DeepSeekModel {
+  /// deepseek-v4.1-flash(API id `deepseek-v4-flash`):支持图片输入。
+  V4Flash
+  Unknown
+}
+
+///|
+fn DeepSeekModel::of(model_id : String) -> DeepSeekModel {
+  match model_id {
+    "deepseek-v4-flash" => V4Flash
+    _ => Unknown
+  }
+}
+
+///|
+fn DeepSeekModel::supports_images(self : DeepSeekModel) -> Bool {
+  match self {
+    V4Flash => true
+    Unknown => false
+  }
+}
 
 ///|
 struct DeepSeekResponsesAPILLM {
@@ -69,6 +100,10 @@ struct DeepSeekResponsesAPILLM {
   model_id : String
   /// DeepSeek thinking effort: low / high / max.
   thinking : String
+  /// Whether the model accepts image input; for text-input models the
+  /// transcript's image blocks are downgraded to placeholder text before
+  /// encoding (see `transform_messages`).
+  supports_images : Bool
 }
 
 ///|
@@ -76,8 +111,9 @@ pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(
   api_key : String,
   model_id~ : String = "deepseek-v4-flash",
   thinking~ : String = "high",
+  supports_images~ : Bool = false,
 ) -> DeepSeekResponsesAPILLM {
-  { api_key, model_id, thinking, }
+  { api_key, model_id, thinking, supports_images, }
 }
 
 ///|
@@ -90,7 +126,10 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
   abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
-  let input = encode_responses_input(context)
+  let input = encode_responses_input(
+    context,
+    supports_images=self.supports_images,
+  )
   let custom_tool_input_properties = Map([])
   let tools : Array[Json] = []
   for tool in context.tools {

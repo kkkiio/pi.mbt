@@ -11,6 +11,8 @@ const TICK_INTERVAL_MS : Int32 = 80
 ///
 /// `session_dir` 为 `None` 时用内存 journal;否则每个会话落一个 JSONL 文件
 /// (文件在第一次真正写入时才创建)。`resume_path` 不为空时启动即载入该会话。
+/// `initial` 是启动后立即发送的首批消息(对齐 pi 的 initialMessage /
+/// initialMessages:`@file` 附件与位置参数提示词从这里进 TUI)。
 pub async fn run(
   llm : &@agent_loop.LLM,
   model : String,
@@ -18,6 +20,7 @@ pub async fn run(
   thinking : String,
   session_dir : String?,
   resume_path~ : String? = None,
+  initial~ : Array[@agent_loop.UserMessage] = [],
 ) -> Unit {
   // 先建会话宿主(会创建 session 目录,可能抛 FsError),再碰终端:终端
   // 副作用只在 app.start() 里发生,这之前失败不需要恢复终端。
@@ -44,6 +47,17 @@ pub async fn run(
       }
     })
     group.spawn_bg(async fn() {
+      if initial.length() > 0 {
+        for message in initial {
+          for block in message.content {
+            match block {
+              Text(text) => app.replay_user(text)
+              Image(..) => app.replay_user("[image]")
+            }
+          }
+        }
+        host.prompt(initial, app)
+      }
       while !app.is_shutting_down() {
         let text = app.take_submission()
         if app.is_shutting_down() {
@@ -61,7 +75,16 @@ pub async fn run(
             let rest = command[8:]
             host.resume_session(rest.trim().to_owned(), app)
           }
-          _ => host.prompt(text, app)
+          _ =>
+            host.prompt(
+              [
+                @agent_loop.UserMessage::{
+                  content: [@agent_loop.InputMessageContent::Text(text)],
+                  timestamp: @env.now(),
+                },
+              ],
+              app,
+            )
         }
       }
     })

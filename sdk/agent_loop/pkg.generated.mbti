@@ -111,7 +111,7 @@ pub(all) enum GrammarFormat {
 
 pub(all) enum InputMessageContent {
   Text(String)
-  Image(Bytes)
+  Image(data~ : String, mime_type~ : String)
 }
 pub fn InputMessageContent::to_json(Self) -> Json
 pub impl ToJson for InputMessageContent

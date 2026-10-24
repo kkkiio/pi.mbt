@@ -86,6 +86,7 @@ async test "orphaned tool call gets a synthetic error result" {
         stop_reason=@agent_loop.StopReason::ToolUse,
       ),
     ],
+    supports_images=true,
     now=tm_now,
   )
   json_inspect(result, content=[
@@ -141,6 +142,7 @@ async test "only unanswered tool calls get synthetic results" {
       ),
       tm_result("call-1", "read", "done"),
     ],
+    supports_images=true,
     now=tm_now,
   )
   json_inspect(result, content=[
@@ -209,6 +211,7 @@ async test "errored and aborted assistant messages are dropped" {
         stop_reason=@agent_loop.StopReason::Stop,
       ),
     ],
+    supports_images=true,
     now=tm_now,
   )
   json_inspect(result, content=[
@@ -259,6 +262,7 @@ async test "a dropped message does not owe a synthetic result" {
         stop_reason=@agent_loop.StopReason::Stop,
       ),
     ],
+    supports_images=true,
     now=tm_now,
   )
   json_inspect(result, content=[
@@ -307,6 +311,7 @@ async test "synthetic result is flushed before the next assistant message" {
         stop_reason=@agent_loop.StopReason::Stop,
       ),
     ],
+    supports_images=true,
     now=tm_now,
   )
   json_inspect(result.map(tm_role), content=[
@@ -326,9 +331,146 @@ async test "synthetic result is flushed before the next user message" {
       ),
       tm_user("interrupting question"),
     ],
+    supports_images=true,
     now=tm_now,
   )
   json_inspect(result.map(tm_role), content=[
     "user", "assistant", "toolResult", "user",
+  ])
+}
+
+///|
+fn tm_image() -> @agent_loop.InputMessageContent {
+  @agent_loop.InputMessageContent::Image(data="aGVsbG8=", mime_type="image/png")
+}
+
+///|
+/// A non-vision model gets pi's `NON_VISION_USER_IMAGE_PLACEHOLDER` in place
+/// of user image blocks; a run of consecutive images collapses into one.
+async test "images in a user message downgrade to one placeholder" {
+  let result = @providers.transform_messages(
+    [
+      @agent_loop.AgentMessage::User({
+        content: [
+          @agent_loop.InputMessageContent::Text("look"),
+          tm_image(),
+          tm_image(),
+          @agent_loop.InputMessageContent::Text("what is it"),
+        ],
+        timestamp: TM_TIMESTAMP,
+      }),
+    ],
+    supports_images=false,
+    now=tm_now,
+  )
+  json_inspect(result, content=[
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "look" },
+        {
+          "type": "text",
+          "text": "(image omitted: model does not support images)",
+        },
+        { "type": "text", "text": "what is it" },
+      ],
+      "timestamp": 1786903823973,
+    },
+  ])
+}
+
+///|
+/// pi's `replaceImagesWithPlaceholder` keeps `previousWasPlaceholder` set when
+/// a text block already reads as the placeholder, so an image after it adds
+/// no second placeholder.
+async test "an image after existing placeholder text adds no second placeholder" {
+  let result = @providers.transform_messages(
+    [
+      @agent_loop.AgentMessage::User({
+        content: [
+          @agent_loop.InputMessageContent::Text(
+            "(image omitted: model does not support images)",
+          ),
+          tm_image(),
+        ],
+        timestamp: TM_TIMESTAMP,
+      }),
+    ],
+    supports_images=false,
+    now=tm_now,
+  )
+  json_inspect(result, content=[
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "(image omitted: model does not support images)",
+        },
+      ],
+      "timestamp": 1786903823973,
+    },
+  ])
+}
+
+///|
+/// Tool results use pi's tool-specific placeholder text instead.
+async test "images in a tool result downgrade to the tool placeholder" {
+  let result = @providers.transform_messages(
+    [
+      @agent_loop.AgentMessage::ToolResult({
+        tool_call_id: "call-1",
+        tool_name: "screenshot",
+        content: [tm_image(), @agent_loop.InputMessageContent::Text("done")],
+        details: None,
+        usage: None,
+        is_error: false,
+        timestamp: TM_TIMESTAMP,
+      }),
+    ],
+    supports_images=false,
+    now=tm_now,
+  )
+  json_inspect(result, content=[
+    {
+      "role": "toolResult",
+      "toolCallId": "call-1",
+      "toolName": "screenshot",
+      "content": [
+        {
+          "type": "text",
+          "text": "(tool image omitted: model does not support images)",
+        },
+        { "type": "text", "text": "done" },
+      ],
+      "isError": false,
+      "timestamp": 1786903823973,
+    },
+  ])
+}
+
+///|
+/// A vision model keeps image blocks untouched, serialized in pi's
+/// `ImageContent` shape.
+async test "supports_images keeps image blocks" {
+  let result = @providers.transform_messages(
+    [
+      @agent_loop.AgentMessage::User({
+        content: [@agent_loop.InputMessageContent::Text("look"), tm_image()],
+        timestamp: TM_TIMESTAMP,
+      }),
+    ],
+    supports_images=true,
+    now=tm_now,
+  )
+  json_inspect(result, content=[
+    {
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "look" },
+        { "type": "image", "data": "aGVsbG8=", "mimeType": "image/png" },
+      ],
+      "timestamp": 1786903823973,
+    },
   ])
 }

@@ -9,3 +9,4 @@ __pycache__/
 AGENTS.local.md
 dist/
 node_modules/
+.scratch/
