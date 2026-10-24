@@ -12,9 +12,31 @@ let fetch_gate : @async.Semaphore = @async.Semaphore::Semaphore(1)
 ///|
 extern "js" fn install_fetch(mode : String) -> FetchFixture =
   #| (mode) => {
-  #|   const fixture = { original: globalThis.fetch, calls: 0, aborted: false, closed: false };
+  #|   const fixture = { original: globalThis.fetch, calls: 0, aborted: false, closed: false, body: null };
   #|   globalThis.fetch = (_url, options) => {
   #|     fixture.calls++;
+  #|     fixture.body = new TextDecoder().decode(options.body);
+  #|     if (mode === "capture") {
+  #|       const message = {
+  #|         type: "message", id: "msg_capture", role: "assistant", status: "completed",
+  #|         content: [{ type: "output_text", text: "ok", annotations: [] }],
+  #|       };
+  #|       const events = [
+  #|         ["response.created", { response: { status: "in_progress" } }],
+  #|         ["response.output_item.added", {
+  #|           output_index: 0,
+  #|           item: { ...message, content: [], status: "in_progress" },
+  #|         }],
+  #|         ["response.output_text.delta", { output_index: 0, delta: "ok" }],
+  #|         ["response.output_item.done", { output_index: 0, item: message }],
+  #|         ["response.completed", { response: {
+  #|           status: "completed", output: [message], error: null, incomplete_details: null,
+  #|           usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+  #|         } }],
+  #|       ];
+  #|       const sse = events.map(([t, d]) => `event: ${t}\ndata: ${JSON.stringify({ type: t, ...d })}\n\n`).join("");
+  #|       return Promise.resolve(new Response(sse, { headers: { "Content-Type": "text/event-stream" } }));
+  #|     }
   #|     if (mode === "headers") {
   #|       return new Promise((_resolve, reject) => {
   #|         options.signal.addEventListener("abort", () => {
@@ -60,6 +82,10 @@ extern "js" fn FetchFixture::aborted(self : FetchFixture) -> Bool =
 ///|
 extern "js" fn FetchFixture::closed(self : FetchFixture) -> Bool =
   #| (fixture) => fixture.closed
+
+///|
+extern "js" fn FetchFixture::request_body(self : FetchFixture) -> String =
+  #| (fixture) => fixture.body
 
 ///|
 fn empty_context() -> @agent_loop.Context {
@@ -145,4 +171,127 @@ async test "provider abort retains streamed text and closes response" {
     [Text(text, ..)] => assert_eq(text, "partial answer")
     _ => fail("aborted provider lost its partial text")
   }
+}
+
+///|
+/// pi's `input_image` encoding (`openai-responses-shared.ts`) through the
+/// public LLM: a vision model gets `detail:"auto"` data-URL items in both user
+/// message content and tool result output.
+async test "image blocks encode as input_image for vision models" {
+  fetch_gate.acquire()
+  defer fetch_gate.release()
+  let fixture = install_fetch("capture")
+  defer fixture.restore()
+  let image = @agent_loop.InputMessageContent::Image(
+    data="aGVsbG8=",
+    mime_type="image/png",
+  )
+  let context : @agent_loop.Context = {
+    system_prompt: "sys",
+    messages: [
+      @agent_loop.AgentMessage::User({
+        content: [@agent_loop.InputMessageContent::Text("look"), image],
+        timestamp: 1,
+      }),
+      @agent_loop.AgentMessage::ToolResult({
+        tool_call_id: "call-1",
+        tool_name: "screenshot",
+        content: [@agent_loop.InputMessageContent::Text("ok"), image],
+        details: None,
+        usage: None,
+        is_error: false,
+        timestamp: 2,
+      }),
+    ],
+    tools: [],
+  }
+  let llm = @providers.DeepSeekResponsesAPILLM(
+    "offline",
+    model_id="vision-test",
+    supports_images=true,
+  )
+  let message = llm.generate(
+    context,
+    sink=_ => (),
+    abort=@agent_loop.AbortController::new().signal(),
+  )
+  assert_true(message.stop_reason is @agent_loop.StopReason::Stop)
+  assert_eq(fixture.calls(), 1)
+  guard @json.parse(fixture.request_body()) is { "input": input, .. } else {
+    abort("request carried no input")
+  }
+  json_inspect(input, content=[
+    {
+      "role": "user",
+      "content": [
+        { "type": "input_text", "text": "look" },
+        {
+          "type": "input_image",
+          "detail": "auto",
+          "image_url": "data:image/png;base64,aGVsbG8=",
+        },
+      ],
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call-1",
+      "output": [
+        { "type": "input_text", "text": "ok" },
+        {
+          "type": "input_image",
+          "detail": "auto",
+          "image_url": "data:image/png;base64,aGVsbG8=",
+        },
+      ],
+    },
+  ])
+}
+
+///|
+/// A non-vision model instead receives pi's placeholder `input_text` in place
+/// of the image block (see `transform_messages`).
+async test "image blocks downgrade to placeholder for non-vision models" {
+  fetch_gate.acquire()
+  defer fetch_gate.release()
+  let fixture = install_fetch("capture")
+  defer fixture.restore()
+  let context : @agent_loop.Context = {
+    system_prompt: "sys",
+    messages: [
+      @agent_loop.AgentMessage::User({
+        content: [
+          @agent_loop.InputMessageContent::Text("look"),
+          @agent_loop.InputMessageContent::Image(
+            data="aGVsbG8=",
+            mime_type="image/png",
+          ),
+        ],
+        timestamp: 1,
+      }),
+    ],
+    tools: [],
+  }
+  let llm = @providers.DeepSeekProvider(api_key="offline").new_llm("test-model")
+  let message = llm.generate(
+    context,
+    sink=_ => (),
+    abort=@agent_loop.AbortController::new().signal(),
+  )
+  assert_true(message.stop_reason is @agent_loop.StopReason::Stop)
+  assert_eq(fixture.calls(), 1)
+  guard @json.parse(fixture.request_body()) is { "input": input, .. } else {
+    abort("request carried no input")
+  }
+  json_inspect(input, content=[
+    {
+      "role": "user",
+      "content": [
+        { "type": "input_text", "text": "look" },
+        {
+          "type": "input_text",
+          "text": "(image omitted: model does not support images)",
+        },
+      ],
+    },
+  ])
 }

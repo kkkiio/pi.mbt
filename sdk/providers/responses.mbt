@@ -2,7 +2,7 @@
 /// Encode the replay-safe input array for a Responses request: the transcript
 /// normalized by `transform_messages` (which downgrades image blocks when
 /// `supports_images` is false) mapped to Responses input items.
-pub fn encode_responses_input(
+fn encode_responses_input(
   context : @agent_loop.Context,
   supports_images~ : Bool,
 ) -> Array[Json] raise {

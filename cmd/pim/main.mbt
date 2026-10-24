@@ -143,6 +143,7 @@ async fn main {
       )
     }
     messages.push({ content, timestamp: @env.now(), })
+    // prompts 可能为空(纯 @file):切片走 clamped_view,越界返回空 view。
     for prompt in prompts[1:] {
       messages.push({
         content: [@agent_loop.InputMessageContent::Text(prompt)],

@@ -157,7 +157,7 @@ Error: tests/cram/testdata/auth-empty-key/auth.json: "deepseek" is not an api_ke
 两者都只挂在首条消息上。不存在的路径是单行错误:
 
 ```mooncram {output_stream: stderr}
-$ DEEPSEEK_API_KEY=sk-fake moon run cmd/pim -- --no-session -p hi @missing.png
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-absent DEEPSEEK_API_KEY=sk-fake moon run cmd/pim -- --no-session -p hi @missing.png
 Error: File not found: */missing.png (glob)
 [1]
 ```
