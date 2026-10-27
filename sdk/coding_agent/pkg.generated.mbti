@@ -6,7 +6,6 @@ import {
   "KKKIIO/pi/sdk/agent_session",
   "KKKIIO/pi/sdk/codemode",
   "KKKIIO/pi/sdk/tools",
-  "moonbitlang/async/aqueue",
   "moonbitlang/async/io",
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
@@ -188,10 +187,7 @@ pub async fn LazyFile::write_reader(Self, &@io.Reader) -> Unit
 pub impl @io.Writer for LazyFile
 
 pub struct NdJsonStream {
-  id : Int32
-  send_queue : @aqueue.Queue[Json]
-  recv_queue : @aqueue.Queue[Json]
-  recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
+  // private fields
 }
 pub fn NdJsonStream::close(Self) -> Unit
 pub async fn NdJsonStream::recv(Self) -> Json
@@ -199,12 +195,7 @@ pub async fn NdJsonStream::send(Self, Json) -> Unit
 pub impl @codemode.Vm for NdJsonStream
 
 pub struct NdJsonStreams[R, W] {
-  reader : R
-  writer : W
-  mut next_id : Int32
-  send_queue : @aqueue.Queue[Json]
-  recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
-  mut closed : Bool
+  // private fields
 }
 pub fn[R, W] NdJsonStreams::close(Self[R, W]) -> Unit
 pub fn[R, W] NdJsonStreams::new(R, W) -> Self[R, W]

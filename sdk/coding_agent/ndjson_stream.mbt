@@ -1,17 +1,16 @@
 ///|
 /// Multiplexed `{ "stream_id", "data" }` NDJSON frames over a byte stream —
-/// pim's own wire shape for a codemode remote such as
-/// `scripts/codemode-sidecar.mjs`. `run` pumps the stream; `new_stream`
-/// allocates a `NdJsonStream`, a transparent `@codemode.Vm` for
-/// `Codemode::execute`: `data` payloads pass through untouched — a VM
-/// message, an array batch, or `{ "type": "exit" }` ending the stream.
+/// pim's wire shape toward `scripts/codemode-sidecar.mjs`, which runs
+/// pi-codemode's `serveCodemodeRemote` behind it. `run` pumps the stream;
+/// `new_stream` allocates a `NdJsonStream`, a transparent `@codemode.Vm`
+/// ready for `Codemode::execute`.
 pub struct NdJsonStreams[R, W] {
-  reader : R
-  writer : W
-  mut next_id : Int32
-  send_queue : @aqueue.Queue[Json]
-  recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
-  mut closed : Bool
+  priv reader : R
+  priv writer : W
+  priv mut next_id : Int32
+  priv send_queue : @aqueue.Queue[Json]
+  priv recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
+  priv mut closed : Bool
 }
 
 ///|
@@ -138,16 +137,16 @@ pub fn[R, W] NdJsonStreams::close(self : NdJsonStreams[R, W]) -> Unit {
 }
 
 ///|
-/// One stream of an `NdJsonStreams` pump, transparent as a `@codemode.Vm`:
+/// One stream of an `NdJsonStreams` pump — a transparent `@codemode.Vm`:
 /// `send` wraps `data` in a `{ "stream_id", "data" }` frame; `recv` returns
 /// each `data` payload as-is — a VM message or an array batch — and raises
-/// once the remote ends the execution (`exit` frame), the pump ends, or
-/// `close` runs.
+/// once the remote ends the execution (`exit` frame, EOF, or `close`
+/// running).
 pub struct NdJsonStream {
-  id : Int32
-  send_queue : @aqueue.Queue[Json]
-  recv_queue : @aqueue.Queue[Json]
-  recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
+  priv id : Int32
+  priv send_queue : @aqueue.Queue[Json]
+  priv recv_queue : @aqueue.Queue[Json]
+  priv recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
 }
 
 ///|
