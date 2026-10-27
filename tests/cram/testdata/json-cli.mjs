@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 
 const result = spawnSync("moon", [
-  "run", "cmd/pim", "--", "--no-session", "--mode", "json", "-p", "offline-json",
+  "run", "--target", "js", "cmd/pim", "--", "--no-session", "--mode", "json", "-p", "offline-json",
 ], {
   encoding: "utf8",
   env: {

@@ -1,0 +1,17 @@
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/agent_session",
+  "KKKIIO/pi/sdk/tools",
+  "KKKIIO/pi/sdk/codemode",
+  "moonbitlang/async",
+  "moonbitlang/async/aqueue",
+  "moonbitlang/async/websocket",
+  "moonbitlang/core/json",
+}
+
+import {
+  "moonbitlang/async/http",
+  "moonbitlang/async/socket",
+} for "test"
+
+supported_targets = "+native"

@@ -47,7 +47,7 @@ jobs:
       # Offline suite only: `tests/live` needs DEEPSEEK_API_KEY and is opt-in.
       # `moon cram` does not emit coverage traces, so `just cram` is not run here.
       - name: moon test
-        run: moon test --enable-coverage
+        run: moon test --target js --enable-coverage
 
       - name: coverage report
         run: |

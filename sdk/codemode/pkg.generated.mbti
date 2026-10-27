@@ -1,0 +1,188 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/codemode"
+
+import {
+  "moonbitlang/core/json",
+}
+
+// Values
+pub fn to_codemode_identifier(String) -> String
+
+// Errors
+
+// Types and methods
+pub(all) enum CallOutcome {
+  Resolve(value~ : Json?)
+  Reject(message~ : String, properties~ : Map[String, Json]?)
+}
+
+pub(all) struct CallResponse {
+  id : Int32
+  outcome : CallOutcome
+  seq : Int32?
+  now : Double?
+}
+pub fn CallResponse::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CallResponse::to_json(Self) -> Json
+pub impl ToJson for CallResponse
+pub impl @json.FromJson for CallResponse
+
+type Codemode
+pub fn Codemode::Codemode(async () -> &Vm, tools? : Array[CodemodeTool], globals? : Array[CodemodeTool], timeout_ms? : Int32, memory_limit_bytes? : Double?) -> Self
+pub async fn Codemode::execute(Self, String, store? : Map[String, Json]) -> CodemodeResult
+
+pub(all) struct CodemodeCall {
+  name : String
+  mut status : String
+  mut duration_ms : Int32
+}
+
+pub(all) struct CodemodeDuring {
+  seq : Int32
+  issued : Int32
+} derive(ToJson, @json.FromJson)
+pub fn CodemodeDuring::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodemodeDuring::to_json(Self) -> Json
+
+pub(all) struct CodemodeError {
+  kind : CodemodeErrorKind
+  name : String?
+  message : String
+  stack : String?
+}
+pub fn CodemodeError::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodemodeError::to_json(Self) -> Json
+pub impl ToJson for CodemodeError
+pub impl @json.FromJson for CodemodeError
+
+pub(all) enum CodemodeErrorKind {
+  Script
+  Timeout
+  Aborted
+  Sandbox
+}
+pub fn CodemodeErrorKind::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodemodeErrorKind::to_json(Self) -> Json
+pub impl ToJson for CodemodeErrorKind
+pub impl @json.FromJson for CodemodeErrorKind
+
+pub(all) enum CodemodeOutputItem {
+  Text(text~ : String, console~ : Bool)
+  Image(data~ : String, mimeType~ : String)
+}
+pub fn CodemodeOutputItem::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodemodeOutputItem::to_json(Self) -> Json
+pub impl ToJson for CodemodeOutputItem
+pub impl @json.FromJson for CodemodeOutputItem
+
+pub(all) enum CodemodeResult {
+  Ok(value~ : Json?, output~ : Array[CodemodeOutputItem], calls~ : Array[CodemodeCall], store_writes~ : CodemodeStoreWrites, during~ : CodemodeDuring?)
+  Err(error~ : CodemodeError, output~ : Array[CodemodeOutputItem], calls~ : Array[CodemodeCall], during~ : CodemodeDuring?)
+}
+
+pub(all) struct CodemodeStoreWrites {
+  set : Map[String, Json]
+  delete : Array[String]
+}
+
+pub(all) struct CodemodeTool {
+  name : String
+  js_name : String?
+  description : String
+  input_schema : Json?
+  output_schema : Json?
+  spread : Bool
+  execute : async (Json?) -> Json
+}
+
+pub(all) struct Deterministic {
+  started_at : Double
+  seed : UInt32
+}
+pub fn Deterministic::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn Deterministic::to_json(Self) -> Json
+pub impl ToJson for Deterministic
+pub impl @json.FromJson for Deterministic
+
+pub(all) struct Global {
+  name : String
+  spread : Bool
+} derive(ToJson, @json.FromJson)
+pub fn Global::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn Global::to_json(Self) -> Json
+
+pub(all) enum HostToVmMessage {
+  CallResult(CallResponse)
+  Stop
+  Null
+}
+pub fn HostToVmMessage::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn HostToVmMessage::to_json(Self) -> Json
+pub impl ToJson for HostToVmMessage
+pub impl @json.FromJson for HostToVmMessage
+
+pub(all) struct StartVmRequest {
+  data : VmStartData
+  interrupt_budget : Double?
+}
+pub fn StartVmRequest::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn StartVmRequest::to_json(Self) -> Json
+pub impl ToJson for StartVmRequest
+pub impl @json.FromJson for StartVmRequest
+
+pub(all) struct Tool {
+  name : String
+  js_name : String
+  description : String
+}
+pub fn Tool::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn Tool::to_json(Self) -> Json
+pub impl ToJson for Tool
+pub impl @json.FromJson for Tool
+
+pub(all) struct VmStartData {
+  code : String
+  tools : Array[Tool]
+  globals : Array[Global]
+  memory_limit_bytes : Double?
+  store : Map[String, Json]
+  deterministic : Deterministic?
+}
+pub fn VmStartData::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn VmStartData::to_json(Self) -> Json
+pub impl ToJson for VmStartData
+pub impl @json.FromJson for VmStartData
+
+pub(all) enum VmToHostMessage {
+  Started(fingerprint~ : String)
+  CallTool(id~ : Int32, name~ : String, args~ : Json?)
+  CallGlobal(id~ : Int32, name~ : String, args~ : Json?)
+  Output(item~ : CodemodeOutputItem)
+  DoneOk(value~ : Json?, writes~ : Array[WriteItem], during~ : CodemodeDuring?)
+  DoneErr(error~ : Json, during~ : CodemodeDuring?)
+  Crash(message~ : String)
+  Idle(seq~ : Int32, issued~ : Int32)
+  Failure(error~ : CodemodeError)
+}
+pub fn VmToHostMessage::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn VmToHostMessage::to_json(Self) -> Json
+pub impl ToJson for VmToHostMessage
+pub impl @json.FromJson for VmToHostMessage
+
+pub(all) enum WriteItem {
+  Set(key~ : String, value~ : Json)
+  Delete(key~ : String)
+}
+pub fn WriteItem::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn WriteItem::to_json(Self) -> Json
+pub impl ToJson for WriteItem
+pub impl @json.FromJson for WriteItem
+
+// Type aliases
+
+// Traits
+pub(open) trait Vm {
+  async fn send(Self, Json) -> Unit
+  async fn recv(Self) -> Json
+  fn close(Self) -> Unit
+}

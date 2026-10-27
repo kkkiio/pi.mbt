@@ -13,7 +13,7 @@ defaults:
 `pim --help` 把用法输出到 stdout 并以 0 退出:
 
 ```mooncram
-$ moon run cmd/pim -- --help
+$ moon run --target js cmd/pim -- --help
 Usage: pim [options] [args...]
 
 Arguments:
@@ -38,7 +38,7 @@ Options:
 两个参数互斥,这一条在参数阶段就被拒绝 —— 不读凭证、不碰网络:
 
 ```mooncram {output_stream: stderr}
-$ moon run cmd/pim -- --no-session -c -p hi
+$ moon run --target js cmd/pim -- --no-session -c -p hi
 Error: --no-session cannot be combined with --continue/--resume
 [1]
 ```
@@ -46,7 +46,7 @@ Error: --no-session cannot be combined with --continue/--resume
 `-c` 与 `-r` 同理互斥 —— 隐式让其中一个优先会无声忽略用户指定的选择器:
 
 ```mooncram {output_stream: stderr}
-$ moon run cmd/pim -- -c -r xyz -p hi
+$ moon run --target js cmd/pim -- -c -r xyz -p hi
 Error: --continue cannot be combined with --resume
 [1]
 ```
@@ -55,7 +55,7 @@ Error: --continue cannot be combined with --resume
 目录下自然一个会话都没有,所以**不需要新增任何 fixture**:
 
 ```mooncram {output_stream: stderr}
-$ PIM_CONFIG_DIR=tests/cram/testdata/auth-absent DEEPSEEK_API_KEY=sk-fake moon run cmd/pim -- -r xyz -p hi
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-absent DEEPSEEK_API_KEY=sk-fake moon run --target js cmd/pim -- -r xyz -p hi
 Error: no session matches 'xyz'
 [1]
 ```
@@ -68,7 +68,7 @@ Error: no session matches 'xyz'
 按 print 模式处理,而 print 模式必须有提示词 —— 诊断写入 stderr,退出码为 1:
 
 ```mooncram {output_stream: stderr}
-$ moon run cmd/pim --
+$ moon run --target js cmd/pim --
 Error: no prompt (pass -p <prompt>, or run in a terminal for the TUI)
 [1]
 ```
@@ -78,7 +78,7 @@ Error: no prompt (pass -p <prompt>, or run in a terminal for the TUI)
 `--mode` 只支持 text/json(与 pi 一致,rpc 未实现),错误同样是单行诊断:
 
 ```mooncram {output_stream: stderr}
-$ moon run cmd/pim -- --mode rpc -p hi
+$ moon run --target js cmd/pim -- --mode rpc -p hi
 Error: mode 'rpc' is not supported yet
 [1]
 ```
@@ -88,7 +88,7 @@ Error: mode 'rpc' is not supported yet
 `-p` 缺省值由 argparse 拒绝;诊断写入 stderr(丢弃 usage 块),退出码为 1:
 
 ```mooncram {output_stream: stderr}
-$ moon run cmd/pim -- -p
+$ moon run --target js cmd/pim -- -p
 Error: a value is required for '-p' but none was supplied
 [1]
 ```
@@ -96,7 +96,7 @@ Error: a value is required for '-p' but none was supplied
 ## 未知选项
 
 ```mooncram {output_stream: stderr}
-$ moon run cmd/pim -- --bogus
+$ moon run --target js cmd/pim -- --bogus
 Error: unexpected argument '--bogus' found
 [1]
 ```
@@ -107,7 +107,7 @@ Error: unexpected argument '--bogus' found
 诊断写入 stderr,退出码为 1:
 
 ```mooncram {output_stream: stderr}
-$ moon run cmd/pim -- --mode yaml -p hi
+$ moon run --target js cmd/pim -- --mode yaml -p hi
 Error: invalid mode 'yaml' (expected text or json)
 [1]
 ```
@@ -120,7 +120,7 @@ Error: invalid mode 'yaml' (expected text or json)
 目录存在但没有 `auth.json`、`DEEPSEEK_API_KEY` 也没配时失败,退出码 1:
 
 ```mooncram {output_stream: stderr}
-$ PIM_CONFIG_DIR=tests/cram/testdata/auth-absent moon run cmd/pim -- -p hi
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-absent moon run --target js cmd/pim -- -p hi
 Error: no DeepSeek API key (set DEEPSEEK_API_KEY, or add a "deepseek" entry to tests/cram/testdata/auth-absent/auth.json)
 [1]
 ```
@@ -128,7 +128,7 @@ Error: no DeepSeek API key (set DEEPSEEK_API_KEY, or add a "deepseek" entry to t
 `auth.json` 存在但 JSON 损坏时明确报错(不静默降级到环境变量):
 
 ```mooncram {output_stream: stderr}
-$ PIM_CONFIG_DIR=tests/cram/testdata/auth-invalid-json moon run cmd/pim -- -p hi
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-invalid-json moon run --target js cmd/pim -- -p hi
 Error: tests/cram/testdata/auth-invalid-json/auth.json is not valid JSON: Invalid character 'n' at line 1, column 2
 [1]
 ```
@@ -137,7 +137,7 @@ Error: tests/cram/testdata/auth-invalid-json/auth.json is not valid JSON: Invali
 悄悄兜住,用户很难解释“为什么换了 key 没生效”:
 
 ```mooncram {output_stream: stderr}
-$ PIM_CONFIG_DIR=tests/cram/testdata/auth-oauth-credential moon run cmd/pim -- -p hi
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-oauth-credential moon run --target js cmd/pim -- -p hi
 Error: tests/cram/testdata/auth-oauth-credential/auth.json: "deepseek" is not an api_key credential (expected {"type": "api_key", "key": "sk-..."})
 [1]
 ```
@@ -145,7 +145,7 @@ Error: tests/cram/testdata/auth-oauth-credential/auth.json: "deepseek" is not an
 `key` 为空同样不算凭证:
 
 ```mooncram {output_stream: stderr}
-$ PIM_CONFIG_DIR=tests/cram/testdata/auth-empty-key moon run cmd/pim -- -p hi
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-empty-key moon run --target js cmd/pim -- -p hi
 Error: tests/cram/testdata/auth-empty-key/auth.json: "deepseek" is not an api_key credential (expected {"type": "api_key", "key": "sk-..."})
 [1]
 ```
@@ -157,7 +157,7 @@ Error: tests/cram/testdata/auth-empty-key/auth.json: "deepseek" is not an api_ke
 两者都只挂在首条消息上。不存在的路径是单行错误:
 
 ```mooncram {output_stream: stderr}
-$ PIM_CONFIG_DIR=tests/cram/testdata/auth-absent DEEPSEEK_API_KEY=sk-fake moon run cmd/pim -- --no-session -p hi @missing.png
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-absent DEEPSEEK_API_KEY=sk-fake moon run --target js cmd/pim -- --no-session -p hi @missing.png
 Error: File not found: */missing.png (glob)
 [1]
 ```

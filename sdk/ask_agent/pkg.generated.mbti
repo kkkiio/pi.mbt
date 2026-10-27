@@ -1,0 +1,37 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/ask_agent"
+
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/agent_session",
+  "KKKIIO/pi/sdk/codemode",
+  "KKKIIO/pi/sdk/tools",
+}
+
+// Values
+pub fn new_ask_agent_session(&@agent_loop.LLM, system_prompt~ : String, journal? : &@agent_session.SessionJournal, tool_registry~ : @tools.ToolRegistry, active_tools~ : ArrayView[String], finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?, on_generation? : async (@agent_loop.GenerationEvent) -> Unit) -> @agent_session.AgentSession
+
+pub async fn[X] with_ws_streams(url~ : String, async (WsStreams) -> X) -> X
+
+// Errors
+
+// Types and methods
+pub struct WsStream {
+  // private fields
+}
+pub fn WsStream::close(Self) -> Unit
+pub async fn WsStream::recv(Self) -> Json
+pub async fn WsStream::send(Self, Json) -> Unit
+pub impl @codemode.Vm for WsStream
+
+pub struct WsStreams {
+  // private fields
+}
+pub fn WsStreams::close(Self) -> Unit
+pub async fn WsStreams::connect(url~ : String) -> Self
+pub fn WsStreams::new_stream(Self) -> WsStream
+pub async fn WsStreams::run(Self) -> Unit
+
+// Type aliases
+
+// Traits

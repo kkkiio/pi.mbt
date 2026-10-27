@@ -1,0 +1,402 @@
+///|
+struct Codemode {
+  vm_launcher : async () -> &Vm
+  tools : Map[String, CodemodeTool]
+  globals : Map[String, CodemodeTool]
+  timeout_ms : Int32
+  memory_limit_bytes : Double?
+}
+
+///|
+/// Create a new codemode instance.
+pub fn Codemode::Codemode(
+  vm_launcher : async () -> &Vm,
+  tools~ : Array[CodemodeTool] = [],
+  globals~ : Array[CodemodeTool] = [],
+  timeout_ms~ : Int32 = 300000,
+  memory_limit_bytes~ : Double? = Some(256.0 * 1024 * 1024),
+) -> Codemode {
+  Codemode::{
+    vm_launcher,
+    tools: tools.iter().map(tool => (tool.name, tool)) |> Map::from_iter,
+    globals: globals.iter().map(global => (global.name, global))
+    |> Map::from_iter,
+    timeout_ms,
+    memory_limit_bytes,
+  }
+}
+
+///|
+/// pi's `toCodemodeIdentifier`: characters that are not valid in a JavaScript
+/// identifier become `_`; an empty name becomes `_`.
+pub fn to_codemode_identifier(name : String) -> String {
+  let builder = StringBuilder()
+  for c in name.iter() {
+    let valid = if builder.is_empty() {
+      c is ('a'..<='z' | 'A'..<='Z' | '_' | '$')
+    } else {
+      c is ('a'..<='z' | 'A'..<='Z' | '0'..<='9' | '_' | '$')
+    }
+    builder.write_char(if valid { c } else { '_' })
+  }
+  if builder.is_empty() {
+    "_"
+  } else {
+    builder.to_string()
+  }
+}
+
+///|
+/// Run `code` to completion on a fresh VM, answering the script's tool and
+/// global calls from `tools`/`globals` and accumulating its output. `store`
+/// is the `load()` snapshot; writes are reported in the result for the
+/// caller to apply.
+///
+/// The script runs at most `timeout_ms` milliseconds (nonpositive means no
+/// limit); on expiry the VM is sent `stop` and the result is a `Timeout`
+/// error. Cancelling `execute` aborts in-flight calls and closes the VM. A
+/// VM that stops answering before a terminal `done`/`crash`/`failure` frame
+/// produces a `Sandbox` error.
+pub async fn Codemode::execute(
+  self : Codemode,
+  code : String,
+  store~ : Map[String, Json] = Map([]),
+) -> CodemodeResult {
+  let vm = (self.vm_launcher)()
+  defer vm.close()
+  let output : Array[CodemodeOutputItem] = []
+  let calls : Array[CodemodeCall] = []
+  let pending : Map[Int32, PendingCall] = Map([])
+  let timed_out = Ref(false)
+  let sandbox = fn(message : String) -> CodemodeResult {
+    CodemodeResult::Err(
+      error={
+        kind: CodemodeErrorKind::Sandbox,
+        name: None,
+        message,
+        stack: None,
+      },
+      output~,
+      calls~,
+      during=None,
+    )
+  }
+  @async.with_task_group(tg => {
+    if self.timeout_ms > 0 {
+      tg.spawn_bg(no_wait=true, () => {
+        @async.sleep(self.timeout_ms)
+        timed_out.val = true
+        ignore(vm.send(Json(HostToVmMessage::Stop)) catch { _ => () })
+        vm.close()
+      })
+    }
+    vm.send(
+      Json(StartVmRequest::{
+        data: VmStartData::{
+          code,
+          tools: self.tools
+          .values()
+          .map(tool => Tool::{
+            name: tool.name,
+            js_name: tool.js_name.unwrap_or(to_codemode_identifier(tool.name)),
+            description: tool.description,
+          })
+          .collect(),
+          globals: self.globals
+          .values()
+          .map(global => Global::{ name: global.name, spread: global.spread, })
+          .collect(),
+          memory_limit_bytes: self.memory_limit_bytes,
+          store,
+          deterministic: None,
+        },
+        interrupt_budget: None,
+      }),
+    ) catch {
+      _ => ()
+    }
+    let batch : Array[Json] = []
+    let result = while true {
+      if batch.is_empty() {
+        let frame = vm.recv() catch {
+          _ =>
+            break if timed_out.val {
+              CodemodeResult::Err(
+                error={
+                  kind: CodemodeErrorKind::Timeout,
+                  name: None,
+                  message: "Execution timed out after \{self.timeout_ms} ms",
+                  stack: None,
+                },
+                output~,
+                calls~,
+                during=None,
+              )
+            } else {
+              sandbox("Sandbox stream ended before the script settled")
+            }
+        }
+        if frame is Array(messages) {
+          for message in messages {
+            batch.push(message)
+          }
+        } else {
+          batch.push(frame)
+        }
+      }
+      let message : VmToHostMessage = @json.from_json(batch.remove(0)) catch {
+        _ =>
+          break sandbox(
+            "Sandbox bridge broken: the frame is not a valid VM message. The script may have modified built-ins such as a prototype's toJSON.",
+          )
+      }
+      match message {
+        Started(_) => () // TODO: determinstic mode
+        CallTool(id~, name~, args~) => {
+          if pending.contains(id) {
+            break sandbox("duplicate call id \{id}")
+          }
+          self.dispatch_call(
+            tg,
+            vm,
+            pending,
+            calls,
+            is_tool=true,
+            id~,
+            name~,
+            args~,
+          )
+        }
+        CallGlobal(id~, name~, args~) => {
+          if pending.contains(id) {
+            break sandbox("duplicate call id \{id}")
+          }
+          self.dispatch_call(
+            tg,
+            vm,
+            pending,
+            calls,
+            is_tool=false,
+            id~,
+            name~,
+            args~,
+          )
+        }
+        Output(item~) => output.push(item)
+        DoneOk(value~, writes~, during~) => {
+          let store_writes = CodemodeStoreWrites::{ set: {}, delete: [], }
+          for write in writes {
+            match write {
+              WriteItem::Set(key~, value~) => store_writes.set[key] = value
+              WriteItem::Delete(key~) => store_writes.delete.push(key)
+            }
+          }
+          break CodemodeResult::Ok(
+            value~,
+            output~,
+            calls~,
+            store_writes~,
+            during~,
+          )
+        }
+        DoneErr(error~, during~) =>
+          match error {
+            Object(fields) =>
+              match fields.get("message") {
+                Some(String(err_message)) =>
+                  break CodemodeResult::Err(
+                    error={
+                      kind: CodemodeErrorKind::Script,
+                      name: match fields.get("name") {
+                        Some(String(name)) => Some(name)
+                        _ => None
+                      },
+                      message: err_message,
+                      stack: match fields.get("stack") {
+                        Some(String(stack)) => Some(stack)
+                        _ => None
+                      },
+                    },
+                    output~,
+                    calls~,
+                    during~,
+                  )
+                _ => break sandbox("script error is malformed")
+              }
+            _ => break sandbox("script error is not an object")
+          }
+        Crash(message~) => break sandbox(message)
+        Idle(_) => () // TODO: determinstic mode
+        Failure(error~) =>
+          break CodemodeResult::Err(error~, output~, calls~, during=None)
+      }
+    } nobreak {
+      fail("unreachable: the loop only ends through `break`")
+    }
+    // A settled execution drops late tool replies; calls still in flight
+    // stay `cancelled` with a duration measured until now.
+    let finished_at = @async.now()
+    for call in pending.values() {
+      if call.record is Some(record) {
+        record.duration_ms = (finished_at - call.started_at).to_int()
+      }
+    }
+    pending.clear()
+    result
+  })
+}
+
+///|
+pub(open) trait Vm {
+  /// Send one whole JSON message to the peer.
+  async fn send(Self, Json) -> Unit
+  /// Receive the next whole JSON message. A message may be a batch —
+  /// `Json::Array` carries several VM messages in one frame — and the end
+  /// of the stream (peer closed, transport lost) raises an error instead
+  /// of returning a sentinel: in codemode semantics a stream that ends
+  /// before a terminal `done`/`crash`/`failure` is always a failure.
+  async fn recv(Self) -> Json
+  /// Close the vm, unblocking any in-progress `recv`/`send` so the
+  /// client's reader and writer tasks return. Must be idempotent.
+  fn close(Self) -> Unit
+}
+
+///|
+priv struct PendingCall {
+  record : CodemodeCall?
+  started_at : Int64
+}
+
+///|
+/// Record the call and answer it. A missing tool/global gets an immediate
+/// error result; a found one runs in a background task so concurrent script
+/// calls stay concurrent. `pending` tracks in-flight calls, and finishing
+/// the execution clears it so a late reply sends nothing.
+async fn Codemode::dispatch_call(
+  self : Codemode,
+  tg : @async.TaskGroup[CodemodeResult],
+  vm : &Vm,
+  pending : Map[Int32, PendingCall],
+  calls : Array[CodemodeCall],
+  is_tool~ : Bool,
+  id~ : Int32,
+  name~ : String,
+  args~ : Json?,
+) -> Unit {
+  let record : CodemodeCall? = if is_tool {
+    let record = CodemodeCall::{ name, status: "cancelled", duration_ms: 0, }
+    calls.push(record)
+    Some(record)
+  } else {
+    None
+  }
+  pending[id] = PendingCall::{ record, started_at: @async.now(), }
+  let table = if is_tool { self.tools } else { self.globals }
+  guard table.get(name) is Some(tool) else {
+    pending.remove(id)
+    if record is Some(record) {
+      record.status = "error"
+    }
+    ignore(
+      vm.send(
+        Json(
+          HostToVmMessage::CallResult({
+            id,
+            outcome: CallOutcome::Reject(
+              message="Unknown \{if is_tool { "tool" } else { "global" }} \"\{name}\"",
+              properties=None,
+            ),
+            seq: None,
+            now: None,
+          }),
+        ),
+      ) catch {
+        _ => ()
+      },
+    )
+    return
+  }
+  tg.spawn_bg(no_wait=true, () => {
+    let outcome = CallOutcome::Resolve(value=Some((tool.execute)(args))) catch {
+      Failure::Failure(message) =>
+        CallOutcome::Reject(message~, properties=None)
+      error => CallOutcome::Reject(message=error.to_string(), properties=None)
+    }
+    if pending.remove_and_get(id) is Some(call) {
+      if call.record is Some(record) {
+        record.status = match outcome {
+          CallOutcome::Resolve(_) => "ok"
+          CallOutcome::Reject(_) => "error"
+        }
+        record.duration_ms = (@async.now() - call.started_at).to_int()
+      }
+      ignore(
+        vm.send(
+          Json(
+            HostToVmMessage::CallResult({ id, outcome, seq: None, now: None, }),
+          ),
+        ) catch {
+          _ => ()
+        },
+      )
+    }
+  })
+}
+
+///|
+/// A `tools.<name>` or global the script can call. `execute` receives the
+/// call's first argument after a JSON round trip — `None` for `undefined`,
+/// `Some(Null)` for explicit `null` — or the whole arguments array when
+/// `spread`. Its return value is serialized back to the script; raising
+/// rejects the script's promise with the error message.
+pub(all) struct CodemodeTool {
+  name : String
+  /// The identifier the script uses; `to_codemode_identifier(name)` when unset.
+  js_name : String?
+  /// Listed in `ALL_TOOLS` for tools.
+  description : String
+  /// Schema of the single argument, for declaration rendering.
+  input_schema : Json?
+  /// Schema of the resolved value, for declaration rendering.
+  output_schema : Json?
+  /// Globals only: `execute` receives all call arguments as an array.
+  spread : Bool
+  execute : async (Json?) -> Json
+}
+
+///|
+/// pi's `CodemodeResult`. `output` is kept for failed executions too, up to
+/// the failure. `during` is the result the VM was processing when a
+/// script-ended run finished.
+pub(all) enum CodemodeResult {
+  Ok(
+    value~ : Json?,
+    output~ : Array[CodemodeOutputItem],
+    calls~ : Array[CodemodeCall],
+    store_writes~ : CodemodeStoreWrites,
+    during~ : CodemodeDuring?
+  )
+  Err(
+    error~ : CodemodeError,
+    output~ : Array[CodemodeOutputItem],
+    calls~ : Array[CodemodeCall],
+    during~ : CodemodeDuring?
+  )
+}
+
+///|
+/// pi's `CodemodeCall`: one `tools.*` call's entry in the `calls` ledger,
+/// `status` is `"ok"`, `"error"`, or `"cancelled"` (still in flight when the
+/// execution ended).
+pub(all) struct CodemodeCall {
+  name : String
+  mut status : String
+  mut duration_ms : Int32
+}
+
+///|
+/// Keys the script changed with `store()`. Only successful executions report writes.
+pub(all) struct CodemodeStoreWrites {
+  set : Map[String, Json]
+  delete : Array[String]
+}

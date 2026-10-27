@@ -11,7 +11,9 @@
     "dist"
   ],
   "dependencies": {
-    "@earendil-works/pi-tui": "0.87.1"
+    "@earendil-works/pi-codemode": "1.4.0",
+    "@earendil-works/pi-tui": "0.87.1",
+    "ws": "^8.18.0"
   },
   "engines": {
     "node": ">=22.19.0"
