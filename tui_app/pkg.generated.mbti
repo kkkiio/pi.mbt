@@ -262,7 +262,7 @@ pub fn Theme::f_warning(Self, String) -> String
 pub fn Theme::fg(Self, String, String) -> String
 pub fn Theme::load(String) -> Self raise Failure
 pub fn Theme::theme_name(Self) -> String
-pub fn Theme::tool_bg(Self, String?, Bool) -> (String) -> String
+pub fn Theme::tool_bg(Self, Bool, Bool) -> (String) -> String
 
 pub struct ThemeColors {
   text : String

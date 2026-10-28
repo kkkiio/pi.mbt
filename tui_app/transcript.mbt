@@ -276,7 +276,7 @@ pub fn Transcript::push_tool_result(
           is_error,
           details,
           started,
-          started.map(_ => now_ms()),
+          Some(now_ms()),
           id~,
         )
         self.generic_tool_cache.remove(index) |> ignore
@@ -293,7 +293,7 @@ pub fn Transcript::push_tool_result(
       is_error,
       details,
       None,
-      None,
+      Some(now_ms()),
       id~,
     ),
   )
@@ -807,6 +807,7 @@ fn render_tool(
       arguments,
       result,
       is_error,
+      ended is Some(_),
       width,
       expanded~,
     )
@@ -836,11 +837,12 @@ fn render_tool_generic(
   arguments : Json,
   result : String?,
   is_error : Bool,
+  finished : Bool,
   width : Int32,
   expanded~ : Bool,
 ) -> Array[String] {
   let theme = transcript.theme
-  let bg = theme.tool_bg(result, is_error)
+  let bg = theme.tool_bg(finished, is_error)
   let lines : Array[String] = []
   lines.push(bg_blank(bg, width))
   let is_read = name == "read" || name == "read_file"
@@ -930,7 +932,7 @@ fn render_bash(
   expanded~ : Bool,
 ) -> Array[String] {
   let theme = transcript.theme
-  let bg = theme.tool_bg(result, is_error)
+  let bg = theme.tool_bg(ended is Some(_), is_error)
   let lines : Array[String] = []
   let content_width = available_width(width, PAD * 2)
   lines.push(bg_blank(bg, width))
