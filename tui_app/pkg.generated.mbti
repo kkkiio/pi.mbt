@@ -338,6 +338,7 @@ pub fn Transcript::set_expanded_thinking(Self, Bool) -> Unit
 pub fn Transcript::start_assistant(Self) -> Unit
 pub fn Transcript::toggle_expanded(Self) -> Unit
 pub fn Transcript::toggle_expanded_thinking(Self) -> Unit
+pub fn Transcript::update_tool_result(Self, String, id~ : String, details~ : Json) -> Unit
 pub impl Widget for Transcript
 
 type TranscriptItem
@@ -403,6 +404,7 @@ pub async fn TuiApp::take_submission(Self) -> String
 pub fn TuiApp::tick(Self) -> Unit
 pub fn TuiApp::tool_call(Self, String, Json, id~ : String, timed? : Bool) -> Unit
 pub fn TuiApp::tool_result(Self, String, String, Bool, id~ : String, details? : Json?) -> Unit
+pub fn TuiApp::tool_update(Self, String, id~ : String, details~ : Json) -> Unit
 pub async fn TuiApp::wait_for_exit(Self) -> Unit
 
 pub struct Unlisten {

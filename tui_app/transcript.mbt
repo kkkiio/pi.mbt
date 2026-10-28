@@ -203,7 +203,50 @@ pub fn Transcript::push_tool_call(
 }
 
 ///|
+/// 按 call id 刷新仍在执行的工具行的部分结果(流式 stdout 等);调用已结束
+/// 或已滚出记录时忽略。result 先被填上但 ended 保持 None,渲染沿用运行中
+/// 的样式,终态仍由 `push_tool_result` 回填。
+pub fn Transcript::update_tool_result(
+  self : Transcript,
+  text : String,
+  id~ : String,
+  details~ : Json,
+) -> Unit {
+  let mut index = self.items.length()
+  while index > 0 {
+    index -= 1
+    match self.items[index] {
+      TranscriptItem::Tool(
+        tool_name,
+        arguments,
+        _,
+        _,
+        _,
+        started,
+        None,
+        id=call_id
+      ) if call_id == id => {
+        self.items[index] = TranscriptItem::Tool(
+          tool_name,
+          arguments,
+          Some(keep_text(text)),
+          false,
+          Some(details),
+          started,
+          None,
+          id~,
+        )
+        self.generic_tool_cache.remove(index) |> ignore
+        return
+      }
+      _ => ()
+    }
+  }
+}
+
+///|
 /// 按 call id 回填工具结果;调用已被裁掉时补一条只有结果的记录。
+/// pending 的判定用 ended=None:执行中的 update 可能已填了部分 result。
 pub fn Transcript::push_tool_result(
   self : Transcript,
   name : String,
@@ -219,11 +262,11 @@ pub fn Transcript::push_tool_result(
       TranscriptItem::Tool(
         tool_name,
         arguments,
-        None,
+        _,
         _,
         _,
         started,
-        _,
+        None,
         id=call_id
       ) if call_id == id => {
         self.items[index] = TranscriptItem::Tool(

@@ -109,6 +109,7 @@ fn end_hook_event_name(event : @agent_loop.AgentEvent) -> String {
     MessageUpdate(_) => "message_update"
     MessageEnd(_) => "message_end"
     ToolExecutionStart(_) => "tool_execution_start"
+    ToolExecutionUpdate(_, _, _) => "tool_execution_update"
     ToolExecutionEnd(_) => "tool_execution_end"
     TurnEnd(_, _) => "turn_end"
     AgentEnd(_) => "agent_end"
@@ -478,4 +479,88 @@ async test "continue rejects an assistant tail" {
   ]
   let error = end_hook_continue_error(messages)
   assert_true(error.contains("Cannot continue from message role: assistant"))
+}
+
+///|
+/// pi `emitToolExecutionUpdate`:执行中的 partial result 以
+/// `tool_execution_update` 透出,排在 start 之后、end 之前;callback 在
+/// settle 之后被忽略(pi #5573,迟到的回调不得发出 stale 事件)。
+async test "tool execution updates stream between start and end" {
+  let llm = EndHookLLM::new([
+    end_hook_assistant(
+      [end_hook_tool_call("probe", { "k": "v" }, id="tool-1")],
+      stop_reason=@agent_loop.StopReason::ToolUse,
+    ),
+    end_hook_assistant(
+      [end_hook_text("final")],
+      stop_reason=@agent_loop.StopReason::Stop,
+    ),
+  ])
+  let messages : Array[@agent_loop.AgentMessage] = []
+  let events : Array[@agent_loop.AgentEvent] = []
+  let mut settled_sink : @agent_loop.ToolExecUpdateCallback? = None
+  let _ = @agent_loop.run_agent_loop(
+    llm,
+    "",
+    messages,
+    end_hook_no_tools(),
+    [end_hook_user("run")],
+    tool_executor=(_, update) => {
+      settled_sink = Some(update)
+      update([@agent_loop.InputMessageContent::Text("half")], {
+        "pct": Json::number(50),
+      })
+      update([@agent_loop.InputMessageContent::Text("full")], {
+        "pct": Json::number(100),
+      })
+      end_hook_tool_result()
+    },
+    event_sink=event => events.push(event),
+  )
+  guard settled_sink is Some(update) else { fail("executor saw no sink") }
+  update([@agent_loop.InputMessageContent::Text("stale")], {})
+  json_inspect(events.map(end_hook_event_name), content=[
+    "agent_start", "turn_start", "message_start", "message_end", "message_start",
+    "message_end", "tool_execution_start", "tool_execution_update", "tool_execution_update",
+    "tool_execution_end", "turn_end", "turn_start", "message_start", "message_end",
+    "turn_end", "agent_end",
+  ])
+  let updates : Array[Json] = []
+  for event in events {
+    match event {
+      @agent_loop.AgentEvent::ToolExecutionUpdate(call, content, details) =>
+        updates.push({
+          "toolCallId": Json(call.id),
+          "toolName": Json(call.name),
+          "args": call.arguments,
+          "partialResult": {
+            "content": [
+              for c in content => c.to_json()
+            ],
+            "details": details,
+          },
+        })
+      _ => ()
+    }
+  }
+  json_inspect(updates, content=[
+    {
+      "toolCallId": "tool-1",
+      "toolName": "probe",
+      "args": { "k": "v" },
+      "partialResult": {
+        "content": [{ "type": "text", "text": "half" }],
+        "details": { "pct": 50 },
+      },
+    },
+    {
+      "toolCallId": "tool-1",
+      "toolName": "probe",
+      "args": { "k": "v" },
+      "partialResult": {
+        "content": [{ "type": "text", "text": "full" }],
+        "details": { "pct": 100 },
+      },
+    },
+  ])
 }

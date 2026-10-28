@@ -1160,8 +1160,8 @@ async test "auto-retry window resets after each successful response" {
       #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}
       #|{"type":"message_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-probe","name":"probe","arguments":{}}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"toolUse","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}
       #|{"type":"auto_retry_end","success":true,"attempt":1,"finalError":null}
-      #|{"type":"tool_execution_start","toolName":"probe","args":{}}
-      #|{"type":"tool_execution_end","toolName":"probe","content":[{"type":"text","text":"probe-ok"}],"isError":false}
+      #|{"type":"tool_execution_start","toolCallId":"call-probe","toolName":"probe","args":{}}
+      #|{"type":"tool_execution_end","toolCallId":"call-probe","toolName":"probe","content":[{"type":"text","text":"probe-ok"}],"isError":false}
       #|{"type":"turn_end","message":{"role":"assistant","content":[{"type":"toolCall","id":"call-probe","name":"probe","arguments":{}}],"api":"faux","provider":"faux","model":"faux-1","stopReason":"toolUse","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0},"toolCalls":["probe"]}
       #|{"type":"turn_start"}
       #|{"type":"message_start","message":{"role":"assistant","content":[],"api":"faux","provider":"faux","model":"faux-1","stopReason":"pending","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"timestamp":0}}

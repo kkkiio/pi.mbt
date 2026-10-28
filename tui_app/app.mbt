@@ -392,6 +392,20 @@ pub fn TuiApp::tool_call(
 }
 
 ///|
+
+///|
+/// 执行中的工具行刷新部分结果(流式 stdout 等);终态仍由 `tool_result` 回填。
+pub fn TuiApp::tool_update(
+  self : TuiApp,
+  text : String,
+  id~ : String,
+  details~ : Json,
+) -> Unit {
+  self.transcript.update_tool_result(text, id~, details~)
+  self.tui.request_render()
+}
+
+///|
 pub fn TuiApp::tool_result(
   self : TuiApp,
   name : String,

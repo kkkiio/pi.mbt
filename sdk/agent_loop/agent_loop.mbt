@@ -162,14 +162,33 @@ pub async fn run_agent_loop(
               timestamp: call_timestamp,
             }
           } else {
-            let update_sink = (_, _) => () // TODO: support progress update
+            // partial result 经队列转给 drainer:callback 必须是同步的(工具
+            // 可能从 JS 回调里调它,见 bash 的 on_data),而 event_sink 是
+            // async。close 后迟到的 try_put 失败即丢弃——对齐 pi:settle 之后
+            // 的进度回调被忽略(#5573 修过 stale update 漏出的同类问题)。
+            let updates = @aqueue.Queue(kind=@aqueue.Unbounded)
+            let update_sink = fn(content, details) {
+              ignore(updates.try_put((content, details)) catch { _ => false })
+            }
             // 子协程里跑工具,watcher 盯中断:置位即结束 group 并取消工具协程。
             let raced = @async.with_task_group() <| group => {
               group.spawn_bg(no_wait=true) <| async fn() {
                 abort.wait_abort()
                 group.return_immediately(None)
               }
-              Some(
+              // drainer 用默认的 no_wait=false:group 正常退出前等它排空残余
+              // update(close 后 get 仍会先取走缓冲),保证 update 排在
+              // ToolExecutionEnd 之前。abort 路径 return_immediately 直接
+              // 取消它,残余 update 丢弃。
+              group.spawn_bg() <| async fn() {
+                for ;; {
+                  let (content, details) = updates.get() catch { _ => break }
+                  event_sink(
+                    AgentEvent::ToolExecutionUpdate(tool_call, content, details),
+                  )
+                }
+              }
+              let result = Some(
                 tool_executor(tool_call, update_sink) catch {
                   err =>
                     {
@@ -180,6 +199,8 @@ pub async fn run_agent_loop(
                     }
                 },
               )
+              updates.close()
+              result
             }
             match raced {
               // 运行中被中断:与未执行的调用一致,补一条 aborted 结果。
