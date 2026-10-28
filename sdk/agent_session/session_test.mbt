@@ -527,6 +527,7 @@ async fn fake_tool_execute(
   _id : String,
   _args : Json,
   _on_update : @agent_loop.ToolExecUpdateCallback,
+  _abort : @agent_loop.AbortSignal,
 ) -> @agent_loop.ToolResult {
   @async.sleep(0)
   { content: [], is_error: false, details: {}, usage: None, }
@@ -602,6 +603,7 @@ async fn blocking_execute(
   _id : String,
   _args : Json,
   _on_update : @agent_loop.ToolExecUpdateCallback,
+  _abort : @agent_loop.AbortSignal,
 ) -> @agent_loop.ToolResult {
   @async.sleep(3000)
   { content: [], details: {}, is_error: false, usage: None, }
@@ -621,10 +623,10 @@ fn abort_batch_tools(log : Array[String]) -> @tools.ToolRegistry {
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
-    execute: (_, _, on_update) => {
+    execute: (_, _, on_update, abort) => {
       log.push("started")
       defer log.push("cleanup")
-      blocking_execute("slow", {}, on_update)
+      blocking_execute("slow", {}, on_update, abort)
     },
   })
   registry.register_tool({
@@ -636,9 +638,9 @@ fn abort_batch_tools(log : Array[String]) -> @tools.ToolRegistry {
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
-    execute: (_, _, on_update) => {
+    execute: (_, _, on_update, abort) => {
       log.push("marker")
-      blocking_execute("marker", {}, on_update)
+      blocking_execute("marker", {}, on_update, abort)
     },
   })
   registry
@@ -707,6 +709,7 @@ async fn probe_execute(
   _id : String,
   _args : Json,
   _on_update : @agent_loop.ToolExecUpdateCallback,
+  _abort : @agent_loop.AbortSignal,
 ) -> @agent_loop.ToolResult {
   @async.sleep(0)
   {
@@ -730,9 +733,9 @@ fn probe_tools(log : Array[String]) -> @tools.ToolRegistry {
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
-    execute: (id, args, on_update) => {
+    execute: (id, args, on_update, abort) => {
       log.push("probe")
-      probe_execute(id, args, on_update)
+      probe_execute(id, args, on_update, abort)
     },
   })
   registry

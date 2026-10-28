@@ -2,20 +2,36 @@
 package "KKKIIO/pi/sdk/agent_loop"
 
 import {
+  "moonbitlang/async/cond_var",
   "moonbitlang/core/builtin",
   "moonbitlang/core/debug",
 }
 
 // Values
-pub async fn run_agent_loop(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], ArrayView[UserMessage], tool_executor~ : async (ToolCall, (Array[InputMessageContent], Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], event_sink? : async (AgentEvent, EventContext) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage]) -> AgentTurnDecision?) -> Unit
+pub async fn run_agent_loop(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], ArrayView[UserMessage], tool_executor~ : async (ToolCall, (Array[InputMessageContent], Json) -> Unit, AbortSignal) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], event_sink? : async (AgentEvent, EventContext) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage]) -> AgentTurnDecision?) -> Unit
 
-pub async fn run_agent_loop_continue(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], tool_executor~ : async (ToolCall, (Array[InputMessageContent], Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], event_sink? : async (AgentEvent, EventContext) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage]) -> AgentTurnDecision?) -> Unit
+pub async fn run_agent_loop_continue(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], tool_executor~ : async (ToolCall, (Array[InputMessageContent], Json) -> Unit, AbortSignal) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], event_sink? : async (AgentEvent, EventContext) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage]) -> AgentTurnDecision?) -> Unit
 
 pub fn usage_json(Usage?) -> Json
 
 // Errors
 
 // Types and methods
+pub struct AbortController {
+  signal : AbortSignal
+}
+pub fn AbortController::abort(Self) -> Unit
+pub fn AbortController::new() -> Self
+pub fn AbortController::signal(Self) -> AbortSignal
+
+pub struct AbortSignal {
+  mut flag : Bool
+  cond : @cond_var.Cond
+}
+pub fn AbortSignal::is_aborted(Self) -> Bool
+pub fn AbortSignal::never() -> Self
+pub async fn AbortSignal::wait_abort(Self) -> Unit
+
 pub(all) enum AgentEvent {
   AgentStart
   TurnStart

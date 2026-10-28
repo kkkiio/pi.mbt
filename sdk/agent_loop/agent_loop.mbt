@@ -13,7 +13,7 @@ pub async fn run_agent_loop(
   messages : Array[AgentMessage],
   tools : ArrayView[ToolDefinition],
   prompts : ArrayView[UserMessage],
-  tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
+  tool_executor~ : async (ToolCall, ToolExecUpdateCallback, AbortSignal) -> ToolResult,
   steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
   event_sink~ : EventSink = (_, _) => (),
   finish_turn_hook~ : FinishTurnHook = (_, _) => None,
@@ -265,7 +265,9 @@ pub async fn run_agent_loop(
                 @async.pause()
               }
             }
-            let result = tool_executor(call, update_sink) catch {
+            let controller = AbortController::new()
+            defer controller.abort()
+            let result = tool_executor(call, update_sink, controller.signal()) catch {
               err =>
                 ToolResult::{
                   content: [InputMessageContent::Text(err.to_string())],
@@ -332,7 +334,7 @@ pub async fn run_agent_loop_continue(
   system_prompt : String,
   messages : Array[AgentMessage],
   tools : ArrayView[ToolDefinition],
-  tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
+  tool_executor~ : async (ToolCall, ToolExecUpdateCallback, AbortSignal) -> ToolResult,
   steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
   event_sink~ : EventSink = (_, _) => (),
   finish_turn_hook~ : FinishTurnHook = (_, _) => None,

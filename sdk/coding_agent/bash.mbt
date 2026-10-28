@@ -2,6 +2,9 @@
 pub const BASH_TOOL_NAME = "bash"
 
 ///|
+/// Abort reaches the tool through coroutine cancellation — the `exec` defer
+/// kills the process tree — so `execute`'s `signal` parameter is reserved
+/// and ignored.
 pub fn new_bash_tool_definition(
   cwd~ : String = @env.current_dir().unwrap(),
   exec~ : async (BashExecParams) -> Int32 = local_bash_exec,
@@ -30,7 +33,7 @@ pub fn new_bash_tool_definition(
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
-    execute: (_, input, on_update) => {
+    execute: (_, input, on_update, _) => {
       execute_bash_tool(cwd, input, on_update~, exec~)
     },
   }

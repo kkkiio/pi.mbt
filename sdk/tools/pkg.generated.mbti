@@ -6,7 +6,7 @@ import {
 }
 
 // Values
-pub async fn run_tool(Map[String, ToolDefinition], @agent_loop.ToolCall, (Array[@agent_loop.InputMessageContent], Json) -> Unit) -> @agent_loop.ToolResult
+pub async fn run_tool(Map[String, ToolDefinition], @agent_loop.ToolCall, (Array[@agent_loop.InputMessageContent], Json) -> Unit, @agent_loop.AbortSignal) -> @agent_loop.ToolResult
 
 // Errors
 
@@ -18,7 +18,7 @@ pub(all) struct ToolDefinition {
   description : String
   parameters : Json
   constrained_sampling : @agent_loop.ConstrainedSampling
-  execute : async (String, Json, (Array[@agent_loop.InputMessageContent], Json) -> Unit) -> @agent_loop.ToolResult
+  execute : async (String, Json, (Array[@agent_loop.InputMessageContent], Json) -> Unit, @agent_loop.AbortSignal) -> @agent_loop.ToolResult
 }
 
 type ToolRegistry

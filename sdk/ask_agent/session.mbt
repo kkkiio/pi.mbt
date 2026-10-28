@@ -7,7 +7,7 @@ pub fn new_ask_agent_session(
   journal~ : &@agent_session.SessionJournal = @agent_session.InMemorySessionJournal(),
   tool_registry~ : @tools.ToolRegistry,
   active_tools~ : ArrayView[String],
-  finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _, _) => None,
+  finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
   on_generation~ : async (@agent_loop.GenerationEvent) -> Unit = fn(_) { () },
 ) -> @agent_session.AgentSession {
   let session = @agent_session.AgentSession(
