@@ -313,3 +313,63 @@ async test "the initial tool set survives hydration without any search or tool c
     assert_eq(journal.get_entries().length(), 3)
   }
 }
+
+///|
+struct GuidelineLLM {
+  requests : Array[(String, Array[String])]
+  responses : Array[@agent_loop.AssistantMessage]
+}
+
+///|
+impl @agent_loop.LLM for GuidelineLLM with fn generate(self, ctx, sink~, abort~) {
+  ignore(abort)
+  let index = self.requests.length()
+  self.requests.push(
+    (ctx.system_prompt, ctx.tools.to_owned().map(t => t.description)),
+  )
+  let message = self.responses[index]
+  sink(@agent_loop.Start(partial=message))
+  message
+}
+
+///|
+async test "discovered tool guidelines reach every request without changing the cached system prompt" {
+  let registry = @tools.ToolRegistry()
+  registry.register_tool(
+    {
+      ..fake_tool("read_issue"),
+      prompt_guidelines: ["Use approved issue numbers only."],
+    },
+    exposure=@tools.Deferred,
+  )
+  let llm = GuidelineLLM::{
+    requests: [],
+    responses: [search_message("read_issue"), ok_message()],
+  }
+  let journal = @agent_session.InMemorySessionJournal()
+  let session = @agent_session.AgentSession(
+    llm,
+    tool_registry=registry,
+    journal~,
+    active_tools=["tool_search"],
+    system_prompt_contributes=[_ => "Stable prompt"],
+  )
+  session.prompt([user_message("find the issue tool")])
+  assert_eq(llm.requests[0].0, llm.requests[1].0)
+  assert_false(
+    llm.requests[0].1.any(d => d.contains("Use approved issue numbers only.")),
+  )
+  assert_true(
+    llm.requests[1].1.any(d => d.contains("Use approved issue numbers only.")),
+  )
+  let next = GuidelineLLM::{ requests: [], responses: [ok_message()], }
+  let resumed = @agent_session.AgentSession(
+    next,
+    tool_registry=registry,
+    journal~,
+  )
+  resumed.prompt([user_message("continue")])
+  assert_true(
+    next.requests[0].1.any(d => d.contains("Use approved issue numbers only.")),
+  )
+}

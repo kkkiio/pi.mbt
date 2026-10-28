@@ -173,7 +173,13 @@ pub async fn Agent::run(
       .get_tool(name)
       .map(d => @agent_loop.ToolDefinition::{
         name: d.name,
-        description: d.description,
+        description: if d.prompt_guidelines.is_empty() {
+          d.description
+        } else {
+          d.description +
+          "\n\nGuidelines:\n" +
+          d.prompt_guidelines.map(g => "- " + g).join("\n")
+        },
         parameters: d.parameters,
         constrained_sampling: d.constrained_sampling,
       })

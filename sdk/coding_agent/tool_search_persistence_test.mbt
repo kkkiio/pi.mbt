@@ -143,3 +143,80 @@ async test "abandoned tool changes do not affect a resumed branch" {
   assert_eq(session.active_tool_names(), ["tool_search"])
   file.close()
 }
+
+///|
+async test "coding sessions sharing a registry keep bash bound to their own directories" {
+  let first_dir = @coding_agent.create_temp_dir("pim-bash-first-")
+  let second_dir = @coding_agent.create_temp_dir("pim-bash-second-")
+  defer @coding_agent.remove_dir(first_dir)
+  defer @coding_agent.remove_dir(second_dir)
+  @coding_agent.write_bytes_file("\{first_dir}/marker.txt", b"first")
+  @coding_agent.write_bytes_file("\{second_dir}/marker.txt", b"second")
+  defer @coding_agent.remove_file("\{first_dir}/marker.txt")
+  defer @coding_agent.remove_file("\{second_dir}/marker.txt")
+  let registry = @tools.ToolRegistry()
+  let first_llm = @faux.FauxLLM()
+  let second_llm = @faux.FauxLLM()
+  let responses = [
+    @faux.faux_message(
+      [@faux.faux_tool_call("bash", { "command": "cat marker.txt" })],
+      stop_reason=@agent_loop.ToolUse,
+    ),
+    @faux.faux_message([@faux.faux_text("done")]),
+  ]
+  first_llm.set_responses(responses)
+  second_llm.set_responses(responses)
+  let first = @coding_agent.new_coding_session(
+    first_llm,
+    cwd=first_dir,
+    tool_registry=registry,
+  )
+  let second = @coding_agent.new_coding_session(
+    second_llm,
+    cwd=second_dir,
+    tool_registry=registry,
+  )
+  assert_true(registry.get_tool("bash") is None)
+  first.prompt([user_message("read marker")])
+  second.prompt([user_message("read marker")])
+  for (session, expected) in [(first, "first"), (second, "second")] {
+    let outputs = session
+      .messages()
+      .filter_map(m => {
+        match m {
+          ToolResult(r) => Some(r.content)
+          _ => None
+        }
+      })
+    assert_true(outputs is [[Text(actual)]] && actual == expected)
+  }
+  // Parent registrations made after construction remain discoverable in each session.
+  registry.register_tool(
+    {
+      name: "late_probe",
+      label: "late_probe",
+      description: "Read a late probe",
+      prompt_guidelines: [],
+      parameters: { "type": "object" },
+      constrained_sampling: @agent_loop.JsonSchema(strict=false),
+      execute: (_, _, _) => {
+        content: [Text("late")],
+        details: {},
+        is_error: false,
+        usage: None,
+      },
+    },
+    exposure=@tools.Deferred,
+  )
+  first.set_active_tools(["tool_search"])
+  first_llm.set_responses([
+    @faux.faux_message(
+      [@faux.faux_tool_call("tool_search", { "query": "late_probe" })],
+      stop_reason=@agent_loop.ToolUse,
+    ),
+    @faux.faux_message([@faux.faux_text("loaded")]),
+  ])
+  first.prompt([user_message("find the late tool")])
+  assert_eq(first.active_tool_names(), ["tool_search", "late_probe"])
+  assert_eq(second.active_tool_names(), ["bash"])
+}

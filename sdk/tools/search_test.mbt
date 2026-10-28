@@ -167,3 +167,51 @@ test "descriptions render required fields, arrays, enums and unions" {
   assert_true(text.contains("\"flags\"?: Array<\"a\" | \"b\">"))
   assert_true(text.contains("\"offset\"?: number | null"))
 }
+
+///|
+test "registry overlays isolate overrides and keep live parent discovery metadata" {
+  let parent = @tools.ToolRegistry()
+  parent.register_namespace({
+    name: "app",
+    prefix: "app__",
+    description: "Original namespace",
+    instructions: "",
+  })
+  parent.register_tool(
+    tool("app__read", "Original tool"),
+    exposure=@tools.Deferred,
+  )
+  parent.register_tool(
+    tool("model_only", "Private tool"),
+    exposure=@tools.ModelOnly,
+  )
+  let child = parent.overlay()
+  child.register_tool(tool("app__read", "Local tool"))
+  child.register_tool(tool("local", "Local extra"))
+  child.register_namespace({
+    name: "app",
+    prefix: "app__",
+    description: "Local namespace",
+    instructions: "Local guideline",
+  })
+  parent.register_tool(
+    tool("app__late", "Late parent tool"),
+    exposure=@tools.Codemode,
+  )
+  assert_eq(parent.get_tool("app__read").unwrap().description, "Original tool")
+  assert_eq(child.get_tool("app__read").unwrap().description, "Local tool")
+  assert_true(parent.get_tool("local") is None)
+  assert_eq(child.all_tools().map(t => t.name), [
+    "app__read", "app__late", "local",
+  ])
+  assert_eq(child.search_tools("late", ns=Some("app")).map(t => t.name), [
+    "app__late",
+  ])
+  assert_true(
+    child.describe_namespace("app").unwrap().contains("Local guideline"),
+  )
+  assert_false(
+    parent.describe_namespace("app").unwrap().contains("Local guideline"),
+  )
+  assert_true(child.describe_tool("model_only") is None)
+}

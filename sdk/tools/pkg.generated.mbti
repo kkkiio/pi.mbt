@@ -51,6 +51,7 @@ pub fn ToolRegistry::all_tools(Self) -> Array[ToolInfo]
 pub fn ToolRegistry::describe_namespace(Self, String) -> String?
 pub fn ToolRegistry::describe_tool(Self, String) -> String?
 pub fn ToolRegistry::get_tool(Self, String) -> ToolDefinition?
+pub fn ToolRegistry::overlay(Self) -> Self
 pub fn ToolRegistry::register_namespace(Self, ToolNamespace) -> Unit
 pub fn ToolRegistry::register_tool(Self, ToolDefinition, exposure? : ToolExposure) -> Unit
 pub fn ToolRegistry::search_tools(Self, String, limit? : Int32, ns? : String?, exclude? : ArrayView[String]) -> Array[ToolInfo]

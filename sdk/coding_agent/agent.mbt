@@ -12,6 +12,7 @@ pub fn new_coding_session(
   active_tools~ : ArrayView[String] = [BASH_TOOL_NAME],
   tool_registry~ : @tools.ToolRegistry = @tools.ToolRegistry(),
 ) -> @agent_session.AgentSession {
+  let tool_registry = tool_registry.overlay()
   let bash_tool = new_bash_tool_definition(cwd~)
   tool_registry.register_tool(bash_tool)
   let session = @agent_session.AgentSession(

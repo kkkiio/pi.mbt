@@ -62,11 +62,15 @@ pim -p "What's the capital of France? Respond with only the city name." --mode j
 SDK 可向 `new_coding_session(..., tool_registry=registry)` 传入注册表,
 用 `register_tool(..., exposure=Deferred)` 注册额外工具。
 注册与声明分离:只有 `active_tools` 中的工具进入模型请求。
+每个 coding session 通过 registry overlay 保存自己的内置 `bash` 实现,
+共享注册表上的后续注册仍会被发现,不会相互覆盖工作目录。
 `tool_search` 在当前未声明的可调用工具中按 BM25 检索(默认最多 8 个),
 返回名称和描述,并将命中的工具追加到下一次模型请求的声明中。
 检索包括工具名、描述、参数属性及描述、namespace 描述和指引;
 完整工具名及 `__` 后的名称后缀优先,同分按注册顺序排列。
 分词与 pi 一致,支持英文大小写、camelCase、缩写和简单复数归一化。
+声明同时携带工具的 `prompt_guidelines`,使动态加载的工具也能收到使用指引,
+并保持缓存的 system prompt 稳定。
 
 工具集变更存为 `customType: "pi.tools"` 的 session 条目,
 `data.activeTools` 保存完整名称列表(含空列表)。

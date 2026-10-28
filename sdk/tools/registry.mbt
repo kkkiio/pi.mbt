@@ -1,5 +1,6 @@
 ///|
 struct ToolRegistry {
+  parent : ToolRegistry?
   tools : Map[String, ToolDefinition]
   order : Array[String]
   exposures : Map[String, ToolExposure]
@@ -8,7 +9,42 @@ struct ToolRegistry {
 
 ///|
 pub fn ToolRegistry::ToolRegistry() -> ToolRegistry {
-  ToolRegistry::{ tools: {}, order: [], exposures: {}, namespaces: [], }
+  ToolRegistry::{
+    parent: None,
+    tools: {},
+    order: [],
+    exposures: {},
+    namespaces: [],
+  }
+}
+
+///|
+/// Create a registry with session-local overrides and a live fallback to this
+/// registry. Later parent registrations remain visible; child replacements
+/// never mutate the parent. Inherited tools keep their registration order.
+pub fn ToolRegistry::overlay(self : ToolRegistry) -> ToolRegistry {
+  { parent: Some(self), tools: {}, order: [], exposures: {}, namespaces: [], }
+}
+
+///|
+fn ToolRegistry::tool_names(self : ToolRegistry) -> Array[String] {
+  let names = self.parent.map_or([], p => p.tool_names())
+  for name in self.order {
+    if !names.contains(name) {
+      names.push(name)
+    }
+  }
+  names
+}
+
+///|
+fn ToolRegistry::all_namespaces(self : ToolRegistry) -> Array[ToolNamespace] {
+  let inherited = self.parent.map_or([], p => p.all_namespaces())
+  let names = inherited.filter(ns => {
+    !self.namespaces.any(n => n.name == ns.name)
+  })
+  names.append(self.namespaces)
+  names
 }
 
 ///|
@@ -32,7 +68,10 @@ pub fn ToolRegistry::get_tool(
   self : ToolRegistry,
   name : String,
 ) -> ToolDefinition? {
-  self.tools.get(name)
+  match self.tools.get(name) {
+    Some(tool) => Some(tool)
+    None => self.parent.map_or(None, p => p.get_tool(name))
+  }
 }
 
 ///|
@@ -79,7 +118,7 @@ fn ToolRegistry::tool_namespace(
   name : String,
 ) -> ToolNamespace? {
   let mut selected : ToolNamespace? = None
-  for ns in self.namespaces {
+  for ns in self.all_namespaces() {
     if name.has_prefix(ns.prefix) &&
       selected.map_or(true, n => n.prefix.length() < ns.prefix.length()) {
       selected = Some(ns)
@@ -90,5 +129,8 @@ fn ToolRegistry::tool_namespace(
 
 ///|
 fn ToolRegistry::is_callable(self : ToolRegistry, name : String) -> Bool {
-  self.exposures.get(name) != Some(ModelOnly)
+  match self.exposures.get(name) {
+    Some(exposure) => exposure != ModelOnly
+    None => self.parent.map_or(true, p => p.is_callable(name))
+  }
 }

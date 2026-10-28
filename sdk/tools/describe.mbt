@@ -21,7 +21,8 @@ pub fn ToolRegistry::describe_namespace(
   self : ToolRegistry,
   name : String,
 ) -> String? {
-  guard self.namespaces
+  guard self
+    .all_namespaces()
     .iter()
     .find_first(ns => normalize_name(ns.name) == normalize_name(name))
     is Some(ns) else {

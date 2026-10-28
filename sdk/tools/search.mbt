@@ -15,10 +15,12 @@ pub extend ToolInfo with ToJson::{to_json}
 /// All script-callable tools in registration order, including deferred tools.
 /// Model-only tools, such as tool_search, are excluded.
 pub fn ToolRegistry::all_tools(self : ToolRegistry) -> Array[ToolInfo] {
-  self.order.filter_map(name => {
+  self
+  .tool_names()
+  .filter_map(name => {
     if self.is_callable(name) {
-      self.tools
-      .get(name)
+      self
+      .get_tool(name)
       .map(t => ToolInfo::{ name, description: t.description, })
     } else {
       None
@@ -57,7 +59,7 @@ pub fn ToolRegistry::search_tools(
     return []
   }
   let counts = candidates.map(tool => {
-    let definition = self.tools[tool.name]
+    let definition = self.get_tool(tool.name).unwrap()
     let parts = [
       tool.name,
       tool.name.replace_all(old="_", new=" "),
