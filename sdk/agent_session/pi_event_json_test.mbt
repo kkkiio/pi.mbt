@@ -164,9 +164,7 @@ impl @agent_loop.LLM for BadSnapshotLLM with fn generate(
   self : BadSnapshotLLM,
   _ctx : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
-  ignore(abort)
   let pending : @agent_loop.AssistantMessage = {
     content: self.content,
     api: "faux",

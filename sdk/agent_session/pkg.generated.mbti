@@ -4,7 +4,9 @@ package "KKKIIO/pi/sdk/agent_session"
 import {
   "KKKIIO/pi/sdk/agent_loop",
   "KKKIIO/pi/sdk/tools",
+  "moonbitlang/async",
   "moonbitlang/core/json",
+  "moonbitlang/core/ref",
 }
 
 // Values
@@ -27,15 +29,15 @@ pub struct Agent {
   auto_refresh_system_prompt : Bool
   mut system_prompt_cache : (String, Array[String])?
   mut messages : Array[@agent_loop.AgentMessage]
-  mut finish_turn_hook : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?
+  mut finish_turn_hook : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?
 }
-pub fn Agent::Agent(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], messages? : ArrayView[@agent_loop.AgentMessage], finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool) -> Self
+pub fn Agent::Agent(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], messages? : ArrayView[@agent_loop.AgentMessage], finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool) -> Self
 pub fn Agent::active_tool_names(Self) -> ArrayView[String]
 pub fn Agent::has_tool(Self, String) -> Bool
 pub fn Agent::messages(Self) -> ArrayView[@agent_loop.AgentMessage]
-pub async fn Agent::run(Self, ArrayView[@agent_loop.UserMessage], abort~ : @agent_loop.AbortSignal, on_event~ : async (@agent_loop.AgentEvent) -> Unit) -> Bool
+pub async fn Agent::run(Self, ArrayView[@agent_loop.UserMessage], on_event~ : async (@agent_loop.AgentEvent) -> Unit) -> Unit
 pub fn Agent::set_active_tools(Self, ArrayView[String]) -> Unit raise
-pub fn Agent::set_finish_turn_hook(Self, async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?) -> Unit
+pub fn Agent::set_finish_turn_hook(Self, async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?) -> Unit
 pub fn Agent::set_messages(Self, ArrayView[@agent_loop.AgentMessage]) -> Unit
 pub fn Agent::system_prompt(Self) -> String
 
@@ -44,15 +46,15 @@ pub struct AgentSession {
   agent : Agent
   fanout : FanOutListener
   retry_settings : RetrySettings
-  mut active_run_abort_controller : @agent_loop.AbortController?
+  mut active_run : @ref.Ref[(@async.Task[Unit?]?, Bool)]?
 }
-pub fn AgentSession::AgentSession(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], journal? : &SessionJournal, tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], retry_settings? : RetrySettings, finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool) -> Self
+pub fn AgentSession::AgentSession(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], journal? : &SessionJournal, tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], retry_settings? : RetrySettings, finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool) -> Self
 pub fn AgentSession::abort(Self) -> Unit
 pub fn AgentSession::active_tool_names(Self) -> ArrayView[String]
 pub fn AgentSession::messages(Self) -> ArrayView[@agent_loop.AgentMessage]
 pub async fn AgentSession::prompt(Self, Array[@agent_loop.UserMessage]) -> Unit
 pub fn AgentSession::set_active_tools(Self, ArrayView[String]) -> Unit raise
-pub fn AgentSession::set_finish_turn_hook(Self, async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?) -> Unit
+pub fn AgentSession::set_finish_turn_hook(Self, async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?) -> Unit
 pub fn AgentSession::subscribe(Self, async (AgentSessionEvent) -> Unit) -> Unit
 
 pub enum AgentSessionEvent {

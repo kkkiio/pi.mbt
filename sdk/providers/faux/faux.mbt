@@ -174,18 +174,6 @@ fn FauxLLM::snapshot(
 }
 
 ///|
-fn FauxLLM::aborted(
-  self : FauxLLM,
-  content : Array[@agent_loop.AssistantMessageContent],
-) -> @agent_loop.AssistantMessage {
-  self.snapshot(
-    content,
-    @agent_loop.StopReason::Aborted,
-    error_message="Interrupted",
-  )
-}
-
-///|
 pub extend FauxLLM with @agent_loop.LLM::{generate}
 
 ///|
@@ -193,13 +181,13 @@ pub impl @agent_loop.LLM for FauxLLM with fn generate(
   self : FauxLLM,
   _ctx : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
   guard self.cursor < self.responses.length() else {
     fail(
       "FauxLLM: no scripted response left for generate call #\{self.cursor + 1}",
     )
   }
+  @async.pause()
   let scripted = self.responses[self.cursor]
   self.cursor += 1
   let acc : Array[@agent_loop.AssistantMessageContent] = []
@@ -210,9 +198,6 @@ pub impl @agent_loop.LLM for FauxLLM with fn generate(
   )
   let mut index = 0
   for block in scripted.content {
-    if abort.is_aborted() {
-      return self.aborted(acc)
-    }
     match block {
       @agent_loop.AssistantMessageContent::Text(text, signature~) => {
         acc.push(@agent_loop.AssistantMessageContent::Text("", signature={}))
@@ -225,9 +210,7 @@ pub impl @agent_loop.LLM for FauxLLM with fn generate(
         let mut so_far = ""
         for piece in split_chunks(text, self.chunk_size) {
           self.pace()
-          if abort.is_aborted() {
-            return self.aborted(acc)
-          }
+          @async.pause()
           so_far += piece
           acc[index] = @agent_loop.AssistantMessageContent::Text(so_far, signature={})
           sink(
@@ -260,9 +243,7 @@ pub impl @agent_loop.LLM for FauxLLM with fn generate(
         let mut so_far = ""
         for piece in split_chunks(text, self.chunk_size) {
           self.pace()
-          if abort.is_aborted() {
-            return self.aborted(acc)
-          }
+          @async.pause()
           so_far += piece
           acc[index] = @agent_loop.AssistantMessageContent::Thinking(so_far, signature={})
           sink(
@@ -304,9 +285,7 @@ pub impl @agent_loop.LLM for FauxLLM with fn generate(
             self.chunk_size,
           ) {
           self.pace()
-          if abort.is_aborted() {
-            return self.aborted(acc)
-          }
+          @async.pause()
           sink(
             @agent_loop.GenerationEvent::ToolCallDelta(
               content_index=index,

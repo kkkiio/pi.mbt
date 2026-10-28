@@ -8,7 +8,7 @@ pub struct AgentSession {
   fanout : FanOutListener
   /// Agent-level auto-retry policy, read at every retryable failure.
   retry_settings : RetrySettings
-  mut active_run_abort_controller : @agent_loop.AbortController?
+  mut active_run : Ref[(@async.Task[Unit?]?, Bool)]?
 }
 
 ///|
@@ -19,7 +19,7 @@ pub fn AgentSession::AgentSession(
   tool_registry~ : @tools.ToolRegistry = @tools.ToolRegistry(),
   active_tools~ : ArrayView[String] = [],
   retry_settings~ : RetrySettings = RetrySettings::default(),
-  finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _, _) => None,
+  finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
   auto_refresh_system_prompt~ : Bool = false,
 ) -> AgentSession {
   let agent = Agent::Agent(
@@ -36,150 +36,176 @@ pub fn AgentSession::AgentSession(
     agent,
     fanout: FanOutListener::FanOutListener(),
     retry_settings,
-    active_run_abort_controller: None,
+    active_run: None,
   }
 }
 
 ///|
-/// Prompt the agent with the given `input` messages.
-/// 
-/// Auto-retry loop: a prompt whose assistant turn ends with a retryable
-/// error is re-run from the same context (bounded, exponential backoff),
-/// mirroring pi's session-level auto-retry: the failed turn's terminal Error
-/// message is dropped and the assistant generation continues — the user
-/// prompt and any prior tool work stay in place and are journaled once.
-///
-/// Like pi's `Agent.runWithLifecycle`, a runtime/listener failure closes the
-/// run with an assistant Error/Aborted message and terminal events. If a
-/// listener also rejects those events, that error escapes; cleanup still runs.
+/// Prompts the agent and owns its cancellable retry window.
+/// User cancellation returns normally; extension and storage errors propagate.
+/// Rejects overlapping prompts and restores journal-backed context on exit.
 pub async fn AgentSession::prompt(
   self : AgentSession,
   input : Array[@agent_loop.UserMessage],
 ) -> Unit {
-  if self.active_run_abort_controller is Some(_) {
+  guard self.active_run is None else {
     fail(
       "Agent is already processing. Use 'steer' or 'followUp' to queue the message.",
-    ) // TODO: support steer/follow_up
+    )
   }
-  // Surface configuration errors before the run closes them as failures.
   for name in self.agent.active_tool_names() {
     guard self.agent.has_tool(name) else { fail("unknown tool: \{name}") }
   }
-  let abort_controller = @agent_loop.AbortController::new()
-  self.active_run_abort_controller = Some(abort_controller)
+  let run : Ref[(@async.Task[Unit?]?, Bool)] = Ref((None, false))
+  self.active_run = Some(run)
   defer {
     self.agent.set_messages(project_messages(self.journal.get_entries()))
-    self.active_run_abort_controller = None
+    self.active_run = None
   }
-  let mut retry_attempt = 0
-  let mut last_assistant_entry_id : String? = None
-  // 结束当前重试窗口:只在真的发起过重试时才发 `AutoRetryEnd`,然后归零。
-  let settle_retry = (success : Bool, final_error : String?) => {
-    if retry_attempt > 0 {
-      self.fanout.on_event(
-        AgentSessionEvent::AutoRetryEnd(
-          attempt=retry_attempt,
-          success~,
-          final_error~,
-        ),
-      )
-      retry_attempt = 0
-    }
-  }
-  let mut pending_prompts = input
-  for ;; {
-    let sink : async (@agent_loop.AgentEvent) -> Unit = event => {
-      // Persist complete messages at their terminal events. User and
-      // assistant messages are complete at MessageEnd (assistant streaming
-      // events in between carry in-flight snapshots whose stop_reason is
-      // Pending); tool results complete at ToolExecutionEnd. Error turns
-      // are persisted unconditionally — the journal is a complete
-      // write-ahead log.
-      let content : SessionEntryContent? = match event {
-        MessageEnd(User(_) as m) => Some(Message(m))
-        MessageEnd(Assistant(m) as msg) => {
-          guard !(m.stop_reason is Pending) else {
-            fail("journal cannot persist a message with pending stop_reason")
+  @async.with_task_group() <| group => {
+    let task = group.spawn(allow_failure=true, () => {
+      @async.handle_cancellation(() => {
+        let mut failure : Error? = None
+        let mut retry_attempt = 0
+        let mut pending_retry_end : AgentSessionEvent? = None
+        let mut last_assistant_entry_id : String? = None
+        let settle_retry = (success : Bool, final_error : String?) => {
+          let event = if pending_retry_end is Some(event) {
+            Some(event)
+          } else if retry_attempt > 0 {
+            Some(AutoRetryEnd(attempt=retry_attempt, success~, final_error~))
+          } else {
+            None
           }
-          Some(Message(msg))
+          retry_attempt = 0
+          pending_retry_end = None
+          if event is Some(event) {
+            self.fanout.on_event(event)
+          }
         }
-        ToolExecutionEnd(result) => Some(Message(ToolResult(result)))
-        _ => None
-      }
-      if content is Some(content) {
-        let stored = self.journal.append([
-          { id: self.journal.generate_id(), content, },
-        ])
-        if content is Message(Assistant(_)) {
-          last_assistant_entry_id = Some(stored[0].id)
+        errdefer (if failure is None && @async.is_being_cancelled() {
+          @async.protect_from_cancel(() => {
+            settle_retry(false, Some("Retry cancelled"))
+          })
+        })
+        let outcome : Result[Unit, Error] = try {
+          let mut pending_prompts = input
+          for ;; {
+            let sink : async (@agent_loop.AgentEvent) -> Unit = event => {
+              let content : SessionEntryContent? = match event {
+                MessageEnd(User(_) as message) => Some(Message(message))
+                MessageEnd(Assistant(message) as msg) => {
+                  guard !(message.stop_reason is Pending) else {
+                    fail(
+                      "journal cannot persist a message with pending stop_reason",
+                    )
+                  }
+                  Some(Message(msg))
+                }
+                ToolExecutionEnd(result) => Some(Message(ToolResult(result)))
+                _ => None
+              }
+              if content is Some(content) {
+                @async.protect_from_cancel(() => {
+                  let stored = self.journal.append([
+                    { id: self.journal.generate_id(), content, },
+                  ])
+                  if content is Message(Assistant(_)) {
+                    last_assistant_entry_id = Some(stored[0].id)
+                  }
+                })
+              }
+              if retry_attempt > 0 &&
+                event is MessageEnd(Assistant(message)) &&
+                !(message.stop_reason is Error) {
+                let attempt = retry_attempt
+                retry_attempt = 0
+                pending_retry_end = Some(
+                  AutoRetryEnd(
+                    attempt~,
+                    success=!(message.stop_reason is Aborted),
+                    final_error=if message.stop_reason is Aborted {
+                      Some("Retry cancelled")
+                    } else {
+                      None
+                    },
+                  ),
+                )
+              }
+              self.fanout.on_event(Loop(event))
+              if pending_retry_end is Some(event) {
+                pending_retry_end = None
+                self.fanout.on_event(event)
+              }
+            }
+            self.agent.run(pending_prompts, on_event=sink)
+            self.agent.set_messages(
+              project_messages(self.journal.get_entries()),
+            )
+            if self.agent.messages().last()
+              is Some(
+                @agent_loop.AgentMessage::Assistant(
+                  { stop_reason: Error, error_message, .. }
+                )
+              ) {
+              if self.retry_settings.enabled &&
+                error_message is Some(message) &&
+                is_retryable_error_message(message) &&
+                retry_attempt < self.retry_settings.max_retries {
+                retry_attempt += 1
+                let delay_ms = self.retry_settings.delay_ms(retry_attempt)
+                self.fanout.on_event(
+                  AutoRetryStart(
+                    attempt=retry_attempt,
+                    max_attempts=self.retry_settings.max_retries,
+                    delay_ms~,
+                    error_message=message,
+                  ),
+                )
+                @async.pause()
+                if last_assistant_entry_id is Some(entry_id) {
+                  @async.protect_from_cancel(() => {
+                    ignore(
+                      self.journal.append([
+                        {
+                          id: self.journal.generate_id(),
+                          content: ContextEdit(target_id=entry_id),
+                        },
+                      ]),
+                    )
+                  })
+                }
+                self.agent.set_messages(
+                  project_messages(self.journal.get_entries()),
+                )
+                @async.sleep(delay_ms)
+                pending_prompts = []
+                continue
+              }
+              settle_retry(false, error_message)
+              break
+            }
+            settle_retry(false, Some("Retry cancelled"))
+            break
+          }
+          Ok(())
+        } catch {
+          err => Err(err)
         }
-      }
-      self.fanout.on_event(AgentSessionEvent::Loop(event))
-      // reset retry window
-      if retry_attempt > 0 && event is MessageEnd(Assistant(message)) {
-        match message.stop_reason {
-          Aborted => settle_retry(false, Some("Retry cancelled"))
-          Error => ()
-          _ => settle_retry(true, None)
+        match outcome {
+          Ok(_) => ()
+          Err(err) => {
+            failure = Some(err)
+            raise err
+          }
         }
-      }
+      })
+    })
+    run.val = (Some(task), run.val.1)
+    if run.val.1 {
+      task.cancel()
     }
-    // 有 prompt 就是新回合;没有 prompt 就是从现有 transcript 续跑(重试走这条)。
-    // 后者校验尾部,所以重试能进行本身就说明失败回合已被 `context_edit` 剔除。
-    // `run` raises only when the synthesized failure cannot be delivered either;
-    // that error then escapes the session, matching pi.
-    let run_escaped = self.agent.run(
-      pending_prompts,
-      abort=abort_controller.signal(),
-      on_event=sink,
-    )
-    self.agent.set_messages(project_messages(self.journal.get_entries()))
-    if self.agent.messages().last()
-      is Some(
-        @agent_loop.AgentMessage::Assistant(
-          { stop_reason: Error, error_message, .. }
-        )
-      ) {
-      if !run_escaped &&
-        self.retry_settings.enabled &&
-        error_message is Some(message) &&
-        is_retryable_error_message(message) &&
-        retry_attempt < self.retry_settings.max_retries {
-        retry_attempt = retry_attempt + 1
-        let delay_ms = self.retry_settings.delay_ms(retry_attempt)
-        self.fanout.on_event(
-          AgentSessionEvent::AutoRetryStart(
-            attempt=retry_attempt,
-            max_attempts=self.retry_settings.max_retries,
-            delay_ms~,
-            error_message=message,
-          ),
-        )
-        if last_assistant_entry_id is Some(entry_id) {
-          ignore(
-            self.journal.append([
-              {
-                id: self.journal.generate_id(),
-                content: ContextEdit(target_id=entry_id),
-              },
-            ]),
-          )
-        }
-        self.agent.set_messages(project_messages(self.journal.get_entries()))
-        if wait_backoff(delay_ms, abort_controller.signal()) is Aborted {
-          // 退避窗口里被中断:这一轮不再发起。
-          settle_retry(false, Some("Retry cancelled"))
-          break
-        }
-        pending_prompts = []
-        continue
-      }
-      settle_retry(false, error_message)
-      break
-    }
-    // 重试窗口没等到新的 assistant 消息就结束了(例如退避睡完与 run 启动之间被中断)。
-    settle_retry(false, Some("Retry cancelled"))
-    break
+    ignore(task.wait())
   }
 }
 
@@ -229,40 +255,18 @@ pub fn AgentSession::active_tool_names(
 ///|
 /// 中断当前运行(如果没有正在跑的,则无效果)。
 pub fn AgentSession::abort(self : AgentSession) -> Unit {
-  guard self.active_run_abort_controller is Some(controller) else { return }
-  controller.abort()
+  guard self.active_run is Some(run) else { return }
+  if !run.val.1 {
+    run.val = (run.val.0, true)
+    if run.val.0 is Some(task) {
+      task.cancel()
+    }
+  }
 }
 
 ///|
 /// A function that contributes to the system prompt based on the active tools.
-/// The prompt should end with a newline.
 pub type SystemPromptContributor = (ArrayView[String]) -> String
-
-///|
-/// 退避竞速的结局。`@async.any` 只返回胜者的值、不告知下标,所以每个分支都要在
-/// 返回值里带上自己的编码。
-priv enum BackoffWait {
-  Slept
-  Aborted
-}
-
-///|
-/// 退避睡眠与中断竞速:谁先到谁赢,输的一支被 `@async.any` 取消。
-async fn wait_backoff(
-  delay_ms : Int32,
-  abort : @agent_loop.AbortSignal,
-) -> BackoffWait {
-  @async.any([
-    async fn() {
-      @async.sleep(delay_ms)
-      BackoffWait::Slept
-    },
-    async fn() {
-      abort.wait_abort()
-      BackoffWait::Aborted
-    },
-  ])
-}
 
 ///|
 /// 从 journal 条目投影出模型上下文。压缩条目把此前的历史换成"总结 + 保留尾部"

@@ -93,84 +93,93 @@ fn empty_context() -> @agent_loop.Context {
 }
 
 ///|
-async test "pre-aborted provider makes no HTTP request" {
+async test "cancelling a provider before startup makes no HTTP request" {
   fetch_gate.acquire()
   defer fetch_gate.release()
   let fixture = install_fetch("headers")
   defer fixture.restore()
-  let controller = @agent_loop.AbortController::new()
-  controller.abort()
   let llm = @providers.DeepSeekProvider(api_key="offline").new_llm("test-model")
-  let message = llm.generate(
-    empty_context(),
-    sink=_ => fail("pre-aborted generation emitted an event"),
-    abort=controller.signal(),
-  )
-  assert_true(message.stop_reason is Aborted)
+  @async.with_task_group() <| group => {
+    let task = group.spawn(() => {
+      @async.handle_cancellation(() => {
+        llm.generate(empty_context(), sink=_ => {
+          fail("unexpected streaming event")
+        })
+      })
+    })
+    task.cancel()
+    assert_true(task.wait() is None)
+  }
   assert_eq(fixture.calls(), 0)
 }
 
 ///|
-async test "abort cancels headers error body and retry backoff" {
+async test "cancellation closes pending headers error bodies and retry backoff" {
   fetch_gate.acquire()
   defer fetch_gate.release()
   for mode in ["headers", "error-body", "backoff"] {
     let fixture = install_fetch(mode)
     defer fixture.restore()
-    let controller = @agent_loop.AbortController::new()
     let llm = @providers.DeepSeekProvider(api_key="offline").new_llm(
       "test-model",
     )
-    let message = @async.with_timeout(1000, () => {
-      @async.with_task_group() <| group => {
-        group.spawn_bg(async fn() {
-          @async.sleep(50)
-          assert_eq(fixture.calls(), 1)
-          controller.abort()
+    @async.with_timeout(1000, () => {
+      @async.with_task_group(group => {
+        let task = group.spawn(() => {
+          @async.handle_cancellation(() => {
+            llm.generate(empty_context(), sink=_ => {
+              fail("unexpected streaming event")
+            })
+          })
         })
-        llm.generate(
-          empty_context(),
-          sink=_ => fail("request without SSE emitted an event"),
-          abort=controller.signal(),
-        )
-      }
+        @async.sleep(50)
+        assert_eq(fixture.calls(), 1)
+        task.cancel()
+        assert_true(task.wait() is None)
+      })
     })
-    assert_true(message.stop_reason is Aborted)
-    assert_true(message.content.is_empty())
-    assert_eq(message.model, "test-model")
     if mode == "headers" {
       assert_true(fixture.aborted())
-    } else if mode == "error-body" {
+    }
+    if mode == "error-body" {
       assert_true(fixture.closed())
     }
-    // Waiting past the first backoff proves no retry escaped cancellation.
     @async.sleep(550)
     assert_eq(fixture.calls(), 1)
   }
 }
 
 ///|
-async test "provider abort retains streamed text and closes response" {
+async test "provider cancellation closes a streaming response" {
   fetch_gate.acquire()
   defer fetch_gate.release()
   let fixture = install_fetch("stream")
   defer fixture.restore()
-  let controller = @agent_loop.AbortController::new()
   let llm = @providers.DeepSeekProvider(api_key="offline").new_llm("test-model")
-  let message = @async.with_timeout(1000, () => {
-    llm.generate(
-      empty_context(),
-      sink=event => if event is TextDelta(..) { controller.abort() },
-      abort=controller.signal(),
-    )
+  let partial : Ref[@agent_loop.AssistantMessage?] = Ref(None)
+  @async.with_timeout(1000, () => {
+    @async.with_task_group(group => {
+      let active : Ref[@async.Task[@agent_loop.AssistantMessage?]?] = Ref(None)
+      let task = group.spawn(() => {
+        @async.handle_cancellation(() => {
+          llm.generate(empty_context(), sink=event => {
+            if event is TextDelta(partial=message, ..) {
+              partial.val = Some(message)
+              active.val.unwrap().cancel()
+            }
+          })
+        })
+      })
+      active.val = Some(task)
+      assert_true(task.wait() is None)
+    })
   })
-  assert_true(message.stop_reason is Aborted)
   assert_true(fixture.closed())
   assert_eq(fixture.calls(), 1)
-  match message.content {
-    [Text(text, ..)] => assert_eq(text, "partial answer")
-    _ => fail("aborted provider lost its partial text")
+  guard partial.val is Some({ content: [Text(text, ..)], .. }) else {
+    fail("missing partial")
   }
+  assert_eq(text, "partial answer")
 }
 
 ///|
@@ -209,11 +218,7 @@ async test "image blocks encode as input_image for vision models" {
   let llm = @providers.DeepSeekProvider(api_key="offline").new_llm(
     "deepseek-v4-flash",
   )
-  let message = llm.generate(
-    context,
-    sink=_ => (),
-    abort=@agent_loop.AbortController::new().signal(),
-  )
+  let message = llm.generate(context, sink=_ => ())
   assert_true(message.stop_reason is @agent_loop.StopReason::Stop)
   assert_eq(fixture.calls(), 1)
   guard @json.parse(fixture.request_body()) is { "input": input, .. } else {
@@ -271,11 +276,7 @@ async test "image blocks downgrade to placeholder for non-vision models" {
     tools: [],
   }
   let llm = @providers.DeepSeekProvider(api_key="offline").new_llm("test-model")
-  let message = llm.generate(
-    context,
-    sink=_ => (),
-    abort=@agent_loop.AbortController::new().signal(),
-  )
+  let message = llm.generate(context, sink=_ => ())
   assert_true(message.stop_reason is @agent_loop.StopReason::Stop)
   assert_eq(fixture.calls(), 1)
   guard @json.parse(fixture.request_body()) is { "input": input, .. } else {

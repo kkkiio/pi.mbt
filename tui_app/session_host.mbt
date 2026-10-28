@@ -420,8 +420,6 @@ pub async fn SessionHost::prompt(
   app : TuiApp,
 ) -> Unit {
   app.begin_work("thinking")
-  // The session emits an error turn for runtime failures. Errors while
-  // delivering that turn can still escape to this UI boundary.
   self.session.prompt(input) catch {
     err => app.push_error("prompt failed: \{err}")
   }

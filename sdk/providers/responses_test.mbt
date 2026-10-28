@@ -176,12 +176,9 @@ async test "openai web-page streaming example" {
 }
 
 ///|
-/// 中断要及时:模型停止发送数据(流停滞)时置位 abort,读流应立即返回
-/// `Aborted`,而不是阻塞到 120s 空闲超时。这是"读行与 abort 竞速"的回归
-/// 测试(对应 pi:signal 交给 fetch 取消请求)。
-async test "responses sse stream returns promptly on abort while stalled" {
+async test "a stalled responses stream can be cancelled promptly" {
   let (reader, writer) = @io.pipe()
-  let controller = @agent_loop.AbortController::new()
+  let active : Ref[@async.Task[@agent_loop.AssistantMessage?]?] = Ref(None)
   let messages : Array[@agent_loop.GenerationEvent] = []
   let start = @async.now()
   @async.with_task_group() <| group => {
@@ -210,33 +207,27 @@ async test "responses sse stream returns promptly on abort while stalled" {
       )
     }
     group.spawn_bg(async fn() {
-      // 模拟用户在流式输出中途按 Esc。先等首个事件落进 sink 再置位:
-      // 排空速率随 CI 负载波动,固定 sleep 会让 abort 抢在首个 flush
-      // 之前,使下面的 messages.length()>0 偶发失败。5s 兜底保证流真
-      // 坏了也不会挂住测试。
       let mut waited = 0
       while messages.length() == 0 && waited < 5_000 {
         @async.sleep(10)
         waited += 10
       }
-      controller.abort()
+      active.val.unwrap().cancel()
     })
-    let message = @providers.read_responses_sse_stream(
-      reader,
-      sink=event => messages.push(event),
-      api="openai-responses",
-      provider="deepseek",
-      model="deepseek-v4-flash",
-      abort=controller.signal,
-    )
-    // 在 abort 置位后远小于 120s 空闲超时内返回,且停因为 Aborted。
-    let elapsed_ms = @async.now() - start
-    debug_inspect(elapsed_ms < 10_000, content="true")
-    match message.stop_reason {
-      @agent_loop.StopReason::Aborted => debug_inspect(true, content="true")
-      other => abort("expected Aborted, got \{other}")
-    }
-    // 已收到的部分内容保留在返回消息里。
-    debug_inspect(messages.length() > 0, content="true")
+    let task = group.spawn(() => {
+      @async.handle_cancellation(() => {
+        @providers.read_responses_sse_stream(
+          reader,
+          sink=event => messages.push(event),
+          api="openai-responses",
+          provider="deepseek",
+          model="deepseek-v4-flash",
+        )
+      })
+    })
+    active.val = Some(task)
+    assert_true(task.wait() is None)
+    assert_true(@async.now() - start < 10_000)
+    assert_true(messages.length() > 0)
   }
 }

@@ -4,9 +4,8 @@
 /// prompt and one run.
 ///
 /// Session policy stays outside on purpose — the journal and the auto-retry
-/// window are not agent state. `Agent::run` therefore takes one attempt plus an
-/// abort signal, so a session can share a single retry window across attempts
-/// and persist every event as it happens.
+/// window are not agent state. `Agent::run` executes one attempt so a session
+/// can own a cancellable retry window and persist events as they happen.
 pub struct Agent {
   llm : &@agent_loop.LLM
   tool_registry : @tools.ToolRegistry
@@ -25,7 +24,7 @@ pub fn Agent::Agent(
   tool_registry~ : @tools.ToolRegistry = @tools.ToolRegistry(),
   active_tools~ : ArrayView[String] = [],
   messages~ : ArrayView[@agent_loop.AgentMessage] = [],
-  finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _, _) => None,
+  finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
   auto_refresh_system_prompt~ : Bool = false,
 ) -> Agent {
   Agent::{
@@ -134,25 +133,14 @@ pub fn Agent::system_prompt(self : Agent) -> String {
 }
 
 ///|
-/// Run one generation attempt: prompts are new user turns, an empty `prompts`
-/// continues from the current transcript (the retry path).
-///
-/// Events go to `on_event` in loop order; a listener failure closes the run with
-/// a synthesized assistant Error/Aborted message on the same event path, so
-/// whoever persists events sees the failure too. If `on_event` rejects those
-/// events as well, that error escapes.
-///
-/// Returns whether the run escaped the loop. Such a failure is local, not a
-/// provider error, so a caller running retries must not treat the synthesized
-/// message as retryable.
+/// Runs one attempt, delivering ordered events to `on_event`.
+/// Empty prompts continue the transcript; extension errors propagate.
+/// Cancellation closes the current turn before leaving the task.
 pub async fn Agent::run(
   self : Agent,
   prompts : ArrayView[@agent_loop.UserMessage],
-  abort~ : @agent_loop.AbortSignal,
   on_event~ : async (@agent_loop.AgentEvent) -> Unit,
-) -> Bool {
-  // Resolve before the failure handling below: an unknown active tool is a
-  // configuration error, not a failed provider turn.
+) -> Unit {
   let tools : Array[@tools.ToolDefinition] = []
   for name in self.active_tools {
     guard self.tool_registry.get_tool(name) is Some(tool) else {
@@ -168,14 +156,7 @@ pub async fn Agent::run(
     constrained_sampling: d.constrained_sampling,
   })
   let system_prompt = self.system_prompt()
-  let mut escaped = false
-  let mut assistant_metadata : @agent_loop.AssistantMessage? = None
   let sink : async (@agent_loop.AgentEvent) -> Unit = event => {
-    match event {
-      MessageStart(Assistant(message)) | MessageEnd(Assistant(message)) =>
-        assistant_metadata = Some(message)
-      _ => ()
-    }
     match event {
       MessageEnd(User(message)) => self.messages.push(User(message))
       MessageEnd(Assistant(message)) => self.messages.push(Assistant(message))
@@ -185,57 +166,26 @@ pub async fn Agent::run(
     }
     on_event(event)
   }
-  try {
-    if prompts.length() > 0 {
-      @agent_loop.run_agent_loop(
-        self.llm,
-        system_prompt,
-        self.messages.copy(),
-        agent_tools,
-        prompts,
-        tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
-        abort~,
-        event_sink=sink,
-        finish_turn_hook=self.finish_turn_hook,
-      )
-    } else {
-      @agent_loop.run_agent_loop_continue(
-        self.llm,
-        system_prompt,
-        self.messages.copy(),
-        agent_tools,
-        tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
-        abort~,
-        event_sink=sink,
-        finish_turn_hook=self.finish_turn_hook,
-      )
-    }
-  } catch {
-    err => {
-      // Escaping errors are not provider failures — providers fold those into
-      // an error AssistantMessage. What reaches here is a local failure
-      // (listener, journal), so close the run on the same event path pi's
-      // `handleRunFailure` uses.
-      let failure : @agent_loop.AssistantMessage = {
-        content: [@agent_loop.AssistantMessageContent::Text("", signature={})],
-        api: assistant_metadata.map(m => m.api).unwrap_or(""),
-        provider: assistant_metadata.map(m => m.provider).unwrap_or(""),
-        model: assistant_metadata.map(m => m.model).unwrap_or(""),
-        stop_reason: if abort.is_aborted() {
-          Aborted
-        } else {
-          Error
-        },
-        error_message: Some(err.to_string()),
-        usage: None,
-        timestamp: @env.now(),
-      }
-      escaped = true
-      sink(MessageStart(Assistant(failure)))
-      sink(MessageEnd(Assistant(failure)))
-      sink(TurnEnd(failure, []))
-      sink(AgentEnd([Assistant(failure)]))
-    }
+  if prompts.length() > 0 {
+    @agent_loop.run_agent_loop(
+      self.llm,
+      system_prompt,
+      self.messages.copy(),
+      agent_tools,
+      prompts,
+      tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+      event_sink=sink,
+      finish_turn_hook=self.finish_turn_hook,
+    )
+  } else {
+    @agent_loop.run_agent_loop_continue(
+      self.llm,
+      system_prompt,
+      self.messages.copy(),
+      agent_tools,
+      tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+      event_sink=sink,
+      finish_turn_hook=self.finish_turn_hook,
+    )
   }
-  escaped
 }

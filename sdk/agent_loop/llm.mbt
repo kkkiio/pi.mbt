@@ -3,15 +3,9 @@
 /// delivering streaming deltas through `sink` as they arrive and returning the
 /// final `AssistantMessage` as the terminal outcome. Providers run their
 /// response stream inline in the calling task (no background task), following
-/// the callback/sink model.
+/// the callback/sink model. Cancellation unwinds without a terminal result.
 pub(open) trait LLM {
-  async fn generate(
-    Self,
-    Context,
-    sink~ : async (GenerationEvent) -> Unit,
-    /// 本次运行的中断令牌(只读),对应 pi 传给 stream function 的 `signal`。
-    abort~ : AbortSignal,
-  ) -> AssistantMessage
+  async fn generate(Self, Context, sink~ : async (GenerationEvent) -> Unit) -> AssistantMessage
 }
 
 ///|

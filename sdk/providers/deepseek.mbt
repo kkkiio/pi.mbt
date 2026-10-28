@@ -124,7 +124,6 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
   self : DeepSeekResponsesAPILLM,
   context : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
   let input = encode_responses_input(
     context,
@@ -169,101 +168,57 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
     "tool_choice": "auto",
     "input": input,
   }
-  // `bail` semantics: the retry window covers connection through the first
-  // SSE event. Once any event has streamed, the completion is live and billed;
-  // a retry would duplicate content downstream, so failures past that point
-  // propagate to the caller instead. Failed attempts emit nothing, keeping the
-  // retry invisible to the sink and downstream consumers.
+  @async.pause()
   let mut produced = false
-  let mut partial = aborted_message(
-    [],
-    api="openai-responses",
-    provider="deepseek",
-    model=self.model_id,
-    now=@env.now(),
-  )
-  // Do not start a request when cancellation predates this call.
-  if abort.is_aborted() {
-    return partial
-  }
   let attempt_sink = (event : @agent_loop.GenerationEvent) => {
     produced = true
-    match event {
-      Start(partial=message)
-      | TextStart(partial=message, ..)
-      | TextDelta(partial=message, ..)
-      | TextEnd(partial=message, ..)
-      | ThinkingStart(partial=message, ..)
-      | ThinkingDelta(partial=message, ..)
-      | ThinkingEnd(partial=message, ..)
-      | ToolCallStart(partial=message, ..)
-      | ToolCallDelta(partial=message, ..)
-      | ToolCallEnd(partial=message, ..) => partial = message
-    }
     sink(event)
   }
-  // One cancellation scope covers HTTP setup, error-body reads, backoff and
-  // SSE. Cancelling the request runs client.close() and aborts the JS fetch;
-  // keep the latest decoded partial outside that scope for the terminal result.
-  @async.with_task_group() <| group => {
-    group.spawn_bg(no_wait=true) <| async fn() {
-      abort.wait_abort()
-      group.return_immediately(
-        aborted_message(
-          partial.content,
-          api=partial.api,
-          provider=partial.provider,
-          model=partial.model,
-          now=partial.timestamp,
-        ),
-      )
-    }
-    @async.retry(
-      @async.ExponentialDelay(
-        initial=RETRY_BACKOFF_MS,
-        factor=2.0,
-        maximum=MAX_BACKOFF_MS,
-      ),
-      max_retry=RETRY_ATTEMPTS - 1,
-      // Transport-shaped errors and `RetryableApiError` are retried within
-      // the budget; anything else is a final verdict that must not be
-      // replayed: plain failures (4xx, malformed payloads, truncated
-      // streams) or an attempt that already produced output. Cancellation is
-      // a control-flow signal rather than an error, so `retry` propagates it
-      // on its own and it never reaches this predicate.
-      fatal_error=error => produced || error is Failure::Failure(_),
-      () => {
-        // Each attempt is a fresh request and a fresh SSE stream.
-        let client = @http.post_stream("\{BASE_URL}/v1/responses", headers={
-          "Content-Type": "application/json",
-          "Authorization": "Bearer \{self.api_key}",
-          "Accept-Encoding": "identity", // disable gzip for streaming
-        })
-        defer client.close()
-        client.write(body)
-        let resp = client.end_request()
-        guard resp.code >= 200 && resp.code < 300 else {
-          let detail = client.read_all().text()
-          let message = "DeepSeek API error \{resp.code}: \{detail}"
-          if retryable_status(resp.code) {
-            raise RetryableApiError(message)
-          }
-          fail(message)
+  @async.retry(
+    @async.ExponentialDelay(
+      initial=RETRY_BACKOFF_MS,
+      factor=2.0,
+      maximum=MAX_BACKOFF_MS,
+    ),
+    max_retry=RETRY_ATTEMPTS - 1,
+    // Transport-shaped errors and `RetryableApiError` are retried within
+    // the budget; anything else is a final verdict that must not be
+    // replayed: plain failures (4xx, malformed payloads, truncated
+    // streams) or an attempt that already produced output. Cancellation is
+    // a control-flow signal rather than an error, so `retry` propagates it
+    // on its own and it never reaches this predicate.
+    fatal_error=error => produced || error is Failure::Failure(_),
+    () => {
+      // Each attempt is a fresh request and a fresh SSE stream.
+      let client = @http.post_stream("\{BASE_URL}/v1/responses", headers={
+        "Content-Type": "application/json",
+        "Authorization": "Bearer \{self.api_key}",
+        "Accept-Encoding": "identity", // disable gzip for streaming
+      })
+      defer client.close()
+      client.write(body)
+      let resp = client.end_request()
+      guard resp.code >= 200 && resp.code < 300 else {
+        let detail = client.read_all().text()
+        let message = "DeepSeek API error \{resp.code}: \{detail}"
+        if retryable_status(resp.code) {
+          raise RetryableApiError(message)
         }
-        read_responses_sse_stream(
-          client,
-          sink=attempt_sink,
-          api="openai-responses",
-          provider="deepseek",
-          model=self.model_id,
-          custom_tool_input_properties~,
-        )
-      },
-    ) catch {
-      // Budget exhausted (or bailed): surface the same message a non-retrying
-      // call would have produced, via plain failure so the marker never escapes.
-      RetryableApiError(message) => fail(message)
-      error => raise error
-    }
+        fail(message)
+      }
+      read_responses_sse_stream(
+        client,
+        sink=attempt_sink,
+        api="openai-responses",
+        provider="deepseek",
+        model=self.model_id,
+        custom_tool_input_properties~,
+      )
+    },
+  ) catch {
+    // Budget exhausted (or bailed): surface the same message a non-retrying
+    // call would have produced, via plain failure so the marker never escapes.
+    RetryableApiError(message) => fail(message)
+    error => raise error
   }
 }

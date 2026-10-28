@@ -19,9 +19,7 @@ impl @agent_loop.LLM for ContextCapturingLLM with fn generate(
   self : ContextCapturingLLM,
   ctx : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
-  ignore(abort)
   self.seen.clear()
   for message in ctx.messages {
     self.seen.push(message)

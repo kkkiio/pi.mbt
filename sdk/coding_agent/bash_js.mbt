@@ -21,8 +21,8 @@
 ///   text is exactly `timeout:{seconds}`;
 /// - a spawn failure (bad `cwd`, missing `/bin/bash`) fails with Node's
 ///   message, which then propagates like the native fs error did;
-/// - cancellation aborts the exit wait and `defer` kills the child, raising
-///   `Aborted`, whose text is exactly `aborted`.
+/// - cancellation aborts the exit wait and `defer` kills the child while
+///   the cancellation signal unwinds.
 ///
 /// The two texts are pinned because `execute_bash_tool` switches on them
 /// (`"aborted"`, `[.. "timeout:", ..]`). They are raised as a typed suberror
