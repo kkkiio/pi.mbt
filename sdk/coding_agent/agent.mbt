@@ -11,7 +11,10 @@ pub fn new_coding_session(
   let tool_registry = @tools.ToolRegistry()
   let bash_tool = new_bash_tool_definition(cwd~)
   tool_registry.register_tool(bash_tool)
-  let codemode_tool = new_codemode_tool_definition(tools=[bash_tool])
+  let codemode_tool = new_codemode_tool_definition(
+    tools=[bash_tool],
+    journal=Some(journal),
+  )
   tool_registry.register_tool(codemode_tool)
   let session = @agent_session.AgentSession(
     llm,

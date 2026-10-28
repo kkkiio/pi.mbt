@@ -61,6 +61,9 @@ function startExecution(link, streamId, request) {
       resolveExchange(exchangeId, { type: "stop" });
     }
   };
+  // A link that is gone (socket closed) asks every execution on it to stop:
+  // their pending exchanges resolve `stop`, which ends serveCodemodeRemote.
+  state.stopAll = stopAll;
 
   const exchange = (messages) =>
     new Promise((resolve) => {
@@ -136,6 +139,10 @@ function handleFrame(link, frame) {
     if (data !== null && typeof data === "object" && state.answer) state.answer(data);
     return;
   }
+  // Only a start request opens a stream — `{ data: {...} }`. Late
+  // `result`/`stop` frames for a settled stream are dropped, like upstream's
+  // `waiting.get(id)` miss.
+  if (data === null || typeof data !== "object" || data.data === null || typeof data.data !== "object") return;
   startExecution(link, streamId, data);
 }
 
@@ -161,6 +168,9 @@ function runStdio() {
     send: (frame) => process.stdout.write(JSON.stringify(frame) + "\n"),
   };
   let pending = "";
+  // UTF-8 decode at the stream level: a raw Buffer appended per chunk would
+  // split multibyte characters on chunk boundaries into replacement chars.
+  process.stdin.setEncoding("utf8");
   process.stdin.on("data", (chunk) => {
     pending += chunk;
     let index = pending.indexOf("\n");
@@ -188,11 +198,22 @@ async function runWebSocket(port) {
     const link = {
       streams: new Map(),
       eof: false,
-      send: (frame) => socket.send(JSON.stringify(frame)),
+      send: (frame) => {
+        try {
+          socket.send(JSON.stringify(frame));
+        } catch {
+          // closed socket: the frames (exit/failure) have nowhere to go
+        }
+      },
     };
     socket.on("message", (data) => feedLines(link, data.toString()));
     socket.on("close", () => {
-      link.eof = true;
+      // A disconnected client can no longer receive replies: stop its
+      // executions rather than orphaning their VMs. Process exit is stdio
+      // only — `link.eof` stays false so a settle() never exits the server.
+      for (const state of link.streams.values()) {
+        state.stopAll?.();
+      }
     });
   });
   wss.on("listening", () => {

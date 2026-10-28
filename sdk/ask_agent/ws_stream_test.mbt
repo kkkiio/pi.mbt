@@ -80,7 +80,10 @@ async test "execute codemode over a ws stream" {
             is { "stream_id": id, "data": data, .. } else {
             fail("bad frame")
           }
-          if data is { "type": "result", .. } {
+          // `stop` is a stream-close marker, not a request: the real
+          // `serveCodemodeRemote` answers it silently, so the fake ignores it
+          // instead of replying done+exit.
+          if data is { "type": "result", .. } || data is { "type": "stop", .. } {
             continue
           }
           ws.send_text(

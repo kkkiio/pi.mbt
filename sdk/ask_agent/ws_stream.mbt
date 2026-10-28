@@ -34,7 +34,9 @@ pub async fn WsStreams::connect(url~ : String) -> WsStreams {
 pub async fn[X] with_ws_streams(url~ : String, f : async (WsStreams) -> X) -> X {
   let streams = WsStreams::connect(url~)
   @async.with_task_group(tg => {
-    tg.spawn_bg(() => streams.run())
+    // `no_wait`: teardown cancels the pump instead of waiting on a socket
+    // close to wake `recv`, which a transport close does not guarantee.
+    tg.spawn_bg(no_wait=true, () => streams.run())
     defer streams.close()
     f(streams)
   })
@@ -143,7 +145,17 @@ pub impl @codemode.VmServer for WsStream with fn recv(self) -> Json {
 }
 
 ///|
+/// Closing tells the remote to stop its VM — pi's `remoteLauncher.stop()` —
+/// by queueing a final `{ "type": "stop" }` frame. `try_put` never suspends,
+/// so `close` stays safe to call from a cancelled coroutine (an `async`
+/// `send` would fail there); a full or closed queue drops the frame.
+/// Harmless on normal completion: the stream already exited remotely.
 pub impl @codemode.VmServer for WsStream with fn close(self) {
+  ignore(
+    self.send_queue.try_put({ "stream_id": self.id, "data": { "type": "stop" } }) catch {
+      _ => false
+    },
+  )
   self.recv_queue_map.remove(self.id)
   self.recv_queue.close()
 }

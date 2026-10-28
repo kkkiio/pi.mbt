@@ -89,7 +89,7 @@ pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(
     while read_frame() is Some(line) {
       let frame = @json.parse(@utf8.decode_lossy(line[:]))
       guard frame is { "stream_id": Number(stream_id, ..), "data": data, .. } else {
-        fail("ndjson streams: invalid frame \{frame.stringify()}")
+        continue // malformed frame: drop it rather than killing the shared pump
       }
       if self.recv_queue_map.get(stream_id.to_int()) is Some(queue) {
         queue.put(data) catch {
@@ -164,7 +164,17 @@ pub impl @codemode.VmServer for NdJsonStream with fn recv(self) -> Json {
 }
 
 ///|
+/// Closing tells the remote to stop its VM — pi's `remoteLauncher.stop()` —
+/// by queueing a final `{ "type": "stop" }` frame. `try_put` never suspends,
+/// so `close` stays safe to call from a cancelled coroutine (an `async`
+/// `send` would fail there); a full or closed queue drops the frame.
+/// Harmless on normal completion: the stream already exited remotely.
 pub impl @codemode.VmServer for NdJsonStream with fn close(self) {
+  ignore(
+    self.send_queue.try_put({ "stream_id": self.id, "data": { "type": "stop" } }) catch {
+      _ => false
+    },
+  )
   self.recv_queue_map.remove(self.id)
   self.recv_queue.close()
 }

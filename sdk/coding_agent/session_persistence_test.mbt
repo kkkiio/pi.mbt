@@ -252,7 +252,7 @@ async test "tool details and usage survive journal resume" {
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
-    execute: (_, _, _) => {
+    execute: (_, _, _, _) => {
       content: [Text("tool output")],
       details,
       usage: Some(usage),
