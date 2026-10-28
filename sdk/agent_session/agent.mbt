@@ -133,13 +133,13 @@ pub fn Agent::system_prompt(self : Agent) -> String {
 }
 
 ///|
-/// Runs one attempt, delivering ordered events to `on_event`.
+/// Runs one attempt, delivering ordered events and delivery context to `on_event`.
 /// Empty prompts continue the transcript; extension errors propagate.
 /// Cancellation closes the current turn before leaving the task.
 pub async fn Agent::run(
   self : Agent,
   prompts : ArrayView[@agent_loop.UserMessage],
-  on_event~ : async (@agent_loop.AgentEvent) -> Unit,
+  on_event~ : @agent_loop.EventSink,
 ) -> Unit {
   let tools : Array[@tools.ToolDefinition] = []
   for name in self.active_tools {
@@ -156,7 +156,7 @@ pub async fn Agent::run(
     constrained_sampling: d.constrained_sampling,
   })
   let system_prompt = self.system_prompt()
-  let sink : async (@agent_loop.AgentEvent) -> Unit = event => {
+  let sink : @agent_loop.EventSink = (event, context) => {
     match event {
       MessageEnd(User(message)) => self.messages.push(User(message))
       MessageEnd(Assistant(message)) => self.messages.push(Assistant(message))
@@ -164,7 +164,7 @@ pub async fn Agent::run(
         self.messages.push(@agent_loop.ToolResult(result))
       _ => ()
     }
-    on_event(event)
+    on_event(event, context)
   }
   if prompts.length() > 0 {
     @agent_loop.run_agent_loop(

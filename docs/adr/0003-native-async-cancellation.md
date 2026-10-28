@@ -7,7 +7,7 @@
 
 此前的 AbortController / AbortSignal 在 session、loop 与 provider 间透传，最终仍通过 task group 取消 HTTP 请求和工具任务。moonbitlang/async 0.22.5 已提供不可被普通 catch 捕获的原生取消、defer / errdefer 和 protect_from_cancel，可以直接承担任务取消与资源释放。
 
-`event_sink : async (AgentEvent) -> Unit` 同时提供顺序通知、背压与失败传播。它属于执行链：应用可以等待扩展完成，或通过抛错终止执行。核心不能回滚扩展已经产生的副作用，也不能通过重放事件保证所有 listener 恰好处理一次。
+`event_sink` 同时提供顺序通知、背压与失败传播。它属于执行链：应用可以等待扩展完成，或通过抛错终止执行。核心不能回滚扩展已经产生的副作用，也不能通过重放事件保证所有 listener 恰好处理一次。
 
 ## 决策
 
@@ -45,7 +45,7 @@ loop 显式记录当前输入、assistant、工具批次、已产生结果及生
 
 正常执行不保护整个 sink。journal 属于 session：session 在其 sink 内保护一次追加及关联记账，再调用可取消的 listeners。保护仅防任务取消，不吞存储错误，不提供任意 I/O 失败的事务回滚。
 
-取消收尾由 loop 的 protect_from_cancel 保护，包含收尾期间调用的整个 sink。因此此时 listeners 也不可被外部任务取消，但仍可抛错。扩展自行设置等待期限；核心不增加收尾超时配置。
+取消收尾由 loop 的 protect_from_cancel 保护，包含收尾期间调用的整个 sink。[ADR 0004](0004-layered-event-cancellation.md) 进一步区分宿主 sink 和 session listener：session 在完成 journal 追加后，为每个 listener 重新建立原生取消边界，扩展显式保护自己的必要异步收尾。核心不增加收尾超时配置。
 
 使用公开的 async.pause 在工作边界提供调度与取消检查点，不能将同步计算视为可抢占执行。
 
@@ -85,4 +85,4 @@ TUI 和 CLI 必须通过 prompt() 的返回或错误结束本次调用，不能�
 
 公共 SDK 接口发生破坏性变化：LLM.generate、loop 和 Agent.run 删除 signal 参数，finish-turn hook 改为两个参数，Agent.run 返回 Unit。取消的可观察结果仍通过 loop 事件和消息表达；直接调用 provider 被取消时不会返回 Aborted 消息。
 
-原生取消减少了跨层竞速代码，保留扩展对执行顺序的控制。代价是应用需要处理扩展失败造成的事件截断，并对受保护收尾中可能长期等待的扩展负责。
+原生取消减少了跨层竞速代码，保留扩展对执行顺序的控制。代价是应用需要处理扩展失败造成的事件截断，并对扩展主动保护的收尾等待负责。

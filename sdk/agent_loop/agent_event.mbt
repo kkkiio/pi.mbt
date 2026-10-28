@@ -1,4 +1,16 @@
 ///|
+/// Describes event delivery; `is_cancelling` is true during cancellation cleanup.
+/// This immutable context reports the delivery phase and does not request cancellation.
+pub(all) struct EventContext {
+  is_cancelling : Bool
+}
+
+///|
+/// Receives ordered loop events and their delivery context.
+/// Cancellation cleanup protects the sink; errors stop delivery and propagate.
+pub type EventSink = async (AgentEvent, EventContext) -> Unit
+
+///|
 /// Lifecycle events emitted by agent loop, ordered by nesting:
 /// agent → turn → message → tool execution.
 ///
@@ -6,7 +18,6 @@
 /// with an in-flight `AssistantMessage` snapshot whose `stop_reason` is
 /// `Pending` and `usage` is `None`; metadata is only trustworthy from
 /// `MessageEnd` onwards.
-/// The owning session also emits terminal events when the loop raises.
 pub(all) enum AgentEvent {
   AgentStart
   TurnStart

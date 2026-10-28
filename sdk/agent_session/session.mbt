@@ -69,7 +69,11 @@ pub async fn AgentSession::prompt(
         let mut retry_attempt = 0
         let mut pending_retry_end : AgentSessionEvent? = None
         let mut last_assistant_entry_id : String? = None
-        let settle_retry = (success : Bool, final_error : String?) => {
+        let settle_retry = (
+          success : Bool,
+          final_error : String?,
+          is_cancelling : Bool,
+        ) => {
           let event = if pending_retry_end is Some(event) {
             Some(event)
           } else if retry_attempt > 0 {
@@ -80,18 +84,18 @@ pub async fn AgentSession::prompt(
           retry_attempt = 0
           pending_retry_end = None
           if event is Some(event) {
-            self.fanout.on_event(event)
+            self.fanout.on_event(event, is_cancelling~)
           }
         }
         errdefer (if failure is None && @async.is_being_cancelled() {
           @async.protect_from_cancel(() => {
-            settle_retry(false, Some("Retry cancelled"))
+            settle_retry(false, Some("Retry cancelled"), true)
           })
         })
         let outcome : Result[Unit, Error] = try {
           let mut pending_prompts = input
           for ;; {
-            let sink : async (@agent_loop.AgentEvent) -> Unit = event => {
+            let sink : @agent_loop.EventSink = (event, context) => {
               let content : SessionEntryContent? = match event {
                 MessageEnd(User(_) as message) => Some(Message(message))
                 MessageEnd(Assistant(message) as msg) => {
@@ -132,10 +136,13 @@ pub async fn AgentSession::prompt(
                   ),
                 )
               }
-              self.fanout.on_event(Loop(event))
+              self.fanout.on_event(
+                Loop(event),
+                is_cancelling=context.is_cancelling,
+              )
               if pending_retry_end is Some(event) {
                 pending_retry_end = None
-                self.fanout.on_event(event)
+                self.fanout.on_event(event, is_cancelling=context.is_cancelling)
               }
             }
             self.agent.run(pending_prompts, on_event=sink)
@@ -182,10 +189,10 @@ pub async fn AgentSession::prompt(
                 pending_prompts = []
                 continue
               }
-              settle_retry(false, error_message)
+              settle_retry(false, error_message, false)
               break
             }
-            settle_retry(false, Some("Retry cancelled"))
+            settle_retry(false, Some("Retry cancelled"), false)
             break
           }
           Ok(())
@@ -210,7 +217,9 @@ pub async fn AgentSession::prompt(
 }
 
 ///|
-/// Subscribe to events starting from the next prompt. This will not replay past events.
+/// Subscribes `listener` to future session events in registration order.
+/// During cancellation cleanup each listener enters a cancelled task; protect required async work.
+/// Listener errors propagate from `prompt`; previously delivered events are not replayed.
 pub fn AgentSession::subscribe(
   self : AgentSession,
   listener : EventListener,

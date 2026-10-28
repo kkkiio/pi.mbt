@@ -35,7 +35,7 @@ pub fn Agent::Agent(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayV
 pub fn Agent::active_tool_names(Self) -> ArrayView[String]
 pub fn Agent::has_tool(Self, String) -> Bool
 pub fn Agent::messages(Self) -> ArrayView[@agent_loop.AgentMessage]
-pub async fn Agent::run(Self, ArrayView[@agent_loop.UserMessage], on_event~ : async (@agent_loop.AgentEvent) -> Unit) -> Unit
+pub async fn Agent::run(Self, ArrayView[@agent_loop.UserMessage], on_event~ : async (@agent_loop.AgentEvent, @agent_loop.EventContext) -> Unit) -> Unit
 pub fn Agent::set_active_tools(Self, ArrayView[String]) -> Unit raise
 pub fn Agent::set_finish_turn_hook(Self, async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?) -> Unit
 pub fn Agent::set_messages(Self, ArrayView[@agent_loop.AgentMessage]) -> Unit
@@ -67,7 +67,7 @@ pub struct FanOutListener {
   listeners : Array[async (AgentSessionEvent) -> Unit]
 }
 pub fn FanOutListener::FanOutListener() -> Self
-pub async fn FanOutListener::on_event(Self, AgentSessionEvent) -> Unit
+pub async fn FanOutListener::on_event(Self, AgentSessionEvent, is_cancelling? : Bool) -> Unit
 
 type InMemorySessionJournal
 pub fn InMemorySessionJournal::InMemorySessionJournal(now? : () -> UInt64) -> Self

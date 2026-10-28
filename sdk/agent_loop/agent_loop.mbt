@@ -15,9 +15,10 @@ pub async fn run_agent_loop(
   prompts : ArrayView[UserMessage],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
   steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
-  event_sink~ : async (AgentEvent) -> Unit = _ => (),
+  event_sink~ : EventSink = (_, _) => (),
   finish_turn_hook~ : FinishTurnHook = (_, _) => None,
 ) -> Unit {
+  let context = EventContext::{ is_cancelling: false, }
   let mut pending_prompts = prompts
   if steer_channel() is ([_, ..] as steer_messages) {
     pending_prompts += steer_messages
@@ -42,20 +43,21 @@ pub async fn run_agent_loop(
     let mut agent_ended = false
     errdefer (if failure is None && @async.is_being_cancelled() {
       @async.protect_from_cancel(() => {
+        let context = EventContext::{ is_cancelling: true, }
         if !turn_started {
           turn_started = true
-          event_sink(TurnStart)
+          event_sink(TurnStart, context)
         }
         while input_index < pending_prompts.length() {
           let msg = AgentMessage::User(pending_prompts[input_index])
           if !input_started {
             messages.push(msg)
             input_started = true
-            event_sink(MessageStart(msg))
+            event_sink(MessageStart(msg), context)
           }
           input_index += 1
           input_started = false
-          event_sink(MessageEnd(msg))
+          event_sink(MessageEnd(msg), context)
         }
         let message = if assistant_finalized {
           assistant.unwrap()
@@ -88,17 +90,17 @@ pub async fn run_agent_loop(
         }
         if !assistant_started {
           assistant_started = true
-          event_sink(MessageStart(Assistant(message)))
+          event_sink(MessageStart(Assistant(message)), context)
         }
         if !assistant_ended {
           assistant_ended = true
-          event_sink(MessageEnd(Assistant(message)))
+          event_sink(MessageEnd(Assistant(message)), context)
         }
         while tool_index < tool_calls.length() {
           let call = tool_calls[tool_index]
           if !tool_started {
             tool_started = true
-            event_sink(ToolExecutionStart(call))
+            event_sink(ToolExecutionStart(call), context)
           }
           let result = ready_result.unwrap_or(ToolResultMessage::{
             tool_call_id: call.id,
@@ -114,36 +116,36 @@ pub async fn run_agent_loop(
           tool_index += 1
           tool_started = false
           ready_result = None
-          event_sink(ToolExecutionEnd(result))
+          event_sink(ToolExecutionEnd(result), context)
         }
         if !turn_ended {
           turn_ended = true
-          event_sink(TurnEnd(message, tool_results))
+          event_sink(TurnEnd(message, tool_results), context)
         }
         if !agent_ended {
           agent_ended = true
-          event_sink(AgentEnd(messages))
+          event_sink(AgentEnd(messages), context)
         }
       })
     })
     let outcome : Result[Unit, Error] = try {
       if !agent_started {
         agent_started = true
-        event_sink(AgentStart)
+        event_sink(AgentStart, context)
         @async.pause()
       }
       turn_started = true
-      event_sink(TurnStart)
+      event_sink(TurnStart, context)
       @async.pause()
       while input_index < pending_prompts.length() {
         let msg = AgentMessage::User(pending_prompts[input_index])
         messages.push(msg)
         input_started = true
-        event_sink(MessageStart(msg))
+        event_sink(MessageStart(msg), context)
         @async.pause()
         input_index += 1
         input_started = false
-        event_sink(MessageEnd(msg))
+        event_sink(MessageEnd(msg), context)
         @async.pause()
       }
       let message = llm.generate({ system_prompt, messages, tools, }, sink=event => {
@@ -153,7 +155,7 @@ pub async fn run_agent_loop(
             assistant_slot = Some(messages.length())
             messages.push(Assistant(partial))
             assistant_started = true
-            event_sink(MessageStart(Assistant(partial))) catch {
+            event_sink(MessageStart(Assistant(partial)), context) catch {
               err => raise ListenerError(err)
             }
           }
@@ -169,7 +171,7 @@ pub async fn run_agent_loop(
             if assistant_slot is Some(index) {
               assistant = Some(partial)
               messages[index] = Assistant(partial)
-              event_sink(MessageUpdate(event)) catch {
+              event_sink(MessageUpdate(event), context) catch {
                 err => raise ListenerError(err)
               }
             }
@@ -227,16 +229,16 @@ pub async fn run_agent_loop(
       }
       if !assistant_started {
         assistant_started = true
-        event_sink(MessageStart(Assistant(message)))
+        event_sink(MessageStart(Assistant(message)), context)
         @async.pause()
       }
       assistant_ended = true
-      event_sink(MessageEnd(Assistant(message)))
+      event_sink(MessageEnd(Assistant(message)), context)
       @async.pause()
       while tool_index < tool_calls.length() {
         let call = tool_calls[tool_index]
         tool_started = true
-        event_sink(ToolExecutionStart(call))
+        event_sink(ToolExecutionStart(call), context)
         @async.pause()
         let timestamp = @env.now()
         if message.stop_reason is Length {
@@ -259,7 +261,7 @@ pub async fn run_agent_loop(
             group.spawn_bg() <| () => {
               for ;; {
                 let (content, details) = updates.get() catch { _ => break }
-                event_sink(ToolExecutionUpdate(call, content, details))
+                event_sink(ToolExecutionUpdate(call, content, details), context)
                 @async.pause()
               }
             }
@@ -290,14 +292,14 @@ pub async fn run_agent_loop(
         tool_index += 1
         tool_started = false
         ready_result = None
-        event_sink(ToolExecutionEnd(result))
+        event_sink(ToolExecutionEnd(result), context)
         @async.pause()
       }
       @async.pause()
       let decision = finish_turn_hook(messages, tool_results)
       @async.pause()
       turn_ended = true
-      event_sink(TurnEnd(message, tool_results))
+      event_sink(TurnEnd(message, tool_results), context)
       @async.pause()
       if !hard_exit && !(decision is Some(End)) {
         pending_prompts = steer_channel()
@@ -306,7 +308,7 @@ pub async fn run_agent_loop(
         }
       }
       agent_ended = true
-      event_sink(AgentEnd(messages))
+      event_sink(AgentEnd(messages), context)
       @async.pause()
       return
     } catch {
@@ -332,7 +334,7 @@ pub async fn run_agent_loop_continue(
   tools : ArrayView[ToolDefinition],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
   steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
-  event_sink~ : async (AgentEvent) -> Unit = _ => (),
+  event_sink~ : EventSink = (_, _) => (),
   finish_turn_hook~ : FinishTurnHook = (_, _) => None,
 ) -> Unit {
   guard messages.length() > 0 else {

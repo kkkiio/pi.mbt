@@ -30,11 +30,27 @@ pub fn FanOutListener::FanOutListener() -> FanOutListener {
 }
 
 ///|
+/// Delivers events sequentially, awaiting each listener before the next.
+/// With `is_cancelling=true`, each listener enters an independently cancelled task.
+/// Native cancellation advances to the next listener; ordinary errors propagate.
+/// Callers must protect cancellation cleanup while waiting for all listeners.
 pub async fn FanOutListener::on_event(
   self : FanOutListener,
   event : AgentSessionEvent,
+  is_cancelling~ : Bool = false,
 ) -> Unit {
   for listener in self.listeners {
-    listener(event)
+    if is_cancelling {
+      @async.with_task_group() <| group => {
+        let gate = @async.Semaphore(1, initial_value=0)
+        group.spawn_bg(() => {
+          ignore(@async.handle_cancellation(() => gate.acquire()))
+          listener(event)
+        })
+        group.return_immediately(())
+      }
+    } else {
+      listener(event)
+    }
   }
 }

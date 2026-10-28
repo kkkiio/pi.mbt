@@ -312,10 +312,13 @@ async test "cancellation cleanup waits for async listeners and ignores repeated 
     match event {
       Loop(MessageUpdate(TextDelta(..))) => session.abort()
       Loop(MessageEnd(Assistant(message))) if message.stop_reason is Aborted => {
-        @async.sleep(5)
-        session.abort()
-        @async.sleep(5)
-        delivered = true
+        assert_true(@async.is_being_cancelled())
+        @async.protect_from_cancel(() => {
+          @async.sleep(5)
+          session.abort()
+          @async.sleep(5)
+          delivered = true
+        })
       }
       Loop(AgentEnd(_)) => {
         assert_true(delivered)
@@ -337,10 +340,11 @@ async test "errors raised during cancellation cleanup propagate and stop dispatc
   session.subscribe(event => {
     match event {
       Loop(MessageUpdate(TextDelta(..))) => session.abort()
-      Loop(MessageEnd(Assistant(message))) if message.stop_reason is Aborted => {
-        @async.sleep(0)
-        raise SessionExtensionFailure
-      }
+      Loop(MessageEnd(Assistant(message))) if message.stop_reason is Aborted =>
+        @async.protect_from_cancel(() => {
+          @async.sleep(0)
+          raise SessionExtensionFailure
+        })
       Loop(AgentEnd(_)) => ended = true
       _ => ()
     }
@@ -461,7 +465,10 @@ async test "a retry end waiting behind a cancelled listener is delivered once" {
         session.abort()
         @async.sleep(0)
       }
-      AutoRetryEnd(success~, ..) => retry_ends.push(success)
+      AutoRetryEnd(success~, ..) => {
+        assert_true(@async.is_being_cancelled())
+        retry_ends.push(success)
+      }
       _ => ()
     }
   })
