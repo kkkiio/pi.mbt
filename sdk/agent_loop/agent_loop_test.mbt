@@ -147,7 +147,7 @@ async test "finish turn end: stops the run and skips the next steering poll" {
       ordering.push("finish_turn:\{tool_results.length()}")
       Some(@agent_loop.AgentTurnDecision::End)
     },
-    event_sink=event => events.push(event),
+    event_sink=(event, _) => events.push(event),
   )
   // One provider call: `end` cancelled the pending tool follow-up.
   assert_eq(llm.cursor, 1)
@@ -201,7 +201,7 @@ async test "finish turn end: hook sees the transcript with tool results appended
       }
       Some(@agent_loop.AgentTurnDecision::End)
     },
-    event_sink=event => events.push(event),
+    event_sink=(event, _) => events.push(event),
   )
   assert_eq(llm.cursor, 1)
   json_inspect(executed, content=[{ "value": "hello" }])
@@ -269,7 +269,7 @@ async test "cancelling generation seals the partial and skips the finish hook" {
             hooked = true
             Some(End)
           },
-          event_sink=event => {
+          event_sink=(event, _) => {
             events.push(event)
             if event is MessageStart(Assistant(_)) {
               active.val.unwrap().cancel()
@@ -323,7 +323,7 @@ async test "finish turn end: leaves queued steering unconsumed" {
       }
     },
     finish_turn_hook=(_, _) => Some(@agent_loop.AgentTurnDecision::End),
-    event_sink=event => events.push(event),
+    event_sink=(event, _) => events.push(event),
   )
   // Polled once before the loop; the post-turn poll never happened.
   assert_eq(steer_calls.length(), 1)
@@ -353,7 +353,7 @@ async test "cancelling before startup journals the accepted input and an aborted
           [],
           [end_hook_user("hi")],
           tool_executor=(_, _) => end_hook_tool_result(),
-          event_sink=event => events.push(event),
+          event_sink=(event, _) => events.push(event),
         )
       })
     })
@@ -426,7 +426,7 @@ async test "continue runs a turn from a tool result tail" {
     messages,
     end_hook_no_tools(),
     tool_executor=(_, _) => end_hook_tool_result(),
-    event_sink=event => events.push(event),
+    event_sink=(event, _) => events.push(event),
   )
   json_inspect(messages.map(end_hook_message_role), content=[
     "user", "assistant", "toolResult", "assistant",
@@ -508,7 +508,7 @@ async test "tool execution updates stream between start and end" {
       })
       end_hook_tool_result()
     },
-    event_sink=event => events.push(event),
+    event_sink=(event, _) => events.push(event),
   )
   guard settled_sink is Some(update) else { fail("executor saw no sink") }
   update([@agent_loop.InputMessageContent::Text("stale")], {})
@@ -556,4 +556,71 @@ async test "tool execution updates stream between start and end" {
       },
     },
   ])
+}
+
+///|
+async test "loop cancellation context accompanies protected terminal delivery" {
+  let llm = EndHookLLM::new([
+    end_hook_assistant([end_hook_text("partial")], stop_reason=Pending),
+  ])
+  let delivered : Array[(String, Bool)] = []
+  @async.with_task_group() <| group => {
+    let active : Ref[@async.Task[Unit?]?] = Ref(None)
+    let task = group.spawn(() => {
+      @async.handle_cancellation(() => {
+        @agent_loop.run_agent_loop(
+          llm,
+          "",
+          [],
+          [],
+          [end_hook_user("run")],
+          tool_executor=(_, _) => end_hook_tool_result(),
+          event_sink=(event, context) => {
+            delivered.push((end_hook_event_name(event), context.is_cancelling))
+            if context.is_cancelling {
+              assert_false(@async.is_being_cancelled())
+              @async.sleep(0)
+            } else if event is MessageStart(Assistant(_)) {
+              active.val.unwrap().cancel()
+            }
+          },
+        )
+      })
+    })
+    active.val = Some(task)
+    assert_true(task.wait() is None)
+  }
+  json_inspect(delivered, content=[
+    ["agent_start", false],
+    ["turn_start", false],
+    ["message_start", false],
+    ["message_end", false],
+    ["message_start", false],
+    ["message_end", true],
+    ["turn_end", true],
+    ["agent_end", true],
+  ])
+}
+
+///|
+async test "normal loop sink delivery reports its ordinary context" {
+  let llm = EndHookLLM::new([
+    end_hook_assistant([end_hook_text("answer")], stop_reason=Stop),
+  ])
+  let mut count = 0
+  @agent_loop.run_agent_loop(
+    llm,
+    "",
+    [],
+    [],
+    [end_hook_user("run")],
+    tool_executor=(_, _) => end_hook_tool_result(),
+    event_sink=(_, context) => {
+      assert_false(context.is_cancelling)
+      assert_false(@async.is_being_cancelled())
+      @async.sleep(0)
+      count += 1
+    },
+  )
+  assert_eq(count, 8)
 }
