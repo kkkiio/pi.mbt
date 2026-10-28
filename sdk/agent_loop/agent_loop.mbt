@@ -24,6 +24,8 @@ pub async fn run_agent_loop(
   // TODO: support follow-up channel
   event_sink~ : async (AgentEvent) -> Unit = _ => (),
   finish_turn_hook~ : FinishTurnHook = (_, _, _) => None,
+  /// Re-read declarations before each model request, for tools loaded during a run.
+  get_tools~ : (() -> Array[ToolDefinition])? = None,
 ) -> Unit {
   event_sink(AgentEvent::AgentStart)
   let mut pending_prompts = prompts
@@ -41,8 +43,12 @@ pub async fn run_agent_loop(
     }
     pending_prompts = []
     let mut message_started = false
+    let current_tools = match get_tools {
+      Some(get) => get()
+      None => tools.to_owned()
+    }
     let assistant_message = llm.generate(
-      { system_prompt, messages, tools, },
+      { system_prompt, messages, tools: current_tools, },
       sink=event => {
         match event {
           Start(partial~) => {
@@ -270,6 +276,8 @@ pub async fn run_agent_loop_continue(
   abort~ : AbortSignal = AbortSignal::never(),
   event_sink~ : async (AgentEvent) -> Unit = _ => (),
   finish_turn_hook~ : FinishTurnHook = (_, _, _) => None,
+  /// Re-read declarations before each model request, including continued runs.
+  get_tools~ : (() -> Array[ToolDefinition])? = None,
 ) -> Unit {
   guard messages.length() > 0 else {
     fail("Cannot continue: no messages in context")
@@ -290,6 +298,7 @@ pub async fn run_agent_loop_continue(
     abort~,
     event_sink~,
     finish_turn_hook~,
+    get_tools~,
   )
 }
 

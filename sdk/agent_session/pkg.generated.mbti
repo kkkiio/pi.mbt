@@ -8,11 +8,15 @@ import {
 }
 
 // Values
+pub const TOOL_SEARCH_TOOL_NAME : String = "tool_search"
+
 pub fn agent_event_to_pi_json(@agent_loop.AgentEvent) -> Json raise
 
 pub fn format_journal_timestamp(UInt64) -> String
 
 pub fn is_retryable_error_message(String) -> Bool
+
+pub fn new_tool_search_tool_definition(AgentSession) -> @tools.ToolDefinition
 
 pub fn to_pi_json(AgentSessionEvent) -> Json raise
 
@@ -22,6 +26,7 @@ pub fn to_pi_json(AgentSessionEvent) -> Json raise
 pub struct Agent {
   llm : &@agent_loop.LLM
   tool_registry : @tools.ToolRegistry
+  mut tool_search : @tools.ToolDefinition?
   active_tools : Array[String]
   system_prompt_contributes : Array[(ArrayView[String]) -> String]
   auto_refresh_system_prompt : Bool
@@ -45,13 +50,14 @@ pub struct AgentSession {
   fanout : FanOutListener
   retry_settings : RetrySettings
   mut active_run_abort_controller : @agent_loop.AbortController?
+  mut tools_recorded : Bool
 }
 pub fn AgentSession::AgentSession(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], journal? : &SessionJournal, tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], retry_settings? : RetrySettings, finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool) -> Self
 pub fn AgentSession::abort(Self) -> Unit
 pub fn AgentSession::active_tool_names(Self) -> ArrayView[String]
 pub fn AgentSession::messages(Self) -> ArrayView[@agent_loop.AgentMessage]
 pub async fn AgentSession::prompt(Self, Array[@agent_loop.UserMessage]) -> Unit
-pub fn AgentSession::set_active_tools(Self, ArrayView[String]) -> Unit raise
+pub async fn AgentSession::set_active_tools(Self, ArrayView[String]) -> Unit
 pub fn AgentSession::set_finish_turn_hook(Self, async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage], @agent_loop.AbortSignal) -> @agent_loop.AgentTurnDecision?) -> Unit
 pub fn AgentSession::subscribe(Self, async (AgentSessionEvent) -> Unit) -> Unit
 

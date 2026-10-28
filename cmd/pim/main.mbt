@@ -34,6 +34,10 @@ async fn main {
           long="thinking",
           about="thinking effort level: low, high (default), or max",
         ),
+        OptionArg(
+          "tools",
+          about="comma-separated active tools: bash,tool_search (default bash)",
+        ),
       ],
       positionals=[
         PositionArg(
@@ -99,6 +103,25 @@ async fn main {
   // 错误的会话:两个选择器同时给出直接报错。
   if continue_session && resume_prefix is Some(_) {
     fatal("Error: --continue cannot be combined with --resume")
+  }
+  let active_tools = match matches.values.get("tools") {
+    Some([names, ..]) => {
+      let selected : Array[String] = []
+      for name in names.split(",") {
+        let name = name.trim().to_owned()
+        if name.is_empty() {
+          continue
+        }
+        guard name is ("bash" | "tool_search") else {
+          fatal("Error: unknown tool '\{name}' (expected bash or tool_search)")
+        }
+        if !selected.contains(name) {
+          selected.push(name)
+        }
+      }
+      selected
+    }
+    _ => ["bash"]
   }
   let api_key = resolve_deepseek_api_key() catch {
     AuthConfigError(message) => fatal("Error: \{message}")
@@ -211,6 +234,7 @@ async fn main {
       session_dir,
       resume_path~,
       initial=messages,
+      active_tools~,
     ) catch {
       err => fatal("Error: \{clean_error_message("\{err}")}")
     }
@@ -254,7 +278,12 @@ async fn main {
       }
   }
   defer cleanup()
-  let session = @coding_agent.new_coding_session(llm, cwd~, journal~)
+  let session = @coding_agent.new_coding_session(
+    llm,
+    cwd~,
+    journal~,
+    active_tools~,
+  )
   let mut last_message : @agent_loop.AgentMessage? = None
   if mode is Json {
     // JSONL 模式:每个 AgentSessionEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。

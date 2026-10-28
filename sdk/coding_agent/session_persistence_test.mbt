@@ -59,7 +59,7 @@ async test "a session turn persists exactly one journal file" {
       _ => "other"
     }
   })
-  assert_eq(roles, ["user", "assistant"])
+  assert_eq(roles, ["other", "user", "assistant"])
   @coding_agent.remove_file(path)
   @coding_agent.remove_dir(dir)
 }
@@ -220,9 +220,10 @@ async test "resuming a pi v3 journal reconstructs compacted branch context" {
     "kept turn", "active branch", "next turn",
   ])
   let all = @coding_agent.fetch_entries(path)
-  assert_eq(all.length(), 8)
+  assert_eq(all.length(), 9)
   assert_eq(all[6].parent_id, Some("active"))
   assert_eq(all[7].parent_id, Some(all[6].id))
+  assert_eq(all[8].parent_id, Some(all[7].id))
   @coding_agent.remove_file(path)
   @coding_agent.remove_dir(dir)
 }
@@ -283,7 +284,7 @@ async test "tool details and usage survive journal resume" {
   session.prompt([user_message("run probe")])
   file.close()
   let entries = @coding_agent.fetch_active_entries(path)
-  let result = match entries[2].content {
+  let result = match entries[3].content {
     Message(ToolResult(result)) => result
     _ => fail("expected tool result in journal")
   }
@@ -329,6 +330,7 @@ async test "tool details and usage survive journal resume" {
     second,
     cwd=dir,
     journal=resumed_journal,
+    tool_registry=registry,
   )
   resumed.prompt([user_message("continue")])
   resumed_file.close()

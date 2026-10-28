@@ -49,7 +49,7 @@ pub fn load_agents_files(String) -> Array[ProjectContextFile]
 
 pub fn new_bash_tool_definition(cwd? : String, exec? : async (BashExecParams) -> Int32) -> @tools.ToolDefinition
 
-pub fn new_coding_session(&@agent_loop.LLM, cwd~ : String, journal? : &@agent_session.SessionJournal, active_tools? : ArrayView[String]) -> @agent_session.AgentSession
+pub fn new_coding_session(&@agent_loop.LLM, cwd~ : String, journal? : &@agent_session.SessionJournal, active_tools? : ArrayView[String], tool_registry? : @tools.ToolRegistry) -> @agent_session.AgentSession
 
 pub fn open_append_file(String, permission? : Int32) -> FsFile raise FsError
 

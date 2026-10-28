@@ -962,7 +962,7 @@ async test "listener failures close the run and preserve the next model context"
     session.prompt([user_message("first request")])
     assert_eq(recovery_events, ["start", "end", "turn_end", "agent_end"])
     let entries = journal.get_entries()
-    let expected_count = if phase == "turn_end" { 3 } else { 2 }
+    let expected_count = if phase == "turn_end" { 4 } else { 3 }
     assert_eq(entries.length(), expected_count)
     guard entries[expected_count - 1].content is Message(Assistant(failure)) else {
       fail("expected terminal assistant failure")
@@ -1023,7 +1023,7 @@ async test "a listener that also rejects recovery leaves the session reusable" {
       err => err.to_string()
     }
     assert_true(error.contains("recovery listener failure"))
-    assert_eq(journal.get_entries().length(), if reject_end { 2 } else { 1 })
+    assert_eq(journal.get_entries().length(), if reject_end { 3 } else { 2 })
     reject = false
     session.prompt([user_message("second request")])
     assert_eq(
@@ -1068,16 +1068,16 @@ async test "a failure that escapes the run does not auto-retry" {
   session.prompt([user_message("go")])
   assert_eq(retry_events.length(), 0)
   assert_eq(llm.pending_responses(), 0)
-  // [user, assistant(completed), assistant(synthetic error)]: the failure is
+  // [tools, user, assistant(completed), assistant(synthetic error)]: the failure is
   // journaled like pi's handleRunFailure, with no context_edit and no second
   // provider call.
   let entries = journal.get_entries()
-  assert_eq(entries.length(), 3)
-  guard entries[1].content is Message(Assistant(completed)) else {
+  assert_eq(entries.length(), 4)
+  guard entries[2].content is Message(Assistant(completed)) else {
     fail("expected the completed assistant turn")
   }
   assert_true(completed.stop_reason is @agent_loop.StopReason::Stop)
-  guard entries[2].content is Message(Assistant(failure)) else {
+  guard entries[3].content is Message(Assistant(failure)) else {
     fail("expected terminal assistant failure")
   }
   assert_true(failure.error_message.unwrap_or("").contains("socket hang up"))
@@ -1375,11 +1375,11 @@ async test "interrupt cancels retry backoff without starting another attempt" {
     // Raw history keeps the completed failures; cancellation adds no fake turn.
     // Each attempted retry also records the `context_edit` that omits its failed
     // turn, so `attempt` runs contribute `attempt` edits on top of the user
-    // message and the failed assistants.
-    assert_eq(journal.get_entries().length(), 2 * attempt + 1)
+    // message and the failed assistants, plus the initial tool snapshot.
+    assert_eq(journal.get_entries().length(), 2 * attempt + 2)
     session.prompt([user_message("next")])
     assert_eq(llm.pending_responses(), 0)
-    assert_eq(journal.get_entries().length(), 2 * attempt + 3)
+    assert_eq(journal.get_entries().length(), 2 * attempt + 4)
     assert_eq(ends.length(), 1)
   }
 }
@@ -1478,6 +1478,6 @@ async test "a reloaded session projects the same context as the live one" {
   inspect(live, content="user: go\nassistant: done")
   let reloaded = @agent_session.AgentSession(StubLLM::{ }, journal~)
   assert_eq(context_lines(reloaded.messages().to_owned()), live)
-  // The failed turn stays in the record: user, error turn, its edit, the retry.
-  assert_eq(journal.get_entries().length(), 4)
+  // The record includes the initial tool snapshot, user, error, edit, and retry.
+  assert_eq(journal.get_entries().length(), 5)
 }

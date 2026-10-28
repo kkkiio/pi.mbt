@@ -9,6 +9,7 @@ pub struct AgentSession {
   /// Agent-level auto-retry policy, read at every retryable failure.
   retry_settings : RetrySettings
   mut active_run_abort_controller : @agent_loop.AbortController?
+  mut tools_recorded : Bool
 }
 
 ///|
@@ -22,22 +23,29 @@ pub fn AgentSession::AgentSession(
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _, _) => None,
   auto_refresh_system_prompt~ : Bool = false,
 ) -> AgentSession {
+  let (restored_tools, tools_recorded) = project_active_tools(
+    journal.get_entries(),
+    active_tools,
+  )
   let agent = Agent::Agent(
     llm,
     system_prompt_contributes~,
     tool_registry~,
-    active_tools~,
+    active_tools=restored_tools,
     messages=project_messages(journal.get_entries()),
     finish_turn_hook~,
     auto_refresh_system_prompt~,
   )
-  AgentSession::{
+  let session = AgentSession::{
     journal,
     agent,
     fanout: FanOutListener::FanOutListener(),
     retry_settings,
     active_run_abort_controller: None,
+    tools_recorded,
   }
+  session.agent.tool_search = Some(new_tool_search_tool_definition(session))
+  session
 }
 
 ///|
@@ -107,6 +115,9 @@ pub async fn AgentSession::prompt(
         _ => None
       }
       if content is Some(content) {
+        if !self.tools_recorded {
+          self.set_active_tools(self.agent.active_tool_names())
+        }
         let stored = self.journal.append([
           { id: self.journal.generate_id(), content, },
         ])
@@ -210,12 +221,64 @@ pub fn AgentSession::set_finish_turn_hook(
 }
 
 ///|
-/// Delegates to the inner agent.
-pub fn AgentSession::set_active_tools(
+/// Persist a replacement tool set before making it active. Unknown names fail
+/// without changing the journal or the agent. The last change on the selected
+/// journal branch wins during hydration, including an explicitly empty set.
+pub async fn AgentSession::set_active_tools(
   self : AgentSession,
   names : ArrayView[String],
-) -> Unit raise {
-  self.agent.set_active_tools(names)
+) -> Unit {
+  let next : Array[String] = []
+  for name in names {
+    guard self.agent.has_tool(name) else { fail("unknown tool: \{name}") }
+    if !next.contains(name) {
+      next.push(name)
+    }
+  }
+  if self.tools_recorded && self.agent.active_tool_names() == next {
+    return
+  }
+  ignore(
+    self.journal.append([
+      {
+        id: self.journal.generate_id(),
+        content: Custom(
+          custom_type="pi.tools",
+          data=Some({ "activeTools": next }),
+        ),
+      },
+    ]),
+  )
+  self.agent.set_active_tools(next)
+  self.tools_recorded = true
+}
+
+///|
+fn project_active_tools(
+  entries : ArrayView[SessionEntry],
+  fallback : ArrayView[String],
+) -> (Array[String], Bool) {
+  let mut active = fallback.to_owned()
+  let mut recorded = false
+  for entry in entries {
+    if entry.content
+      is Custom(
+        custom_type="pi.tools",
+        data=Some({ "activeTools": Array(names), .. })
+      ) {
+      let next = names.filter_map(n => {
+        match n {
+          String(name) => Some(name)
+          _ => None
+        }
+      })
+      if next.length() == names.length() {
+        active = next
+        recorded = true
+      }
+    }
+  }
+  (active, recorded)
 }
 
 ///|

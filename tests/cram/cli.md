@@ -28,6 +28,19 @@ Options:
   --session-dir <session_dir>  directory to store session JSONL files (default: <config>/sessions/<cwd>) [env: PIM_SESSION_DIR]
   --mode <mode>                output mode: text or json (default text)
   --thinking <thinking>        thinking effort level: low, high (default), or max
+  --tools <tools>              comma-separated active tools: bash,tool_search (default bash)
+```
+
+## 工具选择
+
+`tool_search` 默认不启用。`--tools tool_search` 只声明搜索工具,
+让模型搜索并加载 `bash`;`--tools bash,tool_search` 同时启用两者。
+未知名称在读取凭证前报错:
+
+```mooncram {output_stream: stderr}
+$ PIM_CONFIG_DIR=tests/cram/testdata/auth-absent moon run cmd/pim -- --tools missing -p hi
+Error: unknown tool 'missing' (expected bash or tool_search)
+[1]
 ```
 
 ## 会话参数

@@ -1,3 +1,4 @@
 import {
   "KKKIIO/pi/sdk/agent_loop",
+  "moonbitlang/core/math",
 }

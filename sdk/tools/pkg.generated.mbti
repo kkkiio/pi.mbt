@@ -21,10 +21,40 @@ pub(all) struct ToolDefinition {
   execute : async (String, Json, (Array[@agent_loop.InputMessageContent], Json) -> Unit) -> @agent_loop.ToolResult
 }
 
+pub(all) enum ToolExposure {
+  Direct
+  Deferred
+  Codemode
+  ModelOnly
+} derive(Eq)
+pub fn ToolExposure::equal(Self, Self) -> Bool
+pub fn ToolExposure::not_equal(Self, Self) -> Bool
+
+pub(all) struct ToolInfo {
+  name : String
+  description : String
+} derive(Eq, ToJson)
+pub fn ToolInfo::equal(Self, Self) -> Bool
+pub fn ToolInfo::not_equal(Self, Self) -> Bool
+pub fn ToolInfo::to_json(Self) -> Json
+
+pub(all) struct ToolNamespace {
+  name : String
+  prefix : String
+  description : String
+  instructions : String
+}
+
 type ToolRegistry
 pub fn ToolRegistry::ToolRegistry() -> Self
+pub fn ToolRegistry::all_tools(Self) -> Array[ToolInfo]
+pub fn ToolRegistry::describe_namespace(Self, String) -> String?
+pub fn ToolRegistry::describe_tool(Self, String) -> String?
 pub fn ToolRegistry::get_tool(Self, String) -> ToolDefinition?
-pub fn ToolRegistry::register_tool(Self, ToolDefinition) -> Unit
+pub fn ToolRegistry::overlay(Self) -> Self
+pub fn ToolRegistry::register_namespace(Self, ToolNamespace) -> Unit
+pub fn ToolRegistry::register_tool(Self, ToolDefinition, exposure? : ToolExposure) -> Unit
+pub fn ToolRegistry::search_tools(Self, String, limit? : Int32, ns? : String?, exclude? : ArrayView[String]) -> Array[ToolInfo]
 
 // Type aliases
 

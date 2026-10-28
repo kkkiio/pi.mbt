@@ -1,0 +1,19 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/codemode"
+
+import {
+  "KKKIIO/pi/sdk/tools",
+}
+
+// Values
+pub fn new_discovery_globals(@tools.ToolRegistry) -> DiscoveryGlobals
+
+// Errors
+
+// Types and methods
+#external
+pub type DiscoveryGlobals
+
+// Type aliases
+
+// Traits
