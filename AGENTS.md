@@ -94,7 +94,7 @@ just build
 跑真实 provider 的 live 测试(需要 `DEEPSEEK_API_KEY`):
 
 ```bash
-# 若本地存在 `.env.test` 会自动加载
+# 若本地存在 `.env` 会自动加载(just 内建 dotenv)
 just eval
 # 或者手动设置 key
 DEEPSEEK_API_KEY=sk-... moon cram test --work-directory . tests/live

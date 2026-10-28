@@ -8,7 +8,7 @@ description: Test and debug pim's interactive mode in a controlled tmux terminal
 Run the TUI in a controlled terminal (from the repo root):
 
 ```bash
-set -a; source .env.test; set +a # load api key
+set -a; source .env; set +a # load api key
 tmux new-session -d -s pim-test -x 80 -y 24
 tmux send-keys -t pim-test "moon run cmd/pim" Enter
 sleep 3 && tmux capture-pane -t pim-test -p     # capture after startup
