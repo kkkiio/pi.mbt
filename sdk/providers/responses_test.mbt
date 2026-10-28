@@ -210,8 +210,15 @@ async test "responses sse stream returns promptly on abort while stalled" {
       )
     }
     group.spawn_bg(async fn() {
-      // 模拟用户在流式输出中途按 Esc。
-      @async.sleep(200)
+      // 模拟用户在流式输出中途按 Esc。先等首个事件落进 sink 再置位:
+      // 排空速率随 CI 负载波动,固定 sleep 会让 abort 抢在首个 flush
+      // 之前,使下面的 messages.length()>0 偶发失败。5s 兜底保证流真
+      // 坏了也不会挂住测试。
+      let mut waited = 0
+      while messages.length() == 0 && waited < 5_000 {
+        @async.sleep(10)
+        waited += 10
+      }
       controller.abort()
     })
     let message = @providers.read_responses_sse_stream(
