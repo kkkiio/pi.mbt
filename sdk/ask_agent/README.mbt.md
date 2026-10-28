@@ -7,13 +7,13 @@ Provides the agent with light-weight codemode sandbox instead of filesystem, OS 
 `WsStreams` 在一条 WebSocket 上复用多条 `{ "stream_id", "data" }` 逻辑流——这是 pim 自己的
 wire 形状,远端(例如 `scripts/codemode-sidecar.mjs --ws <port>` 或单独部署的 sandbox 容器)在其后
 面跑 pi-codemode 的 `serveCodemodeRemote`。每个沙箱执行对应一条流;`new_stream()` 返回的
-`WsStream` 是透明的 `@codemode.Vm`(`data` 原样透传:VM 消息、消息数组批、`{type:"exit"}` 终流帧),
+`WsStream` 是透明的 `@codemode.VmServer`(`data` 原样透传:VM 消息、消息数组批、`{type:"exit"}` 终流帧),
 交给 `@codemode.Codemode::execute` 使用。
 
 ```mbt nocheck
 @ask_agent.with_ws_streams(url="ws://sandbox-host:9000/", streams => {
   let codemode = @codemode.Codemode::Codemode(
-    fn() -> &@codemode.Vm { streams.new_stream() },
+    fn() -> &@codemode.VmServer { streams.new_stream() },
     tools=my_tools,
   )
   codemode.execute(code)

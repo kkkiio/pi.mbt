@@ -192,7 +192,7 @@ pub struct NdJsonStream {
 pub fn NdJsonStream::close(Self) -> Unit
 pub async fn NdJsonStream::recv(Self) -> Json
 pub async fn NdJsonStream::send(Self, Json) -> Unit
-pub impl @codemode.Vm for NdJsonStream
+pub impl @codemode.VmServer for NdJsonStream
 
 pub struct NdJsonStreams[R, W] {
   // private fields

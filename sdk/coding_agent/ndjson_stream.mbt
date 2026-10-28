@@ -2,7 +2,7 @@
 /// Multiplexed `{ "stream_id", "data" }` NDJSON frames over a byte stream —
 /// pim's wire shape toward `scripts/codemode-sidecar.mjs`, which runs
 /// pi-codemode's `serveCodemodeRemote` behind it. `run` pumps the stream;
-/// `new_stream` allocates a `NdJsonStream`, a transparent `@codemode.Vm`
+/// `new_stream` allocates a `NdJsonStream`, a transparent `@codemode.VmServer`
 /// ready for `Codemode::execute`.
 pub struct NdJsonStreams[R, W] {
   priv reader : R
@@ -137,7 +137,7 @@ pub fn[R, W] NdJsonStreams::close(self : NdJsonStreams[R, W]) -> Unit {
 }
 
 ///|
-/// One stream of an `NdJsonStreams` pump — a transparent `@codemode.Vm`:
+/// One stream of an `NdJsonStreams` pump — a transparent `@codemode.VmServer`:
 /// `send` wraps `data` in a `{ "stream_id", "data" }` frame; `recv` returns
 /// each `data` payload as-is — a VM message or an array batch — and raises
 /// once the remote ends the execution (`exit` frame, EOF, or `close`
@@ -150,12 +150,12 @@ pub struct NdJsonStream {
 }
 
 ///|
-pub impl @codemode.Vm for NdJsonStream with fn send(self, data : Json) -> Unit {
+pub impl @codemode.VmServer for NdJsonStream with fn send(self, data : Json) -> Unit {
   self.send_queue.put({ "stream_id": self.id, "data": data })
 }
 
 ///|
-pub impl @codemode.Vm for NdJsonStream with fn recv(self) -> Json {
+pub impl @codemode.VmServer for NdJsonStream with fn recv(self) -> Json {
   let data = self.recv_queue.get()
   if data is { "type": "exit", .. } {
     fail("ndjson stream: remote ended the execution")
@@ -164,10 +164,10 @@ pub impl @codemode.Vm for NdJsonStream with fn recv(self) -> Json {
 }
 
 ///|
-pub impl @codemode.Vm for NdJsonStream with fn close(self) {
+pub impl @codemode.VmServer for NdJsonStream with fn close(self) {
   self.recv_queue_map.remove(self.id)
   self.recv_queue.close()
 }
 
 ///|
-pub extend NdJsonStream with @codemode.Vm::{send, recv, close}
+pub extend NdJsonStream with @codemode.VmServer::{send, recv, close}

@@ -2,7 +2,7 @@
 /// Multiplexed `{ "stream_id", "data" }` JSON frames over one WebSocket
 /// connection — pim's own wire shape for a codemode remote. `run` pumps
 /// the connection; `new_stream` allocates a `WsStream`, a transparent
-/// `@codemode.Vm` for `Codemode::execute`: `data` payloads pass through
+/// `@codemode.VmServer` for `Codemode::execute`: `data` payloads pass through
 /// untouched — a VM message, an array batch, or `{ "type": "exit" }`
 /// ending the stream.
 pub struct WsStreams {
@@ -116,7 +116,7 @@ pub fn WsStreams::close(self : WsStreams) -> Unit {
 }
 
 ///|
-/// One stream of a `WsStreams` connection, transparent as a `@codemode.Vm`:
+/// One stream of a `WsStreams` connection, transparent as a `@codemode.VmServer`:
 /// `send` wraps `data` in a `{ "stream_id", "data" }` frame; `recv` returns
 /// each `data` payload as-is — a VM message or an array batch — and raises
 /// once the remote ends the execution (`exit` frame, connection close, or
@@ -129,12 +129,12 @@ pub struct WsStream {
 }
 
 ///|
-pub impl @codemode.Vm for WsStream with fn send(self, data : Json) -> Unit {
+pub impl @codemode.VmServer for WsStream with fn send(self, data : Json) -> Unit {
   self.send_queue.put({ "stream_id": self.id, "data": data })
 }
 
 ///|
-pub impl @codemode.Vm for WsStream with fn recv(self) -> Json {
+pub impl @codemode.VmServer for WsStream with fn recv(self) -> Json {
   let data = self.recv_queue.get()
   if data is { "type": "exit", .. } {
     fail("ws stream: remote ended the execution")
@@ -143,10 +143,10 @@ pub impl @codemode.Vm for WsStream with fn recv(self) -> Json {
 }
 
 ///|
-pub impl @codemode.Vm for WsStream with fn close(self) {
+pub impl @codemode.VmServer for WsStream with fn close(self) {
   self.recv_queue_map.remove(self.id)
   self.recv_queue.close()
 }
 
 ///|
-pub extend WsStream with @codemode.Vm::{send, recv, close}
+pub extend WsStream with @codemode.VmServer::{send, recv, close}

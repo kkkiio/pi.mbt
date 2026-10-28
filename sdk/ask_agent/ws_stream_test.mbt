@@ -102,7 +102,7 @@ async test "execute codemode over a ws stream" {
     })
     let result = @ask_agent.with_ws_streams(url="ws://127.0.0.1:\{port}", streams => {
       let codemode = @codemode.Codemode::Codemode(
-        fn() -> &@codemode.Vm { streams.new_stream() },
+        fn() -> &@codemode.VmServer { streams.new_stream() },
         tools=[],
         timeout_ms=0,
       )

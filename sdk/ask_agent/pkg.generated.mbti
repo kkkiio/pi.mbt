@@ -22,7 +22,7 @@ pub struct WsStream {
 pub fn WsStream::close(Self) -> Unit
 pub async fn WsStream::recv(Self) -> Json
 pub async fn WsStream::send(Self, Json) -> Unit
-pub impl @codemode.Vm for WsStream
+pub impl @codemode.VmServer for WsStream
 
 pub struct WsStreams {
   // private fields

@@ -1,6 +1,6 @@
 ///|
 struct Codemode {
-  vm_launcher : async () -> &Vm
+  vm_launcher : async () -> &VmServer
   tools : Map[String, CodemodeTool]
   globals : Map[String, CodemodeTool]
   timeout_ms : Int32
@@ -10,7 +10,7 @@ struct Codemode {
 ///|
 /// Create a new codemode instance.
 pub fn Codemode::Codemode(
-  vm_launcher : async () -> &Vm,
+  vm_launcher : async () -> &VmServer,
   tools~ : Array[CodemodeTool] = [],
   globals~ : Array[CodemodeTool] = [],
   timeout_ms~ : Int32 = 300000,
@@ -227,7 +227,7 @@ pub async fn Codemode::execute(
 }
 
 ///|
-pub(open) trait Vm {
+pub(open) trait VmServer {
   /// Send one whole JSON message to the peer.
   async fn send(Self, Json) -> Unit
   /// Receive the next whole JSON message. 
@@ -253,7 +253,7 @@ priv struct PendingCall {
 async fn Codemode::dispatch_call(
   self : Codemode,
   tg : @async.TaskGroup[CodemodeResult],
-  vm : &Vm,
+  vm : &VmServer,
   pending : Map[Int32, PendingCall],
   calls : Array[CodemodeCall],
   is_tool~ : Bool,

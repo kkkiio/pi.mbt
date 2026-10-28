@@ -3,9 +3,9 @@
 A tool for running js code in a sandboxed environment.
 The protocol is inspired by [pi's codemode-remote](https://github.com/earendil-works/pi/blob/main/packages/codemode/src/runtime/remote.ts).
 
-## Remote VM
+## Remote VM Server
 
-The Host and VM communicate through a stream of messages.
+The Host and VM Server communicate through a stream of messages.
 For example, the following js code:
 
 ```js
@@ -18,7 +18,7 @@ Would be executed as:
 ```mermaid
 sequenceDiagram
     participant H as Host
-    participant V as VM
+    participant V as VM Server
 
     H->>V: StartVm(code)
     V->>H: VmStarted
@@ -34,3 +34,5 @@ sequenceDiagram
     H->>V: CallResult(id=3, seq=4)
     V->>H: Done(seq=3)
 ```
+
+The VM is expected to be isolated from the host and other VMs, both CPU and memory wise.

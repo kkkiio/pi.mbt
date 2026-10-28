@@ -122,7 +122,7 @@ pub fn new_codemode_tool_definition(
   }
   let sidecar = @async.Lazy(() => spawn_codemode_sidecar(sidecar_path))
   let codemode = @codemode.Codemode::Codemode(
-    async fn() -> &@codemode.Vm { sidecar.wait().new_stream() },
+    async fn() -> &@codemode.VmServer { sidecar.wait().new_stream() },
     tools=nested,
     timeout_ms~,
   )

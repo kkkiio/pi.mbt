@@ -7,12 +7,12 @@ priv struct FakeChannel {
 }
 
 ///|
-impl @codemode.Vm for FakeChannel with fn send(self : FakeChannel, data : Json) -> Unit {
+impl @codemode.VmServer for FakeChannel with fn send(self : FakeChannel, data : Json) -> Unit {
   self.sent.push(data)
 }
 
 ///|
-impl @codemode.Vm for FakeChannel with fn recv(self : FakeChannel) -> Json {
+impl @codemode.VmServer for FakeChannel with fn recv(self : FakeChannel) -> Json {
   if self.feed is [] {
     fail("channel closed")
   } else {
@@ -21,7 +21,7 @@ impl @codemode.Vm for FakeChannel with fn recv(self : FakeChannel) -> Json {
 }
 
 ///|
-impl @codemode.Vm for FakeChannel with fn close(self : FakeChannel) -> Unit {
+impl @codemode.VmServer for FakeChannel with fn close(self : FakeChannel) -> Unit {
   self.feed.clear()
 }
 
@@ -42,7 +42,7 @@ async test "a batch frame feeds its messages in order" {
     ],
   ])
   let codemode = @codemode.Codemode::Codemode(
-    fn() -> &@codemode.Vm { channel },
+    fn() -> &@codemode.VmServer { channel },
     timeout_ms=0,
   )
   guard codemode.execute("x")
@@ -63,7 +63,7 @@ async test "a batch frame feeds its messages in order" {
 async test "eof before a terminal frame is a sandbox error" {
   let channel = FakeChannel([])
   let codemode = @codemode.Codemode::Codemode(
-    fn() -> &@codemode.Vm { channel },
+    fn() -> &@codemode.VmServer { channel },
     timeout_ms=0,
   )
   guard codemode.execute("x")
