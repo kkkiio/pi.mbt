@@ -8,9 +8,9 @@ import {
 }
 
 // Values
-pub async fn run_agent_loop(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], ArrayView[UserMessage], tool_executor~ : async (ToolCall, (Array[InputMessageContent], Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], abort? : AbortSignal, event_sink? : async (AgentEvent) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage], AbortSignal) -> AgentTurnDecision?) -> Unit
+pub async fn run_agent_loop(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], ArrayView[UserMessage], tool_executor~ : async (ToolCall, (Array[InputMessageContent], Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], abort? : AbortSignal, event_sink? : async (AgentEvent) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage], AbortSignal) -> AgentTurnDecision?, get_tools? : (() -> Array[ToolDefinition])?) -> Unit
 
-pub async fn run_agent_loop_continue(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], tool_executor~ : async (ToolCall, (Array[InputMessageContent], Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], abort? : AbortSignal, event_sink? : async (AgentEvent) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage], AbortSignal) -> AgentTurnDecision?) -> Unit
+pub async fn run_agent_loop_continue(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], tool_executor~ : async (ToolCall, (Array[InputMessageContent], Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], abort? : AbortSignal, event_sink? : async (AgentEvent) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage], AbortSignal) -> AgentTurnDecision?, get_tools? : (() -> Array[ToolDefinition])?) -> Unit
 
 pub fn usage_json(Usage?) -> Json
 

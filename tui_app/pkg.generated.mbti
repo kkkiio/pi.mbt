@@ -49,7 +49,7 @@ pub fn prompt_editor_new(Tui, Theme, thinking? : String) -> PromptEditor
 
 pub fn render_markdown_themed(Theme, String, Int32, padding_x? : Int32, padding_y? : Int32, body_role? : String, body_italic? : Bool, preserve_ordered_markers? : Bool, preserve_backslash_escapes? : Bool) -> Array[String]
 
-pub async fn run(&@agent_loop.LLM, String, String, String, String?, resume_path? : String?, initial? : Array[@agent_loop.UserMessage]) -> Unit
+pub async fn run(&@agent_loop.LLM, String, String, String, String?, resume_path? : String?, initial? : Array[@agent_loop.UserMessage], active_tools? : ArrayView[String]) -> Unit
 
 pub fn scroll_view(Component, follow_end? : Bool, primary? : Bool, overscroll? : String, scrollbar? : String, scrollbar_track_style? : ((String) -> String)?, scrollbar_thumb_style? : ((String) -> String)?) -> ScrollView
 
@@ -198,7 +198,7 @@ pub fn SessionHost::attach(Self, TuiApp) -> Unit
 pub fn SessionHost::close(Self) -> Unit
 pub fn SessionHost::interrupt(Self) -> Unit
 pub fn SessionHost::load_session(Self, String, TuiApp) -> Unit
-pub fn SessionHost::new(&@agent_loop.LLM, String, String?) -> Self raise @coding_agent.FsError
+pub fn SessionHost::new(&@agent_loop.LLM, String, String?, active_tools? : ArrayView[String]) -> Self raise @coding_agent.FsError
 pub fn SessionHost::new_session(Self) -> Unit raise @coding_agent.FsError
 pub async fn SessionHost::prompt(Self, Array[@agent_loop.UserMessage], TuiApp) -> Unit
 pub fn SessionHost::resume_session(Self, String, TuiApp) -> Unit

@@ -10,6 +10,7 @@
 pub struct Agent {
   llm : &@agent_loop.LLM
   tool_registry : @tools.ToolRegistry
+  mut tool_search : @tools.ToolDefinition?
   active_tools : Array[String]
   system_prompt_contributes : Array[SystemPromptContributor]
   auto_refresh_system_prompt : Bool
@@ -31,6 +32,7 @@ pub fn Agent::Agent(
   Agent::{
     llm,
     tool_registry,
+    tool_search: None,
     active_tools: active_tools.to_owned(),
     system_prompt_contributes,
     auto_refresh_system_prompt,
@@ -61,16 +63,16 @@ pub fn Agent::set_active_tools(
   names : ArrayView[String],
 ) -> Unit raise {
   for name in names {
-    guard self.tool_registry.get_tool(name) is Some(_) else {
-      fail("unknown tool: \{name}")
-    }
+    guard self.get_tool(name) is Some(_) else { fail("unknown tool: \{name}") }
   }
   // Copy first: `names` may alias `active_tools` itself, and `blit_to` leaves
   // the tail in place (so an empty view would not deactivate everything).
   let next = names.to_owned()
   self.active_tools.clear()
   for name in next {
-    self.active_tools.push(name)
+    if !self.active_tools.contains(name) {
+      self.active_tools.push(name)
+    }
   }
 }
 
@@ -94,7 +96,16 @@ pub fn Agent::set_finish_turn_hook(
 /// Whether `name` resolves in the tool registry. Lets a session reject a
 /// misconfigured tool set before a run turns the error into a failed turn.
 pub fn Agent::has_tool(self : Agent, name : String) -> Bool {
-  self.tool_registry.get_tool(name) is Some(_)
+  self.get_tool(name) is Some(_)
+}
+
+///|
+fn Agent::get_tool(self : Agent, name : String) -> @tools.ToolDefinition? {
+  if name == TOOL_SEARCH_TOOL_NAME && self.tool_search is Some(tool) {
+    Some(tool)
+  } else {
+    self.tool_registry.get_tool(name)
+  }
 }
 
 ///|
@@ -153,20 +164,37 @@ pub async fn Agent::run(
 ) -> Bool {
   // Resolve before the failure handling below: an unknown active tool is a
   // configuration error, not a failed provider turn.
-  let tools : Array[@tools.ToolDefinition] = []
   for name in self.active_tools {
-    guard self.tool_registry.get_tool(name) is Some(tool) else {
-      fail("unknown tool: \{name}")
-    }
-    tools.push(tool)
+    guard self.get_tool(name) is Some(_) else { fail("unknown tool: \{name}") }
   }
-  let tool_map = tools.iter().map(t => (t.name, t)) |> Map::from_iter
-  let agent_tools = tools.map(d => @agent_loop.ToolDefinition::{
-    name: d.name,
-    description: d.description,
-    parameters: d.parameters,
-    constrained_sampling: d.constrained_sampling,
-  })
+  let get_tools = () => {
+    self.active_tools.filter_map(name => {
+      self
+      .get_tool(name)
+      .map(d => @agent_loop.ToolDefinition::{
+        name: d.name,
+        description: d.description,
+        parameters: d.parameters,
+        constrained_sampling: d.constrained_sampling,
+      })
+    })
+  }
+  let agent_tools = get_tools()
+  let execute_tool : async (
+    @agent_loop.ToolCall,
+    @agent_loop.ToolExecUpdateCallback,
+  ) -> @agent_loop.ToolResult = (call, hook) => {
+    guard self.active_tools.contains(call.name) &&
+      self.get_tool(call.name) is Some(tool) else {
+      return @agent_loop.ToolResult::{
+        content: [],
+        details: { "error": "Tool not found" },
+        is_error: true,
+        usage: None,
+      }
+    }
+    (tool.execute)(call.id, call.arguments, hook)
+  }
   let system_prompt = self.system_prompt()
   let mut escaped = false
   let mut assistant_metadata : @agent_loop.AssistantMessage? = None
@@ -193,7 +221,8 @@ pub async fn Agent::run(
         self.messages.copy(),
         agent_tools,
         prompts,
-        tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+        tool_executor=execute_tool,
+        get_tools=Some(get_tools),
         abort~,
         event_sink=sink,
         finish_turn_hook=self.finish_turn_hook,
@@ -204,7 +233,8 @@ pub async fn Agent::run(
         system_prompt,
         self.messages.copy(),
         agent_tools,
-        tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
+        tool_executor=execute_tool,
+        get_tools=Some(get_tools),
         abort~,
         event_sink=sink,
         finish_turn_hook=self.finish_turn_hook,
