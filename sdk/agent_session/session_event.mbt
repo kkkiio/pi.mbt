@@ -42,11 +42,7 @@ pub async fn FanOutListener::on_event(
   for listener in self.listeners {
     if is_cancelling {
       @async.with_task_group() <| group => {
-        let gate = @async.Semaphore(1, initial_value=0)
-        group.spawn_bg(() => {
-          ignore(@async.handle_cancellation(() => gate.acquire()))
-          listener(event)
-        })
+        group.spawn_bg(() => listener(event))
         group.return_immediately(())
       }
     } else {
