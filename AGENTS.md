@@ -75,10 +75,16 @@ CLI 契约由 `tests/cram/` 下的 `mooncram` 转录持续验证。
 
 创建 `enhancement` 时，只描述需求，不写方案。
 
-### API Comment Policy
+### Less Comments
 
-在 public API 上写 Doc 注释。
-防御性注释写到 `*_test.mbt` 文件里。
+不要在实现代码里写注释。
+
+API docs comments 写：
+
+- 一句话用途
+- 参数含义
+- 返回值含义
+- 边界条件/异常情况
 
 ## Operation Guide
 
@@ -104,5 +110,7 @@ DEEPSEEK_API_KEY=sk-... moon cram test --work-directory . tests/live
 
 Github PR 配置了 codex review (on pr).
 新提交的 PR 可以 watch [codex review check](.github/workflows/codex-review-check.yml) 来等待 review 结果.
+
+Review 通过后可以 squash merge.
 如果有 review 意见, 可以根据意见修复, 推送后 `@codex review` 重新 review.
 如果 review 超过 3 次仍未通过, 可能是 PR 方向有误, 或者是 codex 理解不对, 停下并联系项目维护者沟通.
