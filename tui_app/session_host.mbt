@@ -231,7 +231,7 @@ fn replay(entries : Array[@agent_session.SessionEntry], app : TuiApp) -> Unit {
       Message(ToolResult(result)) => {
         app.tool_result(
           result.tool_name,
-          tool_result_text(result),
+          tool_result_text(result.content),
           result.is_error,
           id=result.tool_call_id,
           details=result.details,
@@ -318,9 +318,11 @@ fn stop_reason_name(reason : @agent_loop.StopReason) -> String {
 }
 
 ///|
-fn tool_result_text(message : @agent_loop.ToolResultMessage) -> String {
+fn tool_result_text(
+  content : ArrayView[@agent_loop.InputMessageContent],
+) -> String {
   let out = StringBuilder()
-  for content in message.content {
+  for content in content {
     match content {
       Text(text) => out.write_string(text)
       Image(..) => out.write_string("[image]")
@@ -390,10 +392,12 @@ fn SessionHost::on_event(
           app.begin_work(call.name)
           app.tool_call(call.name, call.arguments, id=call.id, timed=true)
         }
+        ToolExecutionUpdate(call, content, details) =>
+          app.tool_update(tool_result_text(content), id=call.id, details~)
         ToolExecutionEnd(result) => {
           app.tool_result(
             result.tool_name,
-            tool_result_text(result),
+            tool_result_text(result.content),
             result.is_error,
             id=result.tool_call_id,
             details=result.details,

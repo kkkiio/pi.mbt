@@ -14,6 +14,11 @@ pub(all) enum AgentEvent {
   MessageUpdate(GenerationEvent)
   MessageEnd(AgentMessage)
   ToolExecutionStart(ToolCall)
+  /// In-flight progress reported by the tool through `ToolExecUpdateCallback`.
+  /// The `ToolCall` correlates the update; the other two fields are pi's
+  /// `partialResult` (`content` + `details`). May repeat any number of times
+  /// between `ToolExecutionStart` and `ToolExecutionEnd`.
+  ToolExecutionUpdate(ToolCall, Array[InputMessageContent], ToolResultDetail)
   ToolExecutionEnd(ToolResultMessage)
   TurnEnd(AssistantMessage, ArrayView[ToolResultMessage])
   AgentEnd(ArrayView[AgentMessage])

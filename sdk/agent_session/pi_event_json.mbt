@@ -54,12 +54,27 @@ pub fn agent_event_to_pi_json(event : @agent_loop.AgentEvent) -> Json raise {
     ToolExecutionStart(call) =>
       {
         "type": "tool_execution_start",
+        "toolCallId": call.id,
         "toolName": call.name,
         "args": call.arguments,
+      }
+    ToolExecutionUpdate(call, content, details) =>
+      {
+        "type": "tool_execution_update",
+        "toolCallId": call.id,
+        "toolName": call.name,
+        "args": call.arguments,
+        "partialResult": {
+          "content": [
+            for c in content => c.to_json()
+          ],
+          "details": details,
+        },
       }
     ToolExecutionEnd(result) =>
       {
         "type": "tool_execution_end",
+        "toolCallId": result.tool_call_id,
         "toolName": result.tool_name,
         "content": [
           for c in result.content => c.to_json()

@@ -95,6 +95,62 @@ async test "toolcall_start keeps id and toolName on the wire" {
 }
 
 ///|
+/// `tool_execution_update` 的线形状与 pi 的 json.md 一致:toolCallId /
+/// toolName / args 关联调用,partialResult 携带工具的 content + details;
+/// 排在 start 之后、end 之前。
+async test "tool_execution_update carries the partial result on the wire" {
+  let registry = @tools.ToolRegistry()
+  registry.register_tool({
+    name: "tick",
+    label: "tick",
+    prompt_guidelines: [],
+    description: "reports progress",
+    parameters: { "type": "object", "properties": {} },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (id, args, on_update) => {
+      on_update([@agent_loop.InputMessageContent::Text("tick-half")], {
+        "pct": Json::number(50),
+      })
+      probe_execute(id, args, on_update)
+    },
+  })
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([
+    @faux.faux_message(
+      [@faux.faux_tool_call("tick", {}, id="call-1")],
+      stop_reason=@agent_loop.StopReason::ToolUse,
+    ),
+    @faux.faux_message([@faux.faux_text("done")]),
+  ])
+  let session = @agent_session.AgentSession(llm, tool_registry=registry, active_tools=[
+    "tick",
+  ])
+  let lines : Array[String] = []
+  session.subscribe(event => {
+    guard event
+      is Loop(
+        ToolExecutionStart(_)
+        | ToolExecutionUpdate(_, _, _)
+        | ToolExecutionEnd(_)
+      ) else {
+      return
+    }
+    lines.push(@agent_session.to_pi_json(event).stringify())
+  })
+  session.prompt([user_message("go")])
+  inspect(
+    lines.join("\n"),
+    content=(
+      #|{"type":"tool_execution_start","toolCallId":"call-1","toolName":"tick","args":{}}
+      #|{"type":"tool_execution_update","toolCallId":"call-1","toolName":"tick","args":{},"partialResult":{"content":[{"type":"text","text":"tick-half"}],"details":{"pct":50}}}
+      #|{"type":"tool_execution_end","toolCallId":"call-1","toolName":"tick","content":[{"type":"text","text":"probe-ok"}],"isError":false}
+    ),
+  )
+}
+
+///|
 /// 一个不合约的 provider:`ToolCallStart` 指向的块由脚本决定,默认与 `content_index`
 /// 不匹配,用来验证投影报错而不是编值。真 provider 不会这样(我们的 `responses` /
 /// `faux` 都是先 push 带 id/name 的 `ToolCall` 再发 `ToolCallStart`)。

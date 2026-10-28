@@ -189,8 +189,10 @@ $ node tests/cram/testdata/json-cli.mjs
 {"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"{\"command\":"}}
 {"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"\"echo pim-offline\"}"}}
 {"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"toolCall":{"type":"toolCall","id":"call_offline","name":"bash","arguments":{"command":"echo pim-offline"}}}}
-{"type":"tool_execution_start","toolName":"bash","args":{"command":"echo pim-offline"}}
-{"type":"tool_execution_end","toolName":"bash","content":[{"type":"text","text":"pim-offline\n"}],"isError":false}
+{"type":"tool_execution_start","toolCallId":"call_offline","toolName":"bash","args":{"command":"echo pim-offline"}}
+{"type":"tool_execution_update","toolCallId":"call_offline","toolName":"bash","args":{"command":"echo pim-offline"},"partialResult":{"content":[],"details":{}}}
+{"type":"tool_execution_update","toolCallId":"call_offline","toolName":"bash","args":{"command":"echo pim-offline"},"partialResult":{"content":[{"type":"text","text":"pim-offline\n"}],"details":{"truncation":null,"fullOutputPath":null}}}
+{"type":"tool_execution_end","toolCallId":"call_offline","toolName":"bash","content":[{"type":"text","text":"pim-offline\n"}],"isError":false}
 {"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_start","contentIndex":0}}
 {"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"pim-offline"}}
 {"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n\"complete\""}}

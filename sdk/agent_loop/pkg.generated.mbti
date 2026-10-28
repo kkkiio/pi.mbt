@@ -39,6 +39,7 @@ pub(all) enum AgentEvent {
   MessageUpdate(GenerationEvent)
   MessageEnd(AgentMessage)
   ToolExecutionStart(ToolCall)
+  ToolExecutionUpdate(ToolCall, Array[InputMessageContent], Json)
   ToolExecutionEnd(ToolResultMessage)
   TurnEnd(AssistantMessage, ArrayView[ToolResultMessage])
   AgentEnd(ArrayView[AgentMessage])

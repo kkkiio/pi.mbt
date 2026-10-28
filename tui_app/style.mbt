@@ -176,21 +176,21 @@ pub fn Theme::bg_tool_error(self : Theme, text : String) -> String {
 }
 
 ///|
-/// 工具块背景:按「结果有无 / 是否错误」选一个背景色函数
-/// (pi `toolPendingBg`/`toolSuccessBg`/`toolErrorBg`)。
+/// 工具块背景:按「是否结束 / 是否错误」选一个背景色函数
+/// (pi `toolPendingBg`/`toolSuccessBg`/`toolErrorBg`)。不能按 result 有无判
+/// 终态:执行中的 partial result 已填在 result 里,但此时仍应显示 pending
+/// 背景。
 pub fn Theme::tool_bg(
   self : Theme,
-  result : String?,
+  finished : Bool,
   is_error : Bool,
 ) -> (String) -> String {
-  match result {
-    None => fn(text) { self.bg_tool_pending(text) }
-    Some(_) =>
-      if is_error {
-        fn(text) { self.bg_tool_error(text) }
-      } else {
-        fn(text) { self.bg_tool_success(text) }
-      }
+  if !finished {
+    fn(text) { self.bg_tool_pending(text) }
+  } else if is_error {
+    fn(text) { self.bg_tool_error(text) }
+  } else {
+    fn(text) { self.bg_tool_success(text) }
   }
 }
 
