@@ -2,13 +2,40 @@
 package "KKKIIO/pi/sdk/codemode"
 
 import {
+  "KKKIIO/pi/sdk/agent_loop",
   "moonbitlang/core/json",
 }
 
 // Values
+pub const CODEMODE_OPTIONS_PREFIX : String = "// @options:"
+
+pub const CODEMODE_SOURCE_GRAMMAR : String = "\nstart: options_source | plain_source\noptions_source: OPTIONS_LINE NEWLINE SOURCE\nplain_source: SOURCE\n\nOPTIONS_LINE: /[ \\t]*\\/\\/ @options:[^\\r\\n]*/\nNEWLINE: /\\r?\\n/\nSOURCE: /[\\s\\S]+/"
+
+pub const DEFAULT_INPUT_SCHEMA_MAX_CHARS : Int32 = 16000
+
+pub const MAX_TIMEOUT_MS : Int32 = 2147483647
+
+pub fn parse_codemode_source(String) -> ParsedCodemodeSource raise CodemodeSourceError
+
+pub fn render_declarations(tools? : ArrayView[CodemodeTool], globals? : ArrayView[CodemodeTool]) -> String
+
+pub fn render_tool_output_type(Json?) -> String
+
+pub fn render_tool_sample(CodemodeTool, input_max_chars? : Int32) -> String
+
+pub fn render_tool_signature(CodemodeTool, input_max_chars? : Int32) -> String
+
+pub fn schema_to_type(Json, max_chars? : Int32?) -> String
+
 pub fn to_codemode_identifier(String) -> String
 
 // Errors
+pub(all) suberror CodemodeSourceError {
+  CodemodeSourceError(String)
+}
+pub fn CodemodeSourceError::output(Self, &Logger) -> Unit
+pub fn CodemodeSourceError::to_string(Self) -> String
+pub impl Show for CodemodeSourceError
 
 // Types and methods
 pub(all) enum CallOutcome {
@@ -29,7 +56,7 @@ pub impl @json.FromJson for CallResponse
 
 type Codemode
 pub fn Codemode::Codemode(async () -> &VmServer, tools? : Array[CodemodeTool], globals? : Array[CodemodeTool], timeout_ms? : Int32, memory_limit_bytes? : Double?) -> Self
-pub async fn Codemode::execute(Self, String, store? : Map[String, Json]) -> CodemodeResult
+pub async fn Codemode::execute(Self, String, store? : Map[String, Json], timeout_ms? : Int32?, abort? : @agent_loop.AbortSignal) -> CodemodeResult
 
 pub(all) struct CodemodeCall {
   name : String
@@ -80,6 +107,11 @@ pub(all) enum CodemodeResult {
   Err(error~ : CodemodeError, output~ : Array[CodemodeOutputItem], calls~ : Array[CodemodeCall], during~ : CodemodeDuring?)
 }
 
+pub(all) struct CodemodeSourceOptions {
+  max_output_tokens : Int64?
+  timeout_ms : Int32?
+}
+
 pub(all) struct CodemodeStoreWrites {
   set : Map[String, Json]
   delete : Array[String]
@@ -92,7 +124,12 @@ pub(all) struct CodemodeTool {
   input_schema : Json?
   output_schema : Json?
   spread : Bool
-  execute : async (Json?) -> Json
+  signature : String?
+  execute : async (Json?, CodemodeToolContext) -> Json
+}
+
+pub(all) struct CodemodeToolContext {
+  signal : @agent_loop.AbortSignal
 }
 
 pub(all) struct Deterministic {
@@ -120,6 +157,11 @@ pub fn HostToVmMessage::from_json(Json, @json.JsonPath) -> Self raise @json.Json
 pub fn HostToVmMessage::to_json(Self) -> Json
 pub impl ToJson for HostToVmMessage
 pub impl @json.FromJson for HostToVmMessage
+
+pub(all) struct ParsedCodemodeSource {
+  code : String
+  options : CodemodeSourceOptions
+}
 
 pub(all) struct StartVmRequest {
   data : VmStartData
@@ -155,8 +197,8 @@ pub impl @json.FromJson for VmStartData
 
 pub(all) enum VmToHostMessage {
   Started(fingerprint~ : String)
-  CallTool(id~ : Int32, name~ : String, args~ : Json?)
-  CallGlobal(id~ : Int32, name~ : String, args~ : Json?)
+  CallTool(id~ : Int32, name~ : String, args~ : String?)
+  CallGlobal(id~ : Int32, name~ : String, args~ : String?)
   Output(item~ : CodemodeOutputItem)
   DoneOk(value~ : Json?, writes~ : Array[WriteItem], during~ : CodemodeDuring?)
   DoneErr(error~ : Json, during~ : CodemodeDuring?)

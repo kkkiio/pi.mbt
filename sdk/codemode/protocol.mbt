@@ -8,8 +8,11 @@ pub(all) struct StartVmRequest {
 /// What the remote sends to the client: VM messages, or a failure outside the VM bridge. 
 pub(all) enum VmToHostMessage {
   Started(fingerprint~ : String)
-  CallTool(id~ : Int32, name~ : String, args~ : Json?)
-  CallGlobal(id~ : Int32, name~ : String, args~ : Json?)
+  /// `args` is the raw JSON text from the wire, parsed per call like pi's
+  /// `handleCall` — a malformed payload rejects that call instead of
+  /// failing the execution.
+  CallTool(id~ : Int32, name~ : String, args~ : String?)
+  CallGlobal(id~ : Int32, name~ : String, args~ : String?)
   Output(item~ : CodemodeOutputItem)
   DoneOk(value~ : Json?, writes~ : Array[WriteItem], during~ : CodemodeDuring?)
   DoneErr(error~ : ScriptErrorJson, during~ : CodemodeDuring?)
@@ -244,7 +247,7 @@ fn call_message(
   id : Int32,
   target : String,
   name : String,
-  args : Json?,
+  args : String?,
 ) -> Json {
   let obj : Map[String, Json] = Map([])
   obj["type"] = Json::string("call")
@@ -252,7 +255,7 @@ fn call_message(
   obj["target"] = Json::string(target)
   obj["name"] = Json(name)
   if args is Some(args) {
-    obj["args"] = Json::string(args.stringify())
+    obj["args"] = Json::string(args)
   }
   Json::object(obj)
 }
@@ -271,10 +274,12 @@ pub impl FromJson for VmToHostMessage with fn from_json(json, path) {
   let type_path = path.add_key("type")
   match kind {
     "started" =>
-      match fields.get("fingerprint") {
-        Some(String(fingerprint)) => Started(fingerprint~)
-        _ => decode_error(type_path, "started: missing fingerprint")
-      }
+      Started(
+        fingerprint=match fields.get("fingerprint") {
+          Some(String(fingerprint)) => fingerprint
+          _ => ""
+        },
+      )
     "call" => {
       guard fields.get("id") is Some(Number(id, ..)) else {
         decode_error(type_path, "call: missing id")
@@ -283,7 +288,7 @@ pub impl FromJson for VmToHostMessage with fn from_json(json, path) {
         decode_error(type_path, "call: missing name")
       }
       let args = match fields.get("args") {
-        Some(String(args)) => Some(parse_json_text(args, path.add_key("args")))
+        Some(String(args)) => Some(args)
         _ => None
       }
       match fields.get("target") {
@@ -340,13 +345,17 @@ pub impl FromJson for VmToHostMessage with fn from_json(json, path) {
         Some(String(message)) => Crash(message~)
         _ => decode_error(type_path, "crash: missing message")
       }
-    "idle" => {
-      guard fields.get("seq") is Some(Number(seq, ..)) &&
-        fields.get("issued") is Some(Number(issued, ..)) else {
-        decode_error(type_path, "idle: missing seq or issued")
-      }
-      Idle(seq=seq.to_int(), issued=issued.to_int())
-    }
+    "idle" =>
+      Idle(
+        seq=match fields.get("seq") {
+          Some(Number(seq, ..)) => seq.to_int()
+          _ => 0
+        },
+        issued=match fields.get("issued") {
+          Some(Number(issued, ..)) => issued.to_int()
+          _ => 0
+        },
+      )
     "failure" =>
       match fields.get("error") {
         Some(error) =>

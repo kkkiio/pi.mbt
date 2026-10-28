@@ -1,4 +1,10 @@
 import {
+  "KKKIIO/pi/sdk/agent_loop",
   "moonbitlang/async",
+  "moonbitlang/core/encoding/percent",
   "moonbitlang/core/json",
 }
+
+import {
+  "moonbitlang/async/aqueue",
+} for "test"

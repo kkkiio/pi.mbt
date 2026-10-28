@@ -17,7 +17,7 @@ test "tool call carries args as a JSON-encoded string" {
     @codemode.VmToHostMessage::CallTool(
       id=1,
       name="bash",
-      args=Some({ "command": "ls" }),
+      args=Some("{\"command\":\"ls\"}"),
     ),
     expected={
       "type": "call",

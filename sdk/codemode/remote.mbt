@@ -1,4 +1,7 @@
 ///|
+using @agent_loop {type AbortSignal, type AbortController}
+
+///|
 struct Codemode {
   vm_launcher : async () -> &VmServer
   tools : Map[String, CodemodeTool]
@@ -32,22 +35,35 @@ pub fn Codemode::Codemode(
 /// is the `load()` snapshot; writes are reported in the result for the
 /// caller to apply.
 ///
-/// The script runs at most `timeout_ms` milliseconds (nonpositive means no
-/// limit); on expiry the VM is sent `stop` and the result is a `Timeout`
-/// error. Cancelling `execute` aborts in-flight calls and closes the VM. A
-/// VM that stops answering before a terminal `done`/`crash`/`failure` frame
-/// produces a `Sandbox` error.
+/// The script runs at most `timeout_ms` milliseconds when given, else the
+/// `Codemode`'s own `timeout_ms` (nonpositive means no limit); on expiry the
+/// VM is sent `stop` and the result is a `Timeout` error. `abort` firing
+/// likewise stops the VM and ends the run as an `Aborted` error. Cancelling
+/// `execute` aborts in-flight calls and closes the VM — the close path tells
+/// the remote to stop without suspending, so it is safe from a cancelled
+/// coroutine. A VM that stops answering before a terminal
+/// `done`/`crash`/`failure` frame produces a `Sandbox` error.
 pub async fn Codemode::execute(
   self : Codemode,
   code : String,
   store~ : Map[String, Json] = Map([]),
+  timeout_ms~ : Int32? = None,
+  abort~ : AbortSignal = AbortSignal::never(),
 ) -> CodemodeResult {
+  let deadline_ms = timeout_ms.unwrap_or(self.timeout_ms)
   let vm = (self.vm_launcher)()
   defer vm.close()
   let output : Array[CodemodeOutputItem] = []
   let calls : Array[CodemodeCall] = []
   let pending : Map[Int32, PendingCall] = Map([])
-  let timed_out = Ref(false)
+  let ended : Ref[CodemodeErrorKind?] = Ref(None)
+  let end_with = async fn(kind : CodemodeErrorKind) {
+    if ended.val is None {
+      ended.val = Some(kind)
+    }
+    ignore(vm.send(Json(HostToVmMessage::Stop)) catch { _ => () })
+    vm.close()
+  }
   let sandbox = fn(message : String) -> CodemodeResult {
     CodemodeResult::Err(
       error={
@@ -61,59 +77,84 @@ pub async fn Codemode::execute(
       during=None,
     )
   }
+  let bridge = fn(message : String) -> CodemodeResult {
+    sandbox(
+      "Sandbox bridge broken: \{message}. The script may have modified built-ins such as a prototype's toJSON.",
+    )
+  }
   @async.with_task_group(tg => {
-    if self.timeout_ms > 0 {
+    if deadline_ms > 0 {
       tg.spawn_bg(no_wait=true, () => {
-        @async.sleep(self.timeout_ms)
-        timed_out.val = true
-        ignore(vm.send(Json(HostToVmMessage::Stop)) catch { _ => () })
-        vm.close()
+        @async.sleep(deadline_ms)
+        end_with(CodemodeErrorKind::Timeout)
       })
     }
-    vm.send(
-      Json(StartVmRequest::{
-        data: VmStartData::{
-          code,
-          tools: self.tools
-          .values()
-          .map(tool => Tool::{
-            name: tool.name,
-            js_name: tool.js_name.unwrap_or(to_codemode_identifier(tool.name)),
-            description: tool.description,
-          })
-          .collect(),
-          globals: self.globals
-          .values()
-          .map(global => Global::{ name: global.name, spread: global.spread, })
-          .collect(),
-          memory_limit_bytes: self.memory_limit_bytes,
-          store,
-          deterministic: None,
-        },
-        interrupt_budget: None,
-      }),
-    ) catch {
-      _ => ()
+    if abort.is_aborted() {
+      end_with(CodemodeErrorKind::Aborted)
+    } else {
+      tg.spawn_bg(no_wait=true, () => {
+        abort.wait_abort()
+        end_with(CodemodeErrorKind::Aborted)
+      })
+    }
+    if ended.val is None {
+      vm.send(
+        Json(StartVmRequest::{
+          data: VmStartData::{
+            code,
+            tools: self.tools
+            .values()
+            .map(tool => Tool::{
+              name: tool.name,
+              js_name: tool.js_name.unwrap_or(to_codemode_identifier(tool.name)),
+              description: tool.description,
+            })
+            .collect(),
+            globals: self.globals
+            .values()
+            .map(global => Global::{ name: global.name, spread: global.spread, })
+            .collect(),
+            memory_limit_bytes: self.memory_limit_bytes,
+            store,
+            deterministic: None,
+          },
+          interrupt_budget: None,
+        }),
+      ) catch {
+        _ => ()
+      }
     }
     let batch : Array[Json] = []
     let result = while true {
       if batch.is_empty() {
         let frame = vm.recv() catch {
           _ =>
-            break if timed_out.val {
-              CodemodeResult::Err(
-                error={
-                  kind: CodemodeErrorKind::Timeout,
-                  name: None,
-                  message: "Execution timed out after \{self.timeout_ms} ms",
-                  stack: None,
-                },
-                output~,
-                calls~,
-                during=None,
-              )
-            } else {
-              sandbox("Sandbox stream ended before the script settled")
+            break match ended.val {
+              Some(Timeout) =>
+                CodemodeResult::Err(
+                  error={
+                    kind: CodemodeErrorKind::Timeout,
+                    name: None,
+                    message: "Execution timed out after \{deadline_ms} ms",
+                    stack: None,
+                  },
+                  output~,
+                  calls~,
+                  during=None,
+                )
+              Some(Aborted) =>
+                CodemodeResult::Err(
+                  error={
+                    kind: CodemodeErrorKind::Aborted,
+                    name: None,
+                    message: "Execution aborted",
+                    stack: None,
+                  },
+                  output~,
+                  calls~,
+                  during=None,
+                )
+              _ => sandbox("Sandbox stream ended before the script settled")
             }
         }
         if frame is Array(messages) {
@@ -131,10 +172,10 @@ pub async fn Codemode::execute(
           )
       }
       match message {
-        Started(_) => () // TODO: determinstic mode
+        Started(_) => () // TODO: deterministic mode
         CallTool(id~, name~, args~) => {
           if pending.contains(id) {
-            break sandbox("duplicate call id \{id}")
+            break bridge("duplicate call id \{id}")
           }
           self.dispatch_call(
             tg,
@@ -144,12 +185,12 @@ pub async fn Codemode::execute(
             is_tool=true,
             id~,
             name~,
-            args~,
+            args_text=args,
           )
         }
         CallGlobal(id~, name~, args~) => {
           if pending.contains(id) {
-            break sandbox("duplicate call id \{id}")
+            break bridge("duplicate call id \{id}")
           }
           self.dispatch_call(
             tg,
@@ -159,7 +200,7 @@ pub async fn Codemode::execute(
             is_tool=false,
             id~,
             name~,
-            args~,
+            args_text=args,
           )
         }
         Output(item~) => output.push(item)
@@ -201,22 +242,21 @@ pub async fn Codemode::execute(
                     calls~,
                     during~,
                   )
-                _ => break sandbox("script error is malformed")
+                _ => break bridge("script error is malformed")
               }
-            _ => break sandbox("script error is not an object")
+            _ => break bridge("script error is not an object")
           }
         Crash(message~) => break sandbox(message)
-        Idle(_) => () // TODO: determinstic mode
+        Idle(_) => () // TODO: deterministic mode
         Failure(error~) =>
           break CodemodeResult::Err(error~, output~, calls~, during=None)
       }
     } nobreak {
       fail("unreachable: the loop only ends through `break`")
     }
-    // A settled execution drops late tool replies; calls still in flight
-    // stay `cancelled` with a duration measured until now.
     let finished_at = @async.now()
     for call in pending.values() {
+      call.controller.abort()
       if call.record is Some(record) {
         record.duration_ms = (finished_at - call.started_at).to_int()
       }
@@ -243,6 +283,7 @@ pub(open) trait VmServer {
 priv struct PendingCall {
   record : CodemodeCall?
   started_at : Int64
+  controller : AbortController
 }
 
 ///|
@@ -259,7 +300,7 @@ async fn Codemode::dispatch_call(
   is_tool~ : Bool,
   id~ : Int32,
   name~ : String,
-  args~ : Json?,
+  args_text~ : String?,
 ) -> Unit {
   let record : CodemodeCall? = if is_tool {
     let record = CodemodeCall::{ name, status: "cancelled", duration_ms: 0, }
@@ -268,9 +309,9 @@ async fn Codemode::dispatch_call(
   } else {
     None
   }
-  pending[id] = PendingCall::{ record, started_at: @async.now(), }
-  let table = if is_tool { self.tools } else { self.globals }
-  guard table.get(name) is Some(tool) else {
+  let controller = AbortController::new()
+  pending[id] = PendingCall::{ record, started_at: @async.now(), controller, }
+  let reject = async fn(message : String) {
     pending.remove(id)
     if record is Some(record) {
       record.status = "error"
@@ -280,10 +321,7 @@ async fn Codemode::dispatch_call(
         Json(
           HostToVmMessage::CallResult({
             id,
-            outcome: CallOutcome::Reject(
-              message="Unknown \{if is_tool { "tool" } else { "global" }} \"\{name}\"",
-              properties=None,
-            ),
+            outcome: CallOutcome::Reject(message~, properties=None),
             seq: None,
             now: None,
           }),
@@ -292,10 +330,31 @@ async fn Codemode::dispatch_call(
         _ => ()
       },
     )
+  }
+  let table = if is_tool { self.tools } else { self.globals }
+  guard table.get(name) is Some(tool) else {
+    reject("Unknown \{if is_tool { "tool" } else { "global" }} \"\{name}\"")
     return
   }
+  let args : Json? = match args_text {
+    Some(text) =>
+      (@json.parse(text) catch {
+        _ => {
+          reject("call arguments are not valid JSON")
+          return
+        }
+      })
+      |> Some
+    None => None
+  }
   tg.spawn_bg(no_wait=true, () => {
-    let outcome = CallOutcome::Resolve(value=Some((tool.execute)(args))) catch {
+    let outcome = CallOutcome::Resolve(
+      value=Some(
+        (tool.execute)(args, CodemodeToolContext::{
+          signal: controller.signal(),
+        }),
+      ),
+    ) catch {
       Failure::Failure(message) =>
         CallOutcome::Reject(message~, properties=None)
       error => CallOutcome::Reject(message=error.to_string(), properties=None)
@@ -322,11 +381,21 @@ async fn Codemode::dispatch_call(
 }
 
 ///|
+/// The per-call context a `CodemodeTool.execute` receives. `signal` is the
+/// call's own abort signal — aborted when the execution finishes with the
+/// call still in flight — not the run-level signal passed to
+/// `Codemode::execute`.
+pub(all) struct CodemodeToolContext {
+  signal : AbortSignal
+}
+
+///|
 /// A `tools.<name>` or global the script can call. `execute` receives the
 /// call's first argument after a JSON round trip — `None` for `undefined`,
 /// `Some(Null)` for explicit `null` — or the whole arguments array when
-/// `spread`. Its return value is serialized back to the script; raising
-/// rejects the script's promise with the error message.
+/// `spread`, plus a `CodemodeToolContext`. Its return value is serialized
+/// back to the script; raising rejects the script's promise with the error
+/// message.
 pub(all) struct CodemodeTool {
   name : String
   /// The identifier the script uses; `to_codemode_identifier(name)` when unset.
@@ -339,7 +408,10 @@ pub(all) struct CodemodeTool {
   output_schema : Json?
   /// Globals only: `execute` receives all call arguments as an array.
   spread : Bool
-  execute : async (Json?) -> Json
+  /// Globals only: TypeScript parameter list and return type for
+  /// `render_declarations`, replacing the rendering from the schemas.
+  signature : String?
+  execute : async (Json?, CodemodeToolContext) -> Json
 }
 
 ///|
