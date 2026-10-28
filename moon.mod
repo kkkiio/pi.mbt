@@ -26,7 +26,7 @@ preferred_target = "js"
 description = "MoonBit agent SDK and pim coding agent CLI"
 
 import {
-  "moonbitlang/async@0.22.2",
+  "moonbitlang/async@0.22.5",
   "moonbitlang/x@0.5.5",
   "moonbitlang/jsonl@0.2.1",
 }

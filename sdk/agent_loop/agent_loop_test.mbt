@@ -7,20 +7,14 @@
 /// queued terminal message, advancing the cursor. Only `Start` is emitted.
 struct EndHookLLM {
   responses : Array[@agent_loop.AssistantMessage]
-  /// When set, `generate` fires this controller before returning the scripted
-  /// message — standing in for a user abort that lands while the provider is
-  /// still streaming, which the provider then closes out with an Aborted
-  /// message.
-  abort_before_return : @agent_loop.AbortController?
   mut cursor : Int32
 }
 
 ///|
 fn EndHookLLM::new(
   responses : Array[@agent_loop.AssistantMessage],
-  abort_before_return~ : @agent_loop.AbortController? = None,
 ) -> EndHookLLM {
-  { responses, abort_before_return, cursor: 0, }
+  { responses, cursor: 0, }
 }
 
 ///|
@@ -28,15 +22,9 @@ impl @agent_loop.LLM for EndHookLLM with fn generate(
   self : EndHookLLM,
   _ctx : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
-  ignore(abort)
   let message = self.responses[self.cursor]
   self.cursor += 1
-  match self.abort_before_return {
-    Some(controller) => controller.abort()
-    None => ()
-  }
   sink(@agent_loop.GenerationEvent::Start(partial=message))
   message
 }
@@ -155,7 +143,7 @@ async test "finish turn end: stops the run and skips the next steering poll" {
       steer_polls.push(1)
       end_hook_no_steering()
     },
-    finish_turn_hook=(_, tool_results, _) => {
+    finish_turn_hook=(_, tool_results) => {
       ordering.push("finish_turn:\{tool_results.length()}")
       Some(@agent_loop.AgentTurnDecision::End)
     },
@@ -204,7 +192,7 @@ async test "finish turn end: hook sees the transcript with tool results appended
       executed.push(call.arguments)
       end_hook_tool_result()
     },
-    finish_turn_hook=(transcript, tool_results, _) => {
+    finish_turn_hook=(transcript, tool_results) => {
       for i = 0; i < tool_results.length(); i = i + 1 {
         hook_tool_call_ids.push(tool_results[i].tool_call_id)
       }
@@ -233,76 +221,78 @@ async test "finish turn end: hook sees the transcript with tool results appended
 ///|
 
 ///|
-async test "finish turn end: hook receives a live signal on a normal turn" {
+async test "finish turn hook receives completed tool results" {
   let llm = EndHookLLM::new([
     end_hook_assistant(
       [end_hook_tool_call("noop", {}, id="tool-1")],
-      stop_reason=@agent_loop.StopReason::ToolUse,
+      stop_reason=ToolUse,
     ),
   ])
-  let messages : Array[@agent_loop.AgentMessage] = []
-  let controller = @agent_loop.AbortController::new()
-  let observed : Array[Bool] = []
-  let _ = @agent_loop.run_agent_loop(
+  let observed : Array[Int32] = []
+  @agent_loop.run_agent_loop(
     llm,
     "",
-    messages,
+    [],
     end_hook_no_tools(),
     [end_hook_user("run")],
     tool_executor=(_, _) => end_hook_tool_result(),
-    steer_channel=end_hook_no_steering,
-    abort=controller.signal(),
-    finish_turn_hook=(_, _, signal) => {
-      observed.push(signal.is_aborted())
-      Some(@agent_loop.AgentTurnDecision::End)
+    finish_turn_hook=(_, results) => {
+      observed.push(results.length())
+      Some(End)
     },
   )
-  json_inspect(observed, content=[false])
+  json_inspect(observed, content=[1])
 }
 
 ///|
 
 ///|
-async test "finish turn end: hook sees an aborted signal, hard exit wins" {
-  let controller = @agent_loop.AbortController::new()
-  let llm = EndHookLLM::new(
-    [
-      end_hook_assistant(
-        [end_hook_text("cut short")],
-        stop_reason=@agent_loop.StopReason::Aborted,
-      ),
-    ],
-    abort_before_return=Some(controller),
-  )
+async test "cancelling generation seals the partial and skips the finish hook" {
+  let llm = EndHookLLM::new([
+    end_hook_assistant([end_hook_text("cut short")], stop_reason=Pending),
+  ])
   let messages : Array[@agent_loop.AgentMessage] = []
-  let observed : Array[Bool] = []
   let events : Array[@agent_loop.AgentEvent] = []
-  let _ = @agent_loop.run_agent_loop(
-    llm,
-    "",
-    messages,
-    end_hook_no_tools(),
-    [end_hook_user("run")],
-    tool_executor=(_, _) => end_hook_tool_result(),
-    steer_channel=end_hook_no_steering,
-    abort=controller.signal(),
-    finish_turn_hook=(_, tool_results, signal) => {
-      observed.push(signal.is_aborted())
-      // An aborted response has no tool results, so the hook cannot act on them.
-      observed.push(tool_results.length() > 0)
-      Some(@agent_loop.AgentTurnDecision::End)
-    },
-    event_sink=event => events.push(event),
-  )
-  json_inspect(observed, content=[true, false])
+  let mut hooked = false
+  @async.with_task_group() <| group => {
+    let active : Ref[@async.Task[Unit?]?] = Ref(None)
+    let task = group.spawn(() => {
+      @async.handle_cancellation(() => {
+        @agent_loop.run_agent_loop(
+          llm,
+          "",
+          messages,
+          [],
+          [end_hook_user("run")],
+          tool_executor=(_, _) => end_hook_tool_result(),
+          finish_turn_hook=(_, _) => {
+            hooked = true
+            Some(End)
+          },
+          event_sink=event => {
+            events.push(event)
+            if event is MessageStart(Assistant(_)) {
+              active.val.unwrap().cancel()
+            }
+          },
+        )
+      })
+    })
+    active.val = Some(task)
+    assert_true(task.wait() is None)
+  }
+  assert_false(hooked)
   assert_eq(llm.cursor, 1)
   json_inspect(events.map(end_hook_event_name), content=[
     "agent_start", "turn_start", "message_start", "message_end", "message_start",
     "message_end", "turn_end", "agent_end",
   ])
-  json_inspect(messages.map(end_hook_message_role), content=[
-    "user", "assistant",
-  ])
+  guard messages.last() is Some(Assistant(message)) else {
+    fail("missing assistant")
+  }
+  assert_true(message.stop_reason is Aborted)
+  guard message.content is [Text(text, ..)] else { fail("missing text") }
+  assert_eq(text, "cut short")
 }
 
 ///|
@@ -332,7 +322,7 @@ async test "finish turn end: leaves queued steering unconsumed" {
         queued
       }
     },
-    finish_turn_hook=(_, _, _) => Some(@agent_loop.AgentTurnDecision::End),
+    finish_turn_hook=(_, _) => Some(@agent_loop.AgentTurnDecision::End),
     event_sink=event => events.push(event),
   )
   // Polled once before the loop; the post-turn poll never happened.
@@ -349,25 +339,28 @@ async test "finish turn end: leaves queued steering unconsumed" {
 ///|
 
 ///|
-async test "pre-aborted run completes a balanced turn instead of dropping it" {
-  let llm = EndHookLLM::new([
-    end_hook_assistant([], stop_reason=@agent_loop.StopReason::Aborted),
-  ])
+async test "cancelling before startup journals the accepted input and an aborted turn" {
+  let llm = EndHookLLM::new([])
   let messages : Array[@agent_loop.AgentMessage] = []
   let events : Array[@agent_loop.AgentEvent] = []
-  let controller = @agent_loop.AbortController::new()
-  controller.abort()
-  @agent_loop.run_agent_loop(
-    llm,
-    "",
-    messages,
-    end_hook_no_tools(),
-    [end_hook_user("hi")],
-    tool_executor=(_, _) => end_hook_tool_result(),
-    steer_channel=end_hook_no_steering,
-    abort=controller.signal(),
-    event_sink=event => events.push(event),
-  )
+  @async.with_task_group() <| group => {
+    let task = group.spawn(() => {
+      @async.handle_cancellation(() => {
+        @agent_loop.run_agent_loop(
+          llm,
+          "",
+          messages,
+          [],
+          [end_hook_user("hi")],
+          tool_executor=(_, _) => end_hook_tool_result(),
+          event_sink=event => events.push(event),
+        )
+      })
+    })
+    task.cancel()
+    assert_true(task.wait() is None)
+  }
+  assert_eq(llm.cursor, 0)
   json_inspect(messages.map(end_hook_message_role), content=[
     "user", "assistant",
   ])
@@ -375,10 +368,10 @@ async test "pre-aborted run completes a balanced turn instead of dropping it" {
     "agent_start", "turn_start", "message_start", "message_end", "message_start",
     "message_end", "turn_end", "agent_end",
   ])
-  match messages.last() {
-    Some(Assistant(message)) => assert_true(message.stop_reason is Aborted)
-    _ => fail("expected a trailing assistant message")
+  guard messages.last() is Some(Assistant(message)) else {
+    fail("missing assistant")
   }
+  assert_true(message.stop_reason is Aborted)
 }
 
 ///|

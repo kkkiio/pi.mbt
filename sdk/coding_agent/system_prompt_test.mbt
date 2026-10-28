@@ -35,9 +35,7 @@ impl @agent_loop.LLM for PromptCapturingLLM with fn generate(
   self : PromptCapturingLLM,
   context : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
-  ignore(abort)
   let prompt = context.system_prompt.replace_all(old=self.cwd, new="/work")
   self.prompts.push(prompt)
   self.requests.push({

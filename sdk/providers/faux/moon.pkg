@@ -2,3 +2,7 @@ import {
   "KKKIIO/pi/sdk/agent_loop",
   "moonbitlang/async",
 }
+
+import {
+  "moonbitlang/async",
+} for "test"

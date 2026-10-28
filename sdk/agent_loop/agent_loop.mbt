@@ -1,17 +1,12 @@
 ///|
-/// Marks an error raised by an event listener (the `event_sink` chain) so the
-/// generation catch passes it to the owning run's lifecycle handler rather
-/// than treating it as a provider response. Never escapes `run_agent_loop`.
 priv suberror ListenerError {
   ListenerError(Error)
 }
 
 ///|
-/// Runs the agent loop, which generates messages from the LLM and executes tools as needed.
-///
-/// Provider failures become a terminal `AssistantMessage` with `stop_reason` `Error`
-/// or `Aborted`. Errors raised by `event_sink` (an event listener) are re-raised to
-/// the caller, where `AgentSession` closes the run like pi's `handleRunFailure`.
+/// Runs model turns and tools, delivering ordered events through `event_sink`.
+/// Provider errors become Error messages; extension errors propagate unchanged.
+/// Cancellation seals the current turn and delivers remaining terminal events.
 pub async fn run_agent_loop(
   llm : &LLM,
   system_prompt : String,
@@ -20,36 +15,145 @@ pub async fn run_agent_loop(
   prompts : ArrayView[UserMessage],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
   steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
-  abort~ : AbortSignal = AbortSignal::never(),
-  // TODO: support follow-up channel
   event_sink~ : async (AgentEvent) -> Unit = _ => (),
-  finish_turn_hook~ : FinishTurnHook = (_, _, _) => None,
+  finish_turn_hook~ : FinishTurnHook = (_, _) => None,
 ) -> Unit {
-  event_sink(AgentEvent::AgentStart)
   let mut pending_prompts = prompts
   if steer_channel() is ([_, ..] as steer_messages) {
     pending_prompts += steer_messages
   }
+  let mut agent_started = false
   for ;; {
-    event_sink(AgentEvent::TurnStart)
-    for prompt in pending_prompts {
-      let msg = AgentMessage::User(prompt)
-      messages.push(msg)
-      // Complete messages get start+end back to back, like pi.
-      event_sink(AgentEvent::MessageStart(msg))
-      event_sink(AgentEvent::MessageEnd(msg))
-    }
-    pending_prompts = []
-    let mut message_started = false
-    let assistant_message = llm.generate(
-      { system_prompt, messages, tools, },
-      sink=event => {
+    let mut failure : Error? = None
+    let mut turn_started = false
+    let mut input_index = 0
+    let mut input_started = false
+    let mut assistant : AssistantMessage? = None
+    let mut assistant_slot : Int32? = None
+    let mut assistant_started = false
+    let mut assistant_finalized = false
+    let mut assistant_ended = false
+    let mut tool_calls : Array[ToolCall] = []
+    let tool_results : Array[ToolResultMessage] = []
+    let mut tool_index = 0
+    let mut tool_started = false
+    let mut ready_result : ToolResultMessage? = None
+    let mut turn_ended = false
+    let mut agent_ended = false
+    errdefer (if failure is None && @async.is_being_cancelled() {
+      @async.protect_from_cancel(() => {
+        if !turn_started {
+          turn_started = true
+          event_sink(TurnStart)
+        }
+        while input_index < pending_prompts.length() {
+          let msg = AgentMessage::User(pending_prompts[input_index])
+          if !input_started {
+            messages.push(msg)
+            input_started = true
+            event_sink(MessageStart(msg))
+          }
+          input_index += 1
+          input_started = false
+          event_sink(MessageEnd(msg))
+        }
+        let message = if assistant_finalized {
+          assistant.unwrap()
+        } else {
+          let partial = assistant.unwrap_or(AssistantMessage::{
+            content: [],
+            api: "",
+            provider: "",
+            model: "",
+            stop_reason: Pending,
+            error_message: None,
+            usage: None,
+            timestamp: @env.now(),
+          })
+          let aborted = {
+            ..partial,
+            stop_reason: Aborted,
+            error_message: Some("Interrupted"),
+          }
+          assistant = Some(aborted)
+          assistant_finalized = true
+          match assistant_slot {
+            Some(index) => messages[index] = Assistant(aborted)
+            None => {
+              assistant_slot = Some(messages.length())
+              messages.push(Assistant(aborted))
+            }
+          }
+          aborted
+        }
+        if !assistant_started {
+          assistant_started = true
+          event_sink(MessageStart(Assistant(message)))
+        }
+        if !assistant_ended {
+          assistant_ended = true
+          event_sink(MessageEnd(Assistant(message)))
+        }
+        while tool_index < tool_calls.length() {
+          let call = tool_calls[tool_index]
+          if !tool_started {
+            tool_started = true
+            event_sink(ToolExecutionStart(call))
+          }
+          let result = ready_result.unwrap_or(ToolResultMessage::{
+            tool_call_id: call.id,
+            tool_name: call.name,
+            content: [InputMessageContent::Text("Operation aborted")],
+            details: None,
+            usage: None,
+            is_error: true,
+            timestamp: @env.now(),
+          })
+          tool_results.push(result)
+          messages.push(ToolResult(result))
+          tool_index += 1
+          tool_started = false
+          ready_result = None
+          event_sink(ToolExecutionEnd(result))
+        }
+        if !turn_ended {
+          turn_ended = true
+          event_sink(TurnEnd(message, tool_results))
+        }
+        if !agent_ended {
+          agent_ended = true
+          event_sink(AgentEnd(messages))
+        }
+      })
+    })
+    let outcome : Result[Unit, Error] = try {
+      if !agent_started {
+        agent_started = true
+        event_sink(AgentStart)
+        @async.pause()
+      }
+      turn_started = true
+      event_sink(TurnStart)
+      @async.pause()
+      while input_index < pending_prompts.length() {
+        let msg = AgentMessage::User(pending_prompts[input_index])
+        messages.push(msg)
+        input_started = true
+        event_sink(MessageStart(msg))
+        @async.pause()
+        input_index += 1
+        input_started = false
+        event_sink(MessageEnd(msg))
+        @async.pause()
+      }
+      let message = llm.generate({ system_prompt, messages, tools, }, sink=event => {
         match event {
           Start(partial~) => {
-            message_started = true
-            let msg = AgentMessage::Assistant(partial)
-            messages.push(msg)
-            event_sink(AgentEvent::MessageStart(msg)) catch {
+            assistant = Some(partial)
+            assistant_slot = Some(messages.length())
+            messages.push(Assistant(partial))
+            assistant_started = true
+            event_sink(MessageStart(Assistant(partial))) catch {
               err => raise ListenerError(err)
             }
           }
@@ -62,204 +166,165 @@ pub async fn run_agent_loop(
           | ToolCallStart(partial~, ..)
           | ToolCallDelta(partial~, ..)
           | ToolCallEnd(partial~, ..) =>
-            // 在 Start 之前到达的中间事件违反流契约,直接丢弃;终态消息由 generate 的返回值兜底。
-            if message_started {
-              messages[messages.length() - 1] = AgentMessage::Assistant(partial)
-              // 事件同时带增量和快照:订阅方要么按 delta 追加,要么用 partial 重建。
-              event_sink(AgentEvent::MessageUpdate(event)) catch {
+            if assistant_slot is Some(index) {
+              assistant = Some(partial)
+              messages[index] = Assistant(partial)
+              event_sink(MessageUpdate(event)) catch {
                 err => raise ListenerError(err)
               }
             }
         }
-      },
-      abort~,
-    ) catch {
-      // Listener failures belong to the run lifecycle, not provider generation.
-      ListenerError(err) => raise err
-      err => {
-        let error_message = {
+        @async.pause()
+      }) catch {
+        ListenerError(err) => raise err
+        err => {
           let text = err.to_string()
-          match text.rev_split_once(" FAILED: ") {
+          let error_message = match text.rev_split_once(" FAILED: ") {
             Some((_, message)) =>
-              match message.strip_suffix(")") {
-                Some(rest) => rest.to_owned()
-                None => message.to_owned()
-              }
+              message.strip_suffix(")").unwrap_or(message).to_owned()
             None => text
           }
-        }
-        let fallback = AssistantMessage::{
-          content: [],
-          api: "",
-          provider: "",
-          model: "",
-          stop_reason: Error,
-          error_message: Some(error_message),
-          usage: None,
-          timestamp: @env.now(),
-        }
-        if message_started && messages.length() > 0 {
-          match messages[messages.length() - 1] {
-            Assistant(m) =>
-              AssistantMessage::{
-                content: [],
-                api: m.api,
-                provider: m.provider,
-                model: m.model,
-                stop_reason: Error,
-                error_message: Some(error_message),
-                usage: None,
-                timestamp: m.timestamp,
-              }
-            _ => fallback
+          let partial = assistant.unwrap_or(AssistantMessage::{
+            content: [],
+            api: "",
+            provider: "",
+            model: "",
+            stop_reason: Pending,
+            error_message: None,
+            usage: None,
+            timestamp: @env.now(),
+          })
+          {
+            ..partial,
+            content: [],
+            stop_reason: Error,
+            error_message: Some(error_message),
+            usage: None,
           }
+        }
+      }
+      guard !(message.stop_reason is Pending) else {
+        fail("generate returned a message with pending stop_reason")
+      }
+      assistant = Some(message)
+      assistant_finalized = true
+      match assistant_slot {
+        Some(index) => messages[index] = Assistant(message)
+        None => {
+          assistant_slot = Some(messages.length())
+          messages.push(Assistant(message))
+        }
+      }
+      let hard_exit = message.stop_reason is Aborted ||
+        message.stop_reason is Error
+      if !hard_exit {
+        tool_calls = message.content.filter_map(content => {
+          match content {
+            AssistantMessageContent::ToolCall(call, ..) => Some(call)
+            _ => None
+          }
+        })
+      }
+      if !assistant_started {
+        assistant_started = true
+        event_sink(MessageStart(Assistant(message)))
+        @async.pause()
+      }
+      assistant_ended = true
+      event_sink(MessageEnd(Assistant(message)))
+      @async.pause()
+      while tool_index < tool_calls.length() {
+        let call = tool_calls[tool_index]
+        tool_started = true
+        event_sink(ToolExecutionStart(call))
+        @async.pause()
+        let timestamp = @env.now()
+        if message.stop_reason is Length {
+          ready_result = Some(ToolResultMessage::{
+            tool_call_id: call.id,
+            tool_name: call.name,
+            content: [],
+            details: None,
+            usage: None,
+            is_error: true,
+            timestamp,
+          })
         } else {
-          fallback
-        }
-      }
-    }
-    let final_msg = AgentMessage::Assistant(assistant_message)
-    if message_started {
-      messages[messages.length() - 1] = final_msg
-    } else {
-      messages.push(final_msg)
-      event_sink(AgentEvent::MessageStart(final_msg))
-    }
-    event_sink(AgentEvent::MessageEnd(final_msg))
-
-    let tool_results = []
-    let hard_exit = match assistant_message.stop_reason {
-      Pending => fail("generate returned a message with pending stop_reason")
-      Aborted => true
-      Error => true
-      (Length with model_error = true)
-      | (Stop | ToolUse with model_error = false) => {
-        for content in assistant_message.content {
-          guard content is AssistantMessageContent::ToolCall(tool_call, ..) else {
-            continue
+          let updates = @aqueue.Queue(kind=@aqueue.Unbounded)
+          defer updates.close()
+          let update_sink = fn(content, details) {
+            ignore(updates.try_put((content, details)) catch { _ => false })
           }
-          event_sink(AgentEvent::ToolExecutionStart(tool_call))
-          let call_timestamp = @env.now()
-          let tool_result = if abort.is_aborted() {
-            // pi: 未执行的工具补一个 "Operation aborted" 结果,保证每个调用都有结果。
-            ToolResultMessage::{
-              tool_call_id: tool_call.id,
-              tool_name: tool_call.name,
-              content: [InputMessageContent::Text("Operation aborted")],
-              details: None,
-              usage: None,
-              is_error: true,
-              timestamp: call_timestamp,
-            }
-          } else if model_error {
-            ToolResultMessage::{
-              tool_call_id: tool_call.id,
-              tool_name: tool_call.name,
-              content: [],
-              details: None,
-              usage: None,
-              is_error: true,
-              timestamp: call_timestamp,
-            }
-          } else {
-            // partial result 经队列转给 drainer:callback 必须是同步的(工具
-            // 可能从 JS 回调里调它,见 bash 的 on_data),而 event_sink 是
-            // async。close 后迟到的 try_put 失败即丢弃——对齐 pi:settle 之后
-            // 的进度回调被忽略(#5573 修过 stale update 漏出的同类问题)。
-            let updates = @aqueue.Queue(kind=@aqueue.Unbounded)
-            let update_sink = fn(content, details) {
-              ignore(updates.try_put((content, details)) catch { _ => false })
-            }
-            // 子协程里跑工具,watcher 盯中断:置位即结束 group 并取消工具协程。
-            let raced = @async.with_task_group() <| group => {
-              group.spawn_bg(no_wait=true) <| async fn() {
-                abort.wait_abort()
-                group.return_immediately(None)
+          @async.with_task_group() <| group => {
+            group.spawn_bg() <| () => {
+              for ;; {
+                let (content, details) = updates.get() catch { _ => break }
+                event_sink(ToolExecutionUpdate(call, content, details))
+                @async.pause()
               }
-              // drainer 用默认的 no_wait=false:group 正常退出前等它排空残余
-              // update(close 后 get 仍会先取走缓冲),保证 update 排在
-              // ToolExecutionEnd 之前。abort 路径 return_immediately 直接
-              // 取消它,残余 update 丢弃。
-              group.spawn_bg() <| async fn() {
-                for ;; {
-                  let (content, details) = updates.get() catch { _ => break }
-                  event_sink(
-                    AgentEvent::ToolExecutionUpdate(tool_call, content, details),
-                  )
-                }
-              }
-              let result = Some(
-                tool_executor(tool_call, update_sink) catch {
-                  err =>
-                    {
-                      content: [InputMessageContent::Text(err.to_string())],
-                      details: {},
-                      is_error: true,
-                      usage: None,
-                    }
-                },
-              )
-              updates.close()
-              result
             }
-            match raced {
-              // 运行中被中断:与未执行的调用一致,补一条 aborted 结果。
-              None =>
-                ToolResultMessage::{
-                  tool_call_id: tool_call.id,
-                  tool_name: tool_call.name,
-                  content: [InputMessageContent::Text("Operation aborted")],
-                  details: None,
-                  usage: None,
+            let result = tool_executor(call, update_sink) catch {
+              err =>
+                ToolResult::{
+                  content: [InputMessageContent::Text(err.to_string())],
+                  details: {},
                   is_error: true,
-                  timestamp: call_timestamp,
-                }
-              Some(result) =>
-                ToolResultMessage::{
-                  tool_call_id: tool_call.id,
-                  tool_name: tool_call.name,
-                  content: result.content,
-                  details: Some(result.details),
-                  usage: result.usage,
-                  is_error: result.is_error,
-                  timestamp: call_timestamp,
+                  usage: None,
                 }
             }
+            ready_result = Some(ToolResultMessage::{
+              tool_call_id: call.id,
+              tool_name: call.name,
+              content: result.content,
+              details: Some(result.details),
+              usage: result.usage,
+              is_error: result.is_error,
+              timestamp,
+            })
+            updates.close()
           }
-          event_sink(AgentEvent::ToolExecutionEnd(tool_result))
-          tool_results.push(tool_result)
-          messages.push(AgentMessage::ToolResult(tool_result))
         }
-        false
+        let result = ready_result.unwrap()
+        tool_results.push(result)
+        messages.push(ToolResult(result))
+        tool_index += 1
+        tool_started = false
+        ready_result = None
+        event_sink(ToolExecutionEnd(result))
+        @async.pause()
+      }
+      @async.pause()
+      let decision = finish_turn_hook(messages, tool_results)
+      @async.pause()
+      turn_ended = true
+      event_sink(TurnEnd(message, tool_results))
+      @async.pause()
+      if !hard_exit && !(decision is Some(End)) {
+        pending_prompts = steer_channel()
+        if tool_results.length() > 0 || pending_prompts.length() > 0 {
+          continue
+        }
+      }
+      agent_ended = true
+      event_sink(AgentEnd(messages))
+      @async.pause()
+      return
+    } catch {
+      err => Err(err)
+    }
+    match outcome {
+      Ok(_) => ()
+      Err(err) => {
+        failure = Some(err)
+        raise err
       }
     }
-    let finish_turn_decision = finish_turn_hook(messages, tool_results, abort)
-    event_sink(AgentEvent::TurnEnd(assistant_message, tool_results))
-    if hard_exit {
-      break
-    }
-    match finish_turn_decision {
-      Some(End) => break
-      None => ()
-    }
-    if tool_results.length() > 0 {
-      continue
-    }
-    pending_prompts = steer_channel()
-    if pending_prompts.length() > 0 {
-      continue
-    }
-    break
   }
-  event_sink(AgentEvent::AgentEnd(messages))
 }
 
 ///|
-/// Continue the loop from the current transcript, appending no prompt.
-///
-/// The transcript must end with something the model can answer: a user message
-/// or a tool result. pi's `runAgentLoopContinue` rejects the other cases, and
-/// this mirrors it.
+/// Continues a transcript ending in a user message or tool result.
+/// Empty transcripts and assistant tails raise an error before execution.
 pub async fn run_agent_loop_continue(
   llm : &LLM,
   system_prompt : String,
@@ -267,9 +332,8 @@ pub async fn run_agent_loop_continue(
   tools : ArrayView[ToolDefinition],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
   steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
-  abort~ : AbortSignal = AbortSignal::never(),
   event_sink~ : async (AgentEvent) -> Unit = _ => (),
-  finish_turn_hook~ : FinishTurnHook = (_, _, _) => None,
+  finish_turn_hook~ : FinishTurnHook = (_, _) => None,
 ) -> Unit {
   guard messages.length() > 0 else {
     fail("Cannot continue: no messages in context")
@@ -278,16 +342,14 @@ pub async fn run_agent_loop_continue(
     Assistant(_) => fail("Cannot continue from message role: assistant")
     _ => ()
   }
-  let no_prompts : Array[UserMessage] = []
   run_agent_loop(
     llm,
     system_prompt,
     messages,
     tools,
-    no_prompts,
+    [],
     tool_executor~,
     steer_channel~,
-    abort~,
     event_sink~,
     finish_turn_hook~,
   )
@@ -332,7 +394,6 @@ pub type ToolExecUpdateCallback = (Array[InputMessageContent], ToolResultDetail)
 pub type FinishTurnHook = async (
   ArrayView[AgentMessage],
   ArrayView[ToolResultMessage],
-  AbortSignal,
 ) -> AgentTurnDecision?
 
 ///|

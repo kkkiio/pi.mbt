@@ -28,7 +28,7 @@ pub struct FauxLLM {
 }
 pub fn FauxLLM::FauxLLM(api? : String, provider? : String, model? : String, chunk_delay_ms? : Int32, chunk_size? : Int32) -> Self
 pub fn FauxLLM::append_responses(Self, ArrayView[@agent_loop.AssistantMessage]) -> Unit
-pub async fn FauxLLM::generate(Self, @agent_loop.Context, sink~ : async (@agent_loop.GenerationEvent) -> Unit, abort~ : @agent_loop.AbortSignal) -> @agent_loop.AssistantMessage
+pub async fn FauxLLM::generate(Self, @agent_loop.Context, sink~ : async (@agent_loop.GenerationEvent) -> Unit) -> @agent_loop.AssistantMessage
 pub fn FauxLLM::pending_responses(Self) -> Int32
 pub fn FauxLLM::set_responses(Self, ArrayView[@agent_loop.AssistantMessage]) -> Unit
 pub impl @agent_loop.LLM for FauxLLM

@@ -10,11 +10,9 @@ impl @agent_loop.LLM for StubLLM with fn generate(
   self : StubLLM,
   _ctx : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
   ignore(self)
   ignore(sink)
-  ignore(abort)
   fail("StubLLM must not be called in hydration tests")
 }
 
@@ -352,10 +350,8 @@ impl @agent_loop.LLM for ScriptedLLM with fn generate(
   self : ScriptedLLM,
   _ctx : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
   ignore(self)
-  ignore(abort)
   let msg = ok_message()
   sink(@agent_loop.GenerationEvent::Start(partial=msg))
   msg
@@ -399,10 +395,8 @@ impl @agent_loop.LLM for NoStartLLM with fn generate(
   self : NoStartLLM,
   _ctx : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
   ignore(self)
-  ignore(abort)
   let msg = ok_message()
   sink(
     @agent_loop.GenerationEvent::TextDelta(
@@ -447,9 +441,7 @@ async test "mid-stream events before Start are dropped" {
 }
 
 ///|
-/// A stub LLM that streams nothing and waits until it is interrupted, then
-/// reports `stop_reason: Aborted` with the text received so far — the shape
-/// pi's providers produce when `AbortSignal` fires mid-stream.
+/// Streams a partial and waits until the task is cancelled.
 struct InterruptibleLLM {}
 
 ///|
@@ -457,10 +449,8 @@ impl @agent_loop.LLM for InterruptibleLLM with fn generate(
   self : InterruptibleLLM,
   _ctx : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
   ignore(self)
-  ignore(abort)
   let partial : @agent_loop.AssistantMessage = {
     content: [
       @agent_loop.AssistantMessageContent::Text("half", signature={
@@ -477,18 +467,6 @@ impl @agent_loop.LLM for InterruptibleLLM with fn generate(
   }
   sink(@agent_loop.GenerationEvent::Start(partial~))
   for ;; {
-    if abort.is_aborted() {
-      return {
-        content: partial.content,
-        api: "openai-responses",
-        provider: "deepseek",
-        model: "deepseek-v4-flash",
-        stop_reason: @agent_loop.StopReason::Aborted,
-        error_message: Some("Interrupted"),
-        usage: None,
-        timestamp: 1741290958000,
-      }
-    }
     @async.sleep(5)
   }
 }
@@ -565,9 +543,7 @@ impl @agent_loop.LLM for ToolCapturingLLM with fn generate(
   self : ToolCapturingLLM,
   ctx : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
-  ignore(abort)
   self.seen.clear()
   for tool in ctx.tools {
     self.seen.push(tool.name)
@@ -622,62 +598,6 @@ async test "activating an unregistered tool fails at prompt time" {
 }
 
 ///|
-/// 已中断的信号上等待立即返回(不挂起),且重复 `abort` 仍然幂等。
-async test "wait_abort returns immediately when already aborted" {
-  let controller = @agent_loop.AbortController::new()
-  let signal = controller.signal()
-  assert_false(signal.is_aborted())
-  controller.abort()
-  assert_true(signal.is_aborted())
-  signal.wait_abort()
-  controller.abort()
-  assert_true(signal.is_aborted())
-}
-
-///|
-/// 广播唤醒全部等待者。
-async test "wait_abort wakes every waiter on abort" {
-  let controller = @agent_loop.AbortController::new()
-  let signal = controller.signal()
-  let woken : Array[String] = []
-  @async.with_task_group() <| group => {
-    for name in ["a", "b"] {
-      group.spawn_bg() <| () => {
-        signal.wait_abort()
-        woken.push(name)
-      }
-    }
-    @async.sleep(50)
-    assert_eq(woken, [])
-    controller.abort()
-  }
-  assert_eq(woken, ["a", "b"])
-}
-
-///|
-/// 等待被取消(超时)时不消费这次中断,也不留在等待队列里。
-async test "a cancelled wait_abort does not consume the abort signal" {
-  let controller = @agent_loop.AbortController::new()
-  let signal = controller.signal()
-  let log : Array[String] = []
-  @async.with_task_group() <| group => {
-    group.spawn_bg() <| () => {
-      @async.with_timeout(50, () => signal.wait_abort()) catch {
-        _ => log.push("cancelled")
-      }
-    }
-    group.spawn_bg() <| () => {
-      @async.sleep(80)
-      signal.wait_abort()
-      log.push("woken")
-    }
-    @async.sleep(150)
-    controller.abort()
-  }
-  assert_eq(log, ["cancelled", "woken"])
-}
-
-///|
 async fn blocking_execute(
   _id : String,
   _args : Json,
@@ -702,6 +622,7 @@ fn abort_batch_tools(log : Array[String]) -> @tools.ToolRegistry {
       strict=true,
     ),
     execute: (_, _, on_update) => {
+      log.push("started")
       defer log.push("cleanup")
       blocking_execute("slow", {}, on_update)
     },
@@ -751,13 +672,17 @@ async test "interrupt during a running tool cancels it and records aborted resul
   )
   @async.with_task_group() <| group => {
     group.spawn_bg(async fn() {
-      @async.sleep(20)
+      @async.with_timeout(1000, () => {
+        while log.is_empty() {
+          @async.pause()
+        }
+      })
       session.abort()
     })
     session.prompt([user_message("go")])
   }
   // 运行中的工具被取消,`defer` 清理已执行;批内后续调用不执行。
-  assert_eq(log, ["cleanup"])
+  json_inspect(log, content=["started", "cleanup"])
   let results = journal
     .get_entries()
     .filter_map(entry => {
@@ -912,93 +837,18 @@ impl @agent_loop.LLM for ContextCapturingLLM with fn generate(
   self : ContextCapturingLLM,
   ctx : @agent_loop.Context,
   sink~ : async (@agent_loop.GenerationEvent) -> Unit,
-  abort~ : @agent_loop.AbortSignal,
 ) -> @agent_loop.AssistantMessage {
   self.contexts.push(ctx.messages.to_owned())
-  self.inner.generate(ctx, sink~, abort~)
+  self.inner.generate(ctx, sink~)
 }
 
 ///|
-/// pi's handleRunFailure closes a listener failure with an error/aborted turn.
-/// The next prompt keeps the journaled user, but not the interrupted partial.
-async test "listener failures close the run and preserve the next model context" {
-  for phase in ["start", "update", "turn_end", "aborted_update"] {
-    let inner = @faux.FauxLLM::FauxLLM(chunk_size=3)
+async test "listener errors propagate while the next prompt uses committed context" {
+  let contexts : Array[String] = []
+  for phase in ["start", "update", "message_end", "turn_end", "agent_end"] {
+    let inner = @faux.FauxLLM(chunk_size=3)
     inner.set_responses([
-      @faux.faux_message([@faux.faux_text("discarded response")]),
-      @faux.faux_message([@faux.faux_text("next answer")]),
-    ])
-    let llm = ContextCapturingLLM::{ inner, contexts: [], }
-    let journal = @agent_session.InMemorySessionJournal()
-    let session = @agent_session.AgentSession(llm, journal~)
-    let mut failed = false
-    let recovery_events : Array[String] = []
-    session.subscribe(event => {
-      let should_fail = match event {
-        Loop(MessageStart(Assistant(_))) => phase == "start"
-        Loop(MessageUpdate(TextDelta(..))) =>
-          phase == "update" || phase == "aborted_update"
-        Loop(TurnEnd(_, _)) => phase == "turn_end"
-        _ => false
-      }
-      if !failed && should_fail {
-        failed = true
-        if phase == "aborted_update" {
-          session.abort()
-        }
-        @async.sleep(0)
-        fail("listener exploded")
-      }
-      if failed {
-        match event {
-          Loop(MessageStart(Assistant(_))) => recovery_events.push("start")
-          Loop(MessageEnd(Assistant(_))) => recovery_events.push("end")
-          Loop(TurnEnd(_, _)) => recovery_events.push("turn_end")
-          Loop(AgentEnd(_)) => recovery_events.push("agent_end")
-          _ => ()
-        }
-      }
-    })
-    session.prompt([user_message("first request")])
-    assert_eq(recovery_events, ["start", "end", "turn_end", "agent_end"])
-    let entries = journal.get_entries()
-    let expected_count = if phase == "turn_end" { 3 } else { 2 }
-    assert_eq(entries.length(), expected_count)
-    guard entries[expected_count - 1].content is Message(Assistant(failure)) else {
-      fail("expected terminal assistant failure")
-    }
-    assert_true(
-      failure.error_message.unwrap_or("").contains("listener exploded"),
-    )
-    assert_eq(failure.api, "faux")
-    assert_eq(failure.provider, "faux")
-    assert_eq(failure.model, "faux-1")
-    assert_eq(context_lines([Assistant(failure)]), "assistant: ")
-    if phase == "aborted_update" {
-      assert_true(failure.stop_reason is Aborted)
-    } else {
-      assert_true(failure.stop_reason is Error)
-    }
-    session.prompt([user_message("second request")])
-    assert_eq(
-      context_lines(llm.contexts[1]),
-      if phase == "turn_end" {
-        "user: first request\nassistant: discarded response\nassistant: \nuser: second request"
-      } else {
-        "user: first request\nassistant: \nuser: second request"
-      },
-    )
-  }
-}
-
-///|
-/// Like pi, an exception while delivering the synthetic failure still escapes.
-/// Cleanup must leave the same session reusable with exactly its saved history.
-async test "a listener that also rejects recovery leaves the session reusable" {
-  for reject_end in [false, true] {
-    let inner = @faux.FauxLLM::FauxLLM()
-    inner.set_responses([
-      @faux.faux_message([@faux.faux_text("unfinished")]),
+      @faux.faux_message([@faux.faux_text("first answer")]),
       @faux.faux_message([@faux.faux_text("next answer")]),
     ])
     let llm = ContextCapturingLLM::{ inner, contexts: [], }
@@ -1006,81 +856,99 @@ async test "a listener that also rejects recovery leaves the session reusable" {
     let session = @agent_session.AgentSession(llm, journal~)
     let mut reject = true
     session.subscribe(event => {
-      guard reject else { return }
-      match event {
-        Loop(MessageUpdate(TextDelta(..))) => fail("initial listener failure")
-        Loop(MessageStart(Assistant(m))) if m.stop_reason is Error &&
-          !reject_end => fail("recovery listener failure")
-        Loop(MessageEnd(Assistant(m))) if m.stop_reason is Error && reject_end =>
-          fail("recovery listener failure")
-        _ => ()
+      let selected = match event {
+        Loop(MessageStart(Assistant(_))) => phase == "start"
+        Loop(MessageUpdate(TextDelta(..))) => phase == "update"
+        Loop(MessageEnd(Assistant(_))) => phase == "message_end"
+        Loop(TurnEnd(_, _)) => phase == "turn_end"
+        Loop(AgentEnd(_)) => phase == "agent_end"
+        _ => false
+      }
+      if reject && selected {
+        raise SessionExtensionFailure
       }
     })
-    let error = try {
+    let caught = try {
       session.prompt([user_message("first request")])
-      ""
+      false
     } catch {
-      err => err.to_string()
+      SessionExtensionFailure => true
+      err => raise err
     }
-    assert_true(error.contains("recovery listener failure"))
-    assert_eq(journal.get_entries().length(), if reject_end { 2 } else { 1 })
+    assert_true(caught)
     reject = false
     session.prompt([user_message("second request")])
-    assert_eq(
-      context_lines(llm.contexts[1]),
-      if reject_end {
-        "user: first request\nassistant: \nuser: second request"
-      } else {
-        "user: first request\nuser: second request"
-      },
-    )
+    contexts.push(context_lines(llm.contexts[1]))
   }
+  json_inspect(contexts, content=[
+    "user: first request\nuser: second request", "user: first request\nuser: second request",
+    "user: first request\nassistant: first answer\nuser: second request", "user: first request\nassistant: first answer\nuser: second request",
+    "user: first request\nassistant: first answer\nuser: second request",
+  ])
 }
 
 ///|
-/// A listener that throws after the turn already succeeded escapes the loop;
-/// the session still closes the run with a synthetic Error turn, but that
-/// failure is local — provider errors always arrive through the normal
-/// MessageEnd path — so a retryable-looking error text must not start
-/// auto-retry. Before the fix this emitted auto_retry_start, journaled a
-/// context_edit, waited out a backoff, and only then failed the continue.
-async test "a failure that escapes the run does not auto-retry" {
-  let llm = @faux.FauxLLM::FauxLLM()
-  llm.set_responses([@faux.faux_message([@faux.faux_text("completed answer")])])
+async test "a listener cancellation-shaped error propagates as an error" {
+  let llm = @faux.FauxLLM()
+  llm.set_responses([
+    @faux.faux_message([@faux.faux_text("first")]),
+    @faux.faux_message([@faux.faux_text("next")]),
+  ])
+  let session = @agent_session.AgentSession(llm)
+  let mut reject = true
+  session.subscribe(event => {
+    if reject && event is Loop(MessageUpdate(TextDelta(..))) {
+      @async.with_task_group() <| group => {
+        let task = group.spawn(() => @async.sleep(1000))
+        task.cancel()
+        task.wait()
+      }
+    }
+  })
+  let caught = try {
+    session.prompt([user_message("first")])
+    false
+  } catch {
+    @async.WaitedTaskAlreadyCancelled => true
+    err => raise err
+  }
+  assert_true(caught)
+  reject = false
+  session.prompt([user_message("next")])
+}
+
+///|
+async test "a retryable-looking listener error propagates to the caller" {
+  let llm = @faux.FauxLLM()
+  llm.set_responses([
+    @faux.faux_message([@faux.faux_text("completed answer")]),
+    @faux.faux_message([@faux.faux_text("next answer")]),
+  ])
   let journal = @agent_session.InMemorySessionJournal()
   let session = @agent_session.AgentSession(
     llm,
     journal~,
     retry_settings=fast_retry_settings(),
   )
-  let retry_events : Array[@agent_session.AgentSessionEvent] = []
-  let mut failed = false
   session.subscribe(event => {
-    match event {
-      AutoRetryStart(..) | AutoRetryEnd(..) => retry_events.push(event)
-      Loop(TurnEnd(_, _)) if !failed => {
-        failed = true
-        fail("socket hang up")
-      }
-      _ => ()
+    if event is Loop(TurnEnd(_, _)) {
+      fail("socket hang up")
     }
   })
-  session.prompt([user_message("go")])
-  assert_eq(retry_events.length(), 0)
-  assert_eq(llm.pending_responses(), 0)
-  // [user, assistant(completed), assistant(synthetic error)]: the failure is
-  // journaled like pi's handleRunFailure, with no context_edit and no second
-  // provider call.
+  let error = try {
+    session.prompt([user_message("go")])
+    ""
+  } catch {
+    err => err.to_string()
+  }
+  assert_true(error.contains("socket hang up"))
+  assert_eq(llm.pending_responses(), 1)
   let entries = journal.get_entries()
-  assert_eq(entries.length(), 3)
-  guard entries[1].content is Message(Assistant(completed)) else {
-    fail("expected the completed assistant turn")
+  assert_eq(entries.length(), 2)
+  guard entries[1].content is Message(Assistant(message)) else {
+    fail("missing assistant")
   }
-  assert_true(completed.stop_reason is @agent_loop.StopReason::Stop)
-  guard entries[2].content is Message(Assistant(failure)) else {
-    fail("expected terminal assistant failure")
-  }
-  assert_true(failure.error_message.unwrap_or("").contains("socket hang up"))
+  assert_true(message.stop_reason is Stop)
 }
 
 ///|
@@ -1184,12 +1052,6 @@ async test "auto-retry window resets after each successful response" {
 /// The normal path: a tool that completes without any interrupt must let
 /// `prompt` return and must be journaled as a real result.
 ///
-/// Regression guard — the agent loop races each tool against an abort watcher
-/// inside a task group, and `with_task_group` waits for every child unless
-/// `no_wait=true`. Without it the group waited forever on a watcher that only
-/// returns on abort, so *every* tool call hung after the tool itself finished.
-/// The interrupt test above cannot catch that: it aborts, which unblocks the
-/// watcher.
 async test "a completing tool call returns and records its result" {
   let log : Array[String] = []
   let registry = probe_tools(log)
@@ -1208,9 +1070,6 @@ async test "a completing tool call returns and records its result" {
     tool_registry=registry,
     active_tools=["probe"],
   )
-  // No interrupt is ever delivered here. If the group starts waiting on the
-  // abort watcher again, the timeout below reports `false` instead of hanging
-  // the whole suite.
   let finished = @async.with_task_group() <| group => {
     group.spawn_bg(no_wait=true) <| async fn() {
       @async.sleep(2000)
@@ -1260,7 +1119,7 @@ async test "finish turn hook on a session ends the run after the tool batch" {
     journal~,
     tool_registry=registry,
     active_tools=["probe"],
-    finish_turn_hook=(_, tool_results, _) => {
+    finish_turn_hook=(_, tool_results) => {
       hook_calls.push(tool_results.length())
       Some(@agent_loop.AgentTurnDecision::End)
     },
@@ -1314,16 +1173,16 @@ async test "a session can replace and wrap its finish turn hook" {
     llm,
     tool_registry=registry,
     active_tools=["probe"],
-    finish_turn_hook=(_, _, _) => {
+    finish_turn_hook=(_, _) => {
       calls.push("inner")
       None
     },
   )
   let inner = session.agent.finish_turn_hook
-  session.set_finish_turn_hook((messages, tool_results, abort) => {
+  session.set_finish_turn_hook((messages, tool_results) => {
     calls.push("outer")
     // Delegate to the hook this one replaced, then decide.
-    ignore(inner(messages, tool_results, abort))
+    ignore(inner(messages, tool_results))
     Some(@agent_loop.AgentTurnDecision::End)
   })
   session.prompt([user_message("go")])
@@ -1414,8 +1273,8 @@ async test "interrupt during a retried generation reports a cancelled retry" {
 }
 
 ///|
-/// Without an interrupt the winning timer cancels its watcher and retries once.
-async test "a completed retry reports success and releases its abort watcher" {
+/// A successful retry closes its retry window before the run completes.
+async test "a completed retry reports success and finishes the prompt" {
   let llm = @faux.FauxLLM::FauxLLM()
   llm.set_responses([error_message("429 rate limit"), ok_message()])
   let session = @agent_session.AgentSession(
@@ -1481,3 +1340,6 @@ async test "a reloaded session projects the same context as the live one" {
   // The failed turn stays in the record: user, error turn, its edit, the retry.
   assert_eq(journal.get_entries().length(), 4)
 }
+
+///|
+suberror SessionExtensionFailure derive(Debug)
