@@ -50,21 +50,22 @@
 ## Domain Language
 
 - **pi** — 上游 TypeScript coding agent(https://github.com/earendil-works/pi),pim 的行为对齐目标。
-- **pim** — 本项目的 CLI 可执行文件产物。
-- **mooncram** — 测试转录中的可执行终端会话块(` ```mooncram `),由 `moon cram test` 校验命令输出与退出状态。
+- **pim** — 本项目的 tui CLI 可执行文件产物。
+- **codemode** — 在 sandbox 中运行 js 代码的机制。
 
 ## Policies & Mandatory Rules
 
 ### Black-Box Test Policy
 
-只写黑盒测试:通过公共 API 或 CLI 行为验证,不添加 `_for_test` 公开符号、不暴露私有类型、不扩大 facade 只为可测性。
+只写黑盒测试: 通过公共 API 或 CLI 行为验证.
+不要为了可测性, 添加 `_for_test` 公开符号、暴露私有类型、扩大 facade .
 
 ### CLI Contract Test Policy
 
-CLI 契约由 `tests/cram/` 下的 `mooncram` 转录持续验证。
+CLI 契约由 `tests/cram/` 下的 `mooncram` 转录持续验证.
 
-- 在对应的转录文件(`tests/cram/cli.md` 等)中同步行为。
-- 涉及凭证的用例必须把 `PIM_CONFIG_DIR` 指向隔离目录,避免开发机的 `~/.pim/auth.json` 影响结果。
+- 在对应的转录文件(`tests/cram/cli.md` 等)中同步行为.
+- 涉及凭证的用例必须把 `PIM_CONFIG_DIR` 指向隔离目录,避免开发机的 `~/.pim/auth.json` 影响结果.
 
 ### Live Provider Test Policy
 

@@ -27,26 +27,6 @@ pub fn Codemode::Codemode(
 }
 
 ///|
-/// pi's `toCodemodeIdentifier`: characters that are not valid in a JavaScript
-/// identifier become `_`; an empty name becomes `_`.
-pub fn to_codemode_identifier(name : String) -> String {
-  let builder = StringBuilder()
-  for c in name.iter() {
-    let valid = if builder.is_empty() {
-      c is ('a'..<='z' | 'A'..<='Z' | '_' | '$')
-    } else {
-      c is ('a'..<='z' | 'A'..<='Z' | '0'..<='9' | '_' | '$')
-    }
-    builder.write_char(if valid { c } else { '_' })
-  }
-  if builder.is_empty() {
-    "_"
-  } else {
-    builder.to_string()
-  }
-}
-
-///|
 /// Run `code` to completion on a fresh VM, answering the script's tool and
 /// global calls from `tools`/`globals` and accumulating its output. `store`
 /// is the `load()` snapshot; writes are reported in the result for the
@@ -250,11 +230,9 @@ pub async fn Codemode::execute(
 pub(open) trait Vm {
   /// Send one whole JSON message to the peer.
   async fn send(Self, Json) -> Unit
-  /// Receive the next whole JSON message. A message may be a batch —
-  /// `Json::Array` carries several VM messages in one frame — and the end
-  /// of the stream (peer closed, transport lost) raises an error instead
-  /// of returning a sentinel: in codemode semantics a stream that ends
-  /// before a terminal `done`/`crash`/`failure` is always a failure.
+  /// Receive the next whole JSON message. 
+  ///
+  /// The end of the stream (peer closed, transport lost) raises a ReaderClosed error.
   async fn recv(Self) -> Json
   /// Close the vm, unblocking any in-progress `recv`/`send` so the
   /// client's reader and writer tasks return. Must be idempotent.
