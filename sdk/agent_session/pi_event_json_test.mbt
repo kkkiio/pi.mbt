@@ -109,11 +109,11 @@ async test "tool_execution_update carries the partial result on the wire" {
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
-    execute: (id, args, on_update, abort) => {
+    execute: (id, args, on_update) => {
       on_update([@agent_loop.InputMessageContent::Text("tick-half")], {
         "pct": Json::number(50),
       })
-      probe_execute(id, args, on_update, abort)
+      probe_execute(id, args, on_update)
     },
   })
   let llm = @faux.FauxLLM::FauxLLM()

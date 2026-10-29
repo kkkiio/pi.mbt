@@ -1,7 +1,4 @@
 ///|
-using @agent_loop {type AbortSignal, type AbortController}
-
-///|
 struct Codemode {
   vm_launcher : async () -> &VmServer
   tools : Map[String, CodemodeTool]
@@ -35,35 +32,21 @@ pub fn Codemode::Codemode(
 /// is the `load()` snapshot; writes are reported in the result for the
 /// caller to apply.
 ///
-/// The script runs at most `timeout_ms` milliseconds when given, else the
-/// `Codemode`'s own `timeout_ms` (nonpositive means no limit); on expiry the
-/// VM is sent `stop` and the result is a `Timeout` error. `abort` firing
-/// likewise stops the VM and ends the run as an `Aborted` error. Cancelling
-/// `execute` aborts in-flight calls and closes the VM — the close path tells
-/// the remote to stop without suspending, so it is safe from a cancelled
-/// coroutine. A VM that stops answering before a terminal
-/// `done`/`crash`/`failure` frame produces a `Sandbox` error.
+/// The deadline includes VM launch and returns a `Timeout` error after cancelling
+/// in-flight calls and waiting for their cleanup. Nonpositive deadlines disable it.
+/// External task cancellation propagates after cleanup without producing a result.
+/// Every acquired VM is closed on exit; closing must stop the remote execution.
+/// A stream ending before a terminal frame produces a `Sandbox` error.
 pub async fn Codemode::execute(
   self : Codemode,
   code : String,
   store~ : Map[String, Json] = Map([]),
   timeout_ms~ : Int32? = None,
-  abort~ : AbortSignal = AbortSignal::never(),
 ) -> CodemodeResult {
   let deadline_ms = timeout_ms.unwrap_or(self.timeout_ms)
-  let vm = (self.vm_launcher)()
-  defer vm.close()
   let output : Array[CodemodeOutputItem] = []
   let calls : Array[CodemodeCall] = []
   let pending : Map[Int32, PendingCall] = Map([])
-  let ended : Ref[CodemodeErrorKind?] = Ref(None)
-  let end_with = async fn(kind : CodemodeErrorKind) {
-    if ended.val is None {
-      ended.val = Some(kind)
-    }
-    ignore(vm.send(Json(HostToVmMessage::Stop)) catch { _ => () })
-    vm.close()
-  }
   let sandbox = fn(message : String) -> CodemodeResult {
     CodemodeResult::Err(
       error={
@@ -86,76 +69,63 @@ pub async fn Codemode::execute(
     if deadline_ms > 0 {
       tg.spawn_bg(no_wait=true, () => {
         @async.sleep(deadline_ms)
-        end_with(CodemodeErrorKind::Timeout)
+        tg.return_immediately(
+          CodemodeResult::Err(
+            error={
+              kind: CodemodeErrorKind::Timeout,
+              name: None,
+              message: "Execution timed out after \{deadline_ms} ms",
+              stack: None,
+            },
+            output~,
+            calls~,
+            during=None,
+          ),
+        )
       })
     }
-    if abort.is_aborted() {
-      end_with(CodemodeErrorKind::Aborted)
-    } else {
-      tg.spawn_bg(no_wait=true, () => {
-        abort.wait_abort()
-        end_with(CodemodeErrorKind::Aborted)
-      })
-    }
-    if ended.val is None {
-      vm.send(
-        Json(StartVmRequest::{
-          data: VmStartData::{
-            code,
-            tools: self.tools
-            .values()
-            .map(tool => Tool::{
-              name: tool.name,
-              js_name: tool.js_name.unwrap_or(to_codemode_identifier(tool.name)),
-              description: tool.description,
-            })
-            .collect(),
-            globals: self.globals
-            .values()
-            .map(global => Global::{ name: global.name, spread: global.spread, })
-            .collect(),
-            memory_limit_bytes: self.memory_limit_bytes,
-            store,
-            deterministic: None,
-          },
-          interrupt_budget: None,
-        }),
-      ) catch {
-        _ => ()
+    let vm = (self.vm_launcher)()
+    defer {
+      vm.close()
+      let finished_at = @async.now()
+      for call in pending.values() {
+        if call.record is Some(record) {
+          record.duration_ms = (finished_at - call.started_at).to_int()
+        }
       }
+      pending.clear()
+    }
+    vm.send(
+      Json(StartVmRequest::{
+        data: VmStartData::{
+          code,
+          tools: self.tools
+          .values()
+          .map(tool => Tool::{
+            name: tool.name,
+            js_name: tool.js_name.unwrap_or(to_codemode_identifier(tool.name)),
+            description: tool.description,
+          })
+          .collect(),
+          globals: self.globals
+          .values()
+          .map(global => Global::{ name: global.name, spread: global.spread, })
+          .collect(),
+          memory_limit_bytes: self.memory_limit_bytes,
+          store,
+          deterministic: None,
+        },
+        interrupt_budget: None,
+      }),
+    ) catch {
+      error => return sandbox("Sandbox start failed: \{error.to_string()}")
     }
     let batch : Array[Json] = []
     let result = while true {
+      @async.pause()
       if batch.is_empty() {
         let frame = vm.recv() catch {
-          _ =>
-            break match ended.val {
-              Some(Timeout) =>
-                CodemodeResult::Err(
-                  error={
-                    kind: CodemodeErrorKind::Timeout,
-                    name: None,
-                    message: "Execution timed out after \{deadline_ms} ms",
-                    stack: None,
-                  },
-                  output~,
-                  calls~,
-                  during=None,
-                )
-              Some(Aborted) =>
-                CodemodeResult::Err(
-                  error={
-                    kind: CodemodeErrorKind::Aborted,
-                    name: None,
-                    message: "Execution aborted",
-                    stack: None,
-                  },
-                  output~,
-                  calls~,
-                  during=None,
-                )
-              _ => sandbox("Sandbox stream ended before the script settled")
-            }
+          _ => break sandbox("Sandbox stream ended before the script settled")
         }
         if frame is Array(messages) {
           for message in messages {
@@ -254,14 +224,6 @@ pub async fn Codemode::execute(
     } nobreak {
       fail("unreachable: the loop only ends through `break`")
     }
-    let finished_at = @async.now()
-    for call in pending.values() {
-      call.controller.abort()
-      if call.record is Some(record) {
-        record.duration_ms = (finished_at - call.started_at).to_int()
-      }
-    }
-    pending.clear()
     result
   })
 }
@@ -274,8 +236,9 @@ pub(open) trait VmServer {
   ///
   /// The end of the stream (peer closed, transport lost) raises a ReaderClosed error.
   async fn recv(Self) -> Json
-  /// Close the vm, unblocking any in-progress `recv`/`send` so the
-  /// client's reader and writer tasks return. Must be idempotent.
+  /// Stop the remote execution and release the stream without suspending.
+  /// Must be idempotent and safe during task cancellation. A live transport
+  /// must retain the stop notification even when ordinary sends are backpressured.
   fn close(Self) -> Unit
 }
 
@@ -283,7 +246,6 @@ pub(open) trait VmServer {
 priv struct PendingCall {
   record : CodemodeCall?
   started_at : Int64
-  controller : AbortController
 }
 
 ///|
@@ -309,8 +271,7 @@ async fn Codemode::dispatch_call(
   } else {
     None
   }
-  let controller = AbortController::new()
-  pending[id] = PendingCall::{ record, started_at: @async.now(), controller, }
+  pending[id] = PendingCall::{ record, started_at: @async.now(), }
   let reject = async fn(message : String) {
     pending.remove(id)
     if record is Some(record) {
@@ -348,13 +309,8 @@ async fn Codemode::dispatch_call(
     None => None
   }
   tg.spawn_bg(no_wait=true, () => {
-    let outcome = CallOutcome::Resolve(
-      value=Some(
-        (tool.execute)(args, CodemodeToolContext::{
-          signal: controller.signal(),
-        }),
-      ),
-    ) catch {
+    let outcome = CallOutcome::Resolve(value=Some((tool.execute)(args))) catch {
+      error if @async.is_being_cancelled() => raise error
       Failure::Failure(message) =>
         CallOutcome::Reject(message~, properties=None)
       error => CallOutcome::Reject(message=error.to_string(), properties=None)
@@ -381,19 +337,10 @@ async fn Codemode::dispatch_call(
 }
 
 ///|
-/// The per-call context a `CodemodeTool.execute` receives. `signal` is the
-/// call's own abort signal — aborted when the execution finishes with the
-/// call still in flight — not the run-level signal passed to
-/// `Codemode::execute`.
-pub(all) struct CodemodeToolContext {
-  signal : AbortSignal
-}
-
-///|
 /// A `tools.<name>` or global the script can call. `execute` receives the
 /// call's first argument after a JSON round trip — `None` for `undefined`,
 /// `Some(Null)` for explicit `null` — or the whole arguments array when
-/// `spread`, plus a `CodemodeToolContext`. Its return value is serialized
+/// `spread`. Its return value is serialized
 /// back to the script; raising rejects the script's promise with the error
 /// message.
 pub(all) struct CodemodeTool {
@@ -411,7 +358,7 @@ pub(all) struct CodemodeTool {
   /// Globals only: TypeScript parameter list and return type for
   /// `render_declarations`, replacing the rendering from the schemas.
   signature : String?
-  execute : async (Json?, CodemodeToolContext) -> Json
+  execute : async (Json?) -> Json
 }
 
 ///|

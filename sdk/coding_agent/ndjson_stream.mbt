@@ -8,7 +8,8 @@ pub struct NdJsonStreams[R, W] {
   priv reader : R
   priv writer : W
   priv mut next_id : Int32
-  priv send_queue : @aqueue.Queue[Json]
+  priv send_queue : @aqueue.Queue[(Json, Bool)]
+  priv send_slots : @aqueue.Queue[Unit]
   priv recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
   priv mut closed : Bool
 }
@@ -17,11 +18,16 @@ pub struct NdJsonStreams[R, W] {
 /// Create a demultiplexer over `reader`/`writer`. `run` must be called to
 /// pump frames, usually in a background task.
 pub fn[R, W] NdJsonStreams::new(reader : R, writer : W) -> NdJsonStreams[R, W] {
+  let send_slots : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+  for _ in 0..<10 {
+    ignore(send_slots.try_put(()) catch { _ => false })
+  }
   NdJsonStreams::{
     reader,
     writer,
     next_id: 1,
-    send_queue: @aqueue.Queue(kind=@aqueue.Blocking(10)),
+    send_queue: @aqueue.Queue(kind=@aqueue.Unbounded),
+    send_slots,
     recv_queue_map: Map([]),
     closed: false,
   }
@@ -43,9 +49,12 @@ pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(
   @async.with_task_group(tg => {
     tg.spawn_bg(() => {
       while true {
-        let msg = self.send_queue.get() catch {
+        let (msg, reserved) = self.send_queue.get() catch {
           @aqueue.QueueAlreadyClosed => break
           err => raise err
+        }
+        if reserved {
+          ignore(self.send_slots.try_put(()) catch { _ => false })
         }
         self.writer.write(@utf8.encode(msg.stringify() + "\n")) catch {
           _ => break
@@ -85,11 +94,12 @@ pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(
         queue.close()
       }
       self.send_queue.close()
+      self.send_slots.close()
     }
     while read_frame() is Some(line) {
       let frame = @json.parse(@utf8.decode_lossy(line[:]))
-      guard frame is { "stream_id": Number(stream_id, ..), "data": data, .. } else {
-        continue // malformed frame: drop it rather than killing the shared pump
+      guard frame is { "stream_id": Number(stream_id, ..), "data": data, .. } else { // malformed frame: drop it rather than killing the shared pump
+        continue
       }
       if self.recv_queue_map.get(stream_id.to_int()) is Some(queue) {
         queue.put(data) catch {
@@ -120,6 +130,8 @@ pub fn[R, W] NdJsonStreams::new_stream(
   NdJsonStream::{
     id,
     send_queue: self.send_queue,
+    send_slots: self.send_slots,
+    closed: false,
     recv_queue,
     recv_queue_map: self.recv_queue_map,
   }
@@ -134,6 +146,7 @@ pub fn[R, W] NdJsonStreams::close(self : NdJsonStreams[R, W]) -> Unit {
     queue.close()
   }
   self.send_queue.close()
+  self.send_slots.close()
 }
 
 ///|
@@ -144,14 +157,25 @@ pub fn[R, W] NdJsonStreams::close(self : NdJsonStreams[R, W]) -> Unit {
 /// running).
 pub struct NdJsonStream {
   priv id : Int32
-  priv send_queue : @aqueue.Queue[Json]
+  priv send_queue : @aqueue.Queue[(Json, Bool)]
+  priv send_slots : @aqueue.Queue[Unit]
   priv recv_queue : @aqueue.Queue[Json]
   priv recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
+  priv mut closed : Bool
 }
 
 ///|
 pub impl @codemode.VmServer for NdJsonStream with fn send(self, data : Json) -> Unit {
-  self.send_queue.put({ "stream_id": self.id, "data": data })
+  guard !self.closed else { fail("codemode stream is closed") }
+  self.send_slots.get()
+  if self.closed {
+    ignore(self.send_slots.try_put(()) catch { _ => false })
+    fail("codemode stream is closed")
+  }
+  errdefer ignore(self.send_slots.try_put(()) catch { _ => false })
+  ignore(
+    self.send_queue.try_put(({ "stream_id": self.id, "data": data }, true)),
+  )
 }
 
 ///|
@@ -167,11 +191,18 @@ pub impl @codemode.VmServer for NdJsonStream with fn recv(self) -> Json {
 /// Closing tells the remote to stop its VM — pi's `remoteLauncher.stop()` —
 /// by queueing a final `{ "type": "stop" }` frame. `try_put` never suspends,
 /// so `close` stays safe to call from a cancelled coroutine (an `async`
-/// `send` would fail there); a full or closed queue drops the frame.
+/// `send` would fail there). Ordinary frames reserve bounded send slots;
+/// stop frames bypass those slots and remain queued while the transport is live.
 /// Harmless on normal completion: the stream already exited remotely.
 pub impl @codemode.VmServer for NdJsonStream with fn close(self) {
+  if self.closed {
+    return
+  }
+  self.closed = true
   ignore(
-    self.send_queue.try_put({ "stream_id": self.id, "data": { "type": "stop" } }) catch {
+    self.send_queue.try_put(
+      ({ "stream_id": self.id, "data": { "type": "stop" } }, false),
+    ) catch {
       _ => false
     },
   )

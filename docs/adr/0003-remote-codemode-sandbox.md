@@ -30,7 +30,17 @@ pub(open) trait VmServer {
 }
 ```
 
-每次 `Codemode::execute` 通过 `vm_launcher : async () -> &VmServer` 获取一条独立流，发送 `StartVmRequest`，在循环中接收 `VmToHostMessage`（或消息批次数组），在宿主协程中并发调度工具调用并回传 `CallResult`，在超时或取消时发送 `HostToVmMessage::Stop` 并调用 `vm.close()`。
+每次 `Codemode::execute` 通过 `vm_launcher : async () -> &VmServer` 获取一条独立流，发送 `StartVmRequest`，在循环中接收 `VmToHostMessage`（或消息批次数组），在宿主协程中并发调度工具调用并回传 `CallResult`，在所有退出路径调用 `vm.close()`，由传输层保留并发送 `HostToVmMessage::Stop`。
+
+### 原生取消与执行所有权
+
+取消遵循 [ADR 0003](0003-native-async-cancellation.md) 与 [ADR 0004](0004-layered-event-cancellation.md)。不再定义或透传自定义 `AbortSignal` / `AbortController`；`CodemodeTool.execute` 仅接收调用参数，不保留只为 signal 存在的 context。
+
+一次 `Codemode::execute` 的任务组拥有 VM 启动、截止计时、消息循环以及所有工具和 global 调用。脚本成功或失败后，仍在运行的调用由任务组取消；外部原生取消同样取消整个执行。任务组等待全部子任务及其受保护清理退出后才返回，未完成调用记为 cancelled，已经产生的结果保留。清理期间抛出的普通错误继续传播。
+
+截止时间包含 VM 启动和协议发送。计时任务到期时结束执行任务组，取消消息循环与嵌套调用，保留已有输出和调用记录，并返回 `Timeout`。外部取消直接传播，不合成 `CodemodeResult::Err(Aborted)` 或工具错误结果；session 的正常返回、loop 的 `Operation aborted` 结果和取消终态事件由 main 的取消路径负责。协议中的 `aborted` 仍可表示远端主动报告的结果。
+
+VM 获取成功后立即注册 `defer vm.close()`。`close` 必须同步、幂等、可在取消状态调用，并在传输仍可用时保留停止通知。NDJSON 与 WebSocket 的普通发送维持 10 个排队槽位，停止帧绕过槽位进入同一有序队列，避免队列满时丢弃 stop；传输关闭时唤醒等待发送和接收的任务。JS AbortController 仅用于 FFI 的可取消等待。
 
 ### 2. VM 执行层委托给上游 `@earendil-works/pi-codemode` 的 `serveCodemodeRemote`
 
@@ -59,7 +69,7 @@ pub(open) trait VmServer {
 将 VM Server 移出 `sdk/codemode` 并不会牺牲控制力：
 - **天然的每次执行 Reset**：VM Server 进程虽然常驻（仅缓存编译好的 `WebAssembly.Module`），但 `serveCodemodeRemote` 对每一个 `stream_id`（每次 `execute`）都会实例化一个全新的 QuickJS Wasm 实例，执行结束或收到 `stop` 后立即 `dispose()` 回收线性内存。跨执行状态仅通过协议中的 `store` / `writes` 由宿主显式传递。
 - **双保险的 Cancel / Timeout**：
-  1. 当宿主超时或取消时，`Codemode::execute` 立即发送 `{"type": "stop"}` 并关闭本地流返回，绝不被远端阻塞；`codemode-sidecar.mjs` 收到 `stop` 后立即向所有挂起的 `exchange` 回调兑现 `{ type: "stop" }`，触发 `serveCodemodeRemote` 销毁 VM。
+  1. 当宿主超时或取消时，`Codemode::execute` 通过关闭本地流排入 `{"type": "stop"}`，并等待本地调用清理结束，不等待远端停止确认；`codemode-sidecar.mjs` 收到 `stop` 后立即向所有挂起的 `exchange` 回调兑现 `{ type: "stop" }`，触发 `serveCodemodeRemote` 销毁 VM。
   2. 对于不调用工具的纯 CPU 死循环（`while (true) {}`），`serveCodemodeRemote` 内置 `interruptBudget`（默认 100,000 次中断轮询），耗尽预算后自动中断 VM 并上报 `Timeout`，无需宿主通过 `SIGKILL` 强杀进程。
 
 ### 3. 消除双 Target 重复实现与 ~50,000 行 C 源码维护负担

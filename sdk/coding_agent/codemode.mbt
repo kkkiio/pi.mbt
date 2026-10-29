@@ -70,10 +70,9 @@ fn spawn_codemode_sidecar(
 ///   `cancelled`. Nested events never reach the agent loop or journal: the
 ///   ledger rides inside the parent's `ToolResult.details` instead of
 ///   upstream's `nestedCalls`/event plumbing.
-/// - A nested call runs with its own abort signal (aborted when the script
-///   settles) and its `usage` sums into the result's `usage`. `abort`
-///   reaches `Codemode::execute`, which stops the remote VM and surfaces a
-///   "Script aborted" error.
+/// - A nested call is cancelled when the script settles and its `usage`
+///   sums into the result's `usage`. External task cancellation
+///   stops the remote VM, waits for nested cleanup, and propagates to the caller.
 /// - A `// @options: {...}` first line sets `max_output_tokens` and a
 ///   per-call `timeout_ms`, which overrides `timeout_ms` for that execution.
 /// - Output keeps the upstream shape: "Script completed|failed" header,
@@ -124,7 +123,7 @@ pub fn new_codemode_tool_definition(
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
-    execute: (id, input, on_update, abort) => {
+    execute: (id, input, on_update) => {
       execute_codemode_tool(
         launcher,
         tools,
@@ -133,7 +132,6 @@ pub fn new_codemode_tool_definition(
         id,
         input,
         on_update,
-        abort,
       )
     },
   }
@@ -184,9 +182,7 @@ fn to_codemode_declaration(
     output_schema: Some({ "type": "string" }),
     spread: false,
     signature: None,
-    execute: fn(_args : Json?, _ctx : @codemode.CodemodeToolContext) -> Json {
-      Json::null()
-    },
+    execute: fn(_args : Json?) -> Json { Json::null() },
   }
 }
 
@@ -352,8 +348,7 @@ const ERROR_PREVIEW_CHARS : Int32 = 500
 /// tool-result shape. `on_update` receives the nested-call ledger as the
 /// partial result (`{ calls: [...] }`), first before the script starts —
 /// pi shows the row as running — then on every call start and finish.
-/// `abort` reaches `Codemode::execute`; the call's own signal reaches the
-/// nested tool.
+/// External task cancellation propagates after the VM and nested calls clean up.
 async fn execute_codemode_tool(
   launcher : async () -> &@codemode.VmServer,
   tools : ArrayView[@tools.ToolDefinition],
@@ -362,7 +357,6 @@ async fn execute_codemode_tool(
   tool_call_id : String,
   input : Json,
   on_update : @agent_loop.ToolExecUpdateCallback,
-  abort : @agent_loop.AbortSignal,
 ) -> @agent_loop.ToolResult {
   let params : CodemodeToolInput = @json.from_json(input)
   let started_at = @async.now()
@@ -401,14 +395,7 @@ async fn execute_codemode_tool(
     parsed.code,
     store~,
     timeout_ms=parsed.options.timeout_ms,
-    abort~,
   )
-  // The script settled with calls still in flight — they are cancelled.
-  for call in calls {
-    if call.status == "running" {
-      call.status = "cancelled"
-    }
-  }
   if result is Ok(store_writes~, ..) && journal is Some(journal) {
     append_codemode_store(journal, store_writes)
   }
@@ -471,7 +458,7 @@ async fn execute_codemode_tool(
 /// `renderToolSample` output. `execute` records a `CodemodeNestedCall` row, republishes
 /// the ledger on the nested tool's own partial updates (nested partial
 /// content does not merge into the parent result — upstream shows it as a
-/// nested row update only), runs the tool with the call's own `signal`,
+/// nested row update only), runs the tool in the execution's task group,
 /// sums its `usage`, and resolves like `toScriptValue`: the text content,
 /// or `details` when the text is empty.
 fn nested_codemode_tools(
@@ -495,10 +482,7 @@ fn nested_codemode_tools(
       output_schema: declaration.output_schema,
       spread: false,
       signature: None,
-      execute: async fn(
-        args : Json?,
-        ctx : @codemode.CodemodeToolContext,
-      ) -> Json {
+      execute: async fn(args : Json?) -> Json {
         let record = CodemodeNestedCall::{
           id: "\{tool_call_id}/\{calls.length() + 1}",
           name: tool.name,
@@ -510,14 +494,16 @@ fn nested_codemode_tools(
         calls.push(record)
         publish()
         let started_at = @async.now()
-        // A raise inside `execute` is an error result — the same fold the
-        // agent loop applies around `tool_executor`.
+        defer (if record.status == "running" {
+          record.status = "cancelled"
+          record.duration_ms = Some((@async.now() - started_at).to_int())
+        })
         let result = (tool.execute)(
           record.id,
           args.unwrap_or(Json::object({})),
           (_, _) => publish(),
-          ctx.signal,
         ) catch {
+          error if @async.is_being_cancelled() => raise error
           error =>
             @agent_loop.ToolResult::{
               content: [
@@ -544,11 +530,7 @@ fn nested_codemode_tools(
           } else {
             text
           }
-          record.status = if ctx.signal.is_aborted() {
-            "cancelled"
-          } else {
-            "error"
-          }
+          record.status = "error"
           record.error = Some(truncate_preview(error_text, ERROR_PREVIEW_CHARS))
           publish()
           fail(error_text)

@@ -135,7 +135,7 @@ async test "finish turn end: stops the run and skips the next steering poll" {
     messages,
     end_hook_no_tools(),
     [end_hook_user("run")],
-    tool_executor=(call, _, _) => {
+    tool_executor=(call, _) => {
       ordering.push("execute:\{call.name}")
       end_hook_tool_result()
     },
@@ -188,7 +188,7 @@ async test "finish turn end: hook sees the transcript with tool results appended
     messages,
     end_hook_no_tools(),
     [end_hook_user("echo something")],
-    tool_executor=(call, _, _) => {
+    tool_executor=(call, _) => {
       executed.push(call.arguments)
       end_hook_tool_result()
     },
@@ -235,7 +235,7 @@ async test "finish turn hook receives completed tool results" {
     [],
     end_hook_no_tools(),
     [end_hook_user("run")],
-    tool_executor=(_, _, _) => end_hook_tool_result(),
+    tool_executor=(_, _) => end_hook_tool_result(),
     finish_turn_hook=(_, results) => {
       observed.push(results.length())
       Some(End)
@@ -264,7 +264,7 @@ async test "cancelling generation seals the partial and skips the finish hook" {
           messages,
           [],
           [end_hook_user("run")],
-          tool_executor=(_, _, _) => end_hook_tool_result(),
+          tool_executor=(_, _) => end_hook_tool_result(),
           finish_turn_hook=(_, _) => {
             hooked = true
             Some(End)
@@ -313,7 +313,7 @@ async test "finish turn end: leaves queued steering unconsumed" {
     messages,
     end_hook_no_tools(),
     [end_hook_user("start")],
-    tool_executor=(_, _, _) => end_hook_tool_result(),
+    tool_executor=(_, _) => end_hook_tool_result(),
     steer_channel=() => {
       steer_calls.push(1)
       if steer_calls.length() == 1 {
@@ -352,7 +352,7 @@ async test "cancelling before startup journals the accepted input and an aborted
           messages,
           [],
           [end_hook_user("hi")],
-          tool_executor=(_, _, _) => end_hook_tool_result(),
+          tool_executor=(_, _) => end_hook_tool_result(),
           event_sink=(event, _) => events.push(event),
         )
       })
@@ -425,7 +425,7 @@ async test "continue runs a turn from a tool result tail" {
     "",
     messages,
     end_hook_no_tools(),
-    tool_executor=(_, _, _) => end_hook_tool_result(),
+    tool_executor=(_, _) => end_hook_tool_result(),
     event_sink=(event, _) => events.push(event),
   )
   json_inspect(messages.map(end_hook_message_role), content=[
@@ -447,7 +447,7 @@ async fn end_hook_continue_error(
       "",
       messages,
       end_hook_no_tools(),
-      tool_executor=(_, _, _) => end_hook_tool_result(),
+      tool_executor=(_, _) => end_hook_tool_result(),
     )
     ""
   } catch {
@@ -498,7 +498,7 @@ async test "tool execution updates stream between start and end" {
     messages,
     end_hook_no_tools(),
     [end_hook_user("run")],
-    tool_executor=(_, update, _) => {
+    tool_executor=(_, update) => {
       settled_sink = Some(update)
       update([@agent_loop.InputMessageContent::Text("half")], {
         "pct": Json::number(50),
@@ -574,7 +574,7 @@ async test "loop cancellation context accompanies protected terminal delivery" {
           [],
           [],
           [end_hook_user("run")],
-          tool_executor=(_, _, _) => end_hook_tool_result(),
+          tool_executor=(_, _) => end_hook_tool_result(),
           event_sink=(event, context) => {
             delivered.push((end_hook_event_name(event), context.is_cancelling))
             if context.is_cancelling {
@@ -614,7 +614,7 @@ async test "normal loop sink delivery reports its ordinary context" {
     [],
     [],
     [end_hook_user("run")],
-    tool_executor=(_, _, _) => end_hook_tool_result(),
+    tool_executor=(_, _) => end_hook_tool_result(),
     event_sink=(_, context) => {
       assert_false(context.is_cancelling)
       assert_false(@async.is_being_cancelled())

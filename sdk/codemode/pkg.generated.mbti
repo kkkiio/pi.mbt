@@ -2,7 +2,6 @@
 package "KKKIIO/pi/sdk/codemode"
 
 import {
-  "KKKIIO/pi/sdk/agent_loop",
   "moonbitlang/core/json",
 }
 
@@ -56,7 +55,7 @@ pub impl @json.FromJson for CallResponse
 
 type Codemode
 pub fn Codemode::Codemode(async () -> &VmServer, tools? : Array[CodemodeTool], globals? : Array[CodemodeTool], timeout_ms? : Int32, memory_limit_bytes? : Double?) -> Self
-pub async fn Codemode::execute(Self, String, store? : Map[String, Json], timeout_ms? : Int32?, abort? : @agent_loop.AbortSignal) -> CodemodeResult
+pub async fn Codemode::execute(Self, String, store? : Map[String, Json], timeout_ms? : Int32?) -> CodemodeResult
 
 pub(all) struct CodemodeCall {
   name : String
@@ -125,11 +124,7 @@ pub(all) struct CodemodeTool {
   output_schema : Json?
   spread : Bool
   signature : String?
-  execute : async (Json?, CodemodeToolContext) -> Json
-}
-
-pub(all) struct CodemodeToolContext {
-  signal : @agent_loop.AbortSignal
+  execute : async (Json?) -> Json
 }
 
 pub(all) struct Deterministic {

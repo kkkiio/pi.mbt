@@ -25,7 +25,6 @@ async test "bash tool returns merged output, exit code and details" {
     "call-1",
     { "command": "echo out; echo err 1>&2" },
     (_, _) => (),
-    @agent_loop.AbortSignal::never(),
   )
   json_inspect(result, content={
     "content": [{ "type": "text", "text": "out\nerr\n" }],
@@ -41,12 +40,10 @@ async test "bash tool returns merged output, exit code and details" {
 async test "bash tool reports a non-zero exit code" {
   let message = try {
     ignore(
-      (bash_tool().execute)(
-        "call-2",
-        { "command": "echo before; exit 3" },
-        (_, _) => (),
-        @agent_loop.AbortSignal::never(),
-      ),
+      (bash_tool().execute)("call-2", { "command": "echo before; exit 3" }, (
+        _,
+        _,
+      ) => ()),
     )
     fail("expected the tool to fail")
   } catch {
@@ -64,7 +61,6 @@ async test "bash tool kills the command on timeout" {
         "call-3",
         { "command": "echo started; sleep 5", "timeout": 1 },
         (_, _) => (),
-        @agent_loop.AbortSignal::never(),
       ),
     )
     fail("expected the tool to fail")
@@ -83,7 +79,6 @@ async test "bash tool streams throttled updates and a terminal update" {
     "call-4",
     { "command": "for i in 1 2 3 4; do echo tick$i; sleep 0.15; done" },
     (content, _detail) => updates.push(content),
-    @agent_loop.AbortSignal::never(),
   )
   json_inspect(result, content={
     "content": [{ "type": "text", "text": "tick1\ntick2\ntick3\ntick4\n" }],
@@ -109,7 +104,6 @@ async test "bash tool spills truncated output to a temp file" {
     "call-5",
     { "command": "seq 1 200 | awk '{printf \"%0600d\\n\", $1}'" },
     (_, _) => (),
-    @agent_loop.AbortSignal::never(),
   )
   guard result.details is { "fullOutputPath": String(path), .. } else {
     fail(

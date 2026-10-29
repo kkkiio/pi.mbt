@@ -84,6 +84,7 @@ async test "eof before a terminal frame is a sandbox error" {
 priv struct BlockingChannel {
   sent : Array[Json]
   inbox : @aqueue.Queue[Json]
+  mut closed : Bool
 }
 
 ///|
@@ -103,50 +104,44 @@ impl @codemode.VmServer for BlockingChannel with fn recv(self : BlockingChannel)
 impl @codemode.VmServer for BlockingChannel with fn close(
   self : BlockingChannel,
 ) -> Unit {
+  self.closed = true
   self.inbox.close()
 }
 
 ///|
 fn BlockingChannel::BlockingChannel() -> BlockingChannel {
-  { sent: [], inbox: @aqueue.Queue(kind=@aqueue.Unbounded), }
+  { sent: [], inbox: @aqueue.Queue(kind=@aqueue.Unbounded), closed: false, }
 }
 
 ///|
-/// `abort` 触发后:先给 VM 发 stop 再关流,执行以 `Aborted` 错误结束。
-async test "abort stops the vm and ends the execution" {
+async test "cancelling execution propagates and closes the vm" {
   let channel = BlockingChannel::BlockingChannel()
+  let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
   let codemode = @codemode.Codemode::Codemode(
-    fn() -> &@codemode.VmServer { channel },
+    async fn() -> &@codemode.VmServer {
+      started.put(())
+      channel
+    },
     timeout_ms=0,
   )
-  let controller = @agent_loop.AbortController::new()
-  let result = @async.with_task_group(group => {
-    group.spawn_bg(() => {
-      @async.sleep(20)
-      controller.abort()
+  @async.with_task_group(group => {
+    let task = group.spawn(() => {
+      @async.handle_cancellation(() => codemode.execute("x"))
     })
-    codemode.execute("x", abort=controller.signal())
+    started.get()
+    task.cancel()
+    assert_true(task.wait() is None)
   })
-  guard result
-    is @codemode.CodemodeResult::Err(
-      error={ kind: @codemode.CodemodeErrorKind::Aborted, message, .. },
-      ..
-    ) else {
-    fail("unexpected result")
-  }
-  assert_eq(message, "Execution aborted")
-  // 首个 send 是 StartVmRequest,其后是 stop。
-  assert_true(channel.sent.iter().any(frame => frame is { "type": "stop", .. }))
+  assert_true(channel.closed)
 }
 
 ///|
-/// 脚本结束时仍在运行的调用(pi `finish()` 的行为):它的 per-call signal
-/// 被 abort,`calls` 台账行保持 cancelled 并记下时长。
-async test "a call in flight when the script ends sees its signal aborted" {
+/// Script completion cancels unfinished calls and waits for protected cleanup.
+async test "a call in flight when the script ends is cancelled and cleaned up" {
   let channel = BlockingChannel::BlockingChannel()
   let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
   let never : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
-  let signal_seen : Ref[@agent_loop.AbortSignal?] = Ref(None)
+  let cleaned = Ref(false)
   let codemode = @codemode.Codemode::Codemode(
     fn() -> &@codemode.VmServer { channel },
     tools=[
@@ -158,8 +153,11 @@ async test "a call in flight when the script ends sees its signal aborted" {
         output_schema: None,
         spread: false,
         signature: None,
-        execute: (_args : Json?, ctx : @codemode.CodemodeToolContext) => {
-          signal_seen.val = Some(ctx.signal)
+        execute: (_args : Json?) => {
+          defer @async.protect_from_cancel(() => {
+            @async.pause()
+            cleaned.val = true
+          })
           started.put(())
           never.get()
           Json::null()
@@ -187,8 +185,265 @@ async test "a call in flight when the script ends sees its signal aborted" {
   }
   assert_eq(call.name, "wait")
   assert_eq(call.status, "cancelled")
-  guard signal_seen.val is Some(signal) else {
-    fail("the tool never saw its context")
+  assert_true(cleaned.val)
+  assert_true(channel.closed)
+}
+
+///|
+async test "every execution exit cancels tools and globals before returning" {
+  for ending in ["done", "script-error", "eof", "timeout", "cancel"] {
+    let channel = BlockingChannel::BlockingChannel()
+    let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+    let never : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+    let cleaned = Ref(0)
+    let wait : @codemode.CodemodeTool = {
+      name: "wait",
+      js_name: None,
+      description: "",
+      input_schema: None,
+      output_schema: None,
+      spread: false,
+      signature: None,
+      execute: _ => {
+        defer @async.protect_from_cancel(() => {
+          @async.pause()
+          cleaned.val += 1
+        })
+        started.put(())
+        never.get()
+        Json::null()
+      },
+    }
+    let codemode = @codemode.Codemode::Codemode(
+      fn() -> &@codemode.VmServer { channel },
+      tools=[wait],
+      globals=[wait],
+      timeout_ms=if ending == "timeout" { 100 } else { 0 },
+    )
+    channel.inbox.put({
+      "type": "output",
+      "item": { "type": "text", "text": "partial" },
+    })
+    channel.inbox.put({
+      "type": "call",
+      "target": "tool",
+      "id": 1,
+      "name": "wait",
+    })
+    channel.inbox.put({
+      "type": "call",
+      "target": "global",
+      "id": 2,
+      "name": "wait",
+    })
+    @async.with_timeout(3000, () => {
+      @async.with_task_group(group => {
+        let task = group.spawn(() => {
+          @async.handle_cancellation(() => codemode.execute("x"))
+        })
+        started.get()
+        started.get()
+        match ending {
+          "done" =>
+            channel.inbox.put({ "type": "done", "ok": true, "writes": "[]" })
+          "script-error" =>
+            channel.inbox.put({
+              "type": "done",
+              "ok": false,
+              "error": "{\"message\":\"boom\"}",
+            })
+          "eof" => channel.inbox.close()
+          "cancel" => task.cancel()
+          _ => ()
+        }
+        let result = task.wait()
+        assert_eq(cleaned.val, 2)
+        assert_true(channel.closed)
+        assert_eq(channel.sent.length(), 1)
+        match (ending, result) {
+          ("cancel", None) => ()
+          (
+            "done",
+            Some(
+              Ok(
+                calls=[{ status: "cancelled", .. }],
+                output=[Text(text="partial", ..)],
+                ..
+              )
+            ),
+          ) => ()
+          ("script-error", Some(Err(error={ kind: Script, .. }, ..))) => ()
+          ("eof", Some(Err(error={ kind: Sandbox, .. }, ..))) => ()
+          (
+            "timeout",
+            Some(
+              Err(
+                error={ kind: Timeout, .. },
+                calls=[{ status: "cancelled", .. }],
+                output=[Text(text="partial", ..)],
+                ..
+              )
+            ),
+          ) => ()
+          _ => fail("unexpected result for \{ending}")
+        }
+      })
+    })
   }
-  assert_true(signal.is_aborted())
+}
+
+///|
+async test "launch obeys both external cancellation and the execution deadline" {
+  for timed_out in [false, true] {
+    let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+    let never : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+    let cleaned = Ref(false)
+    let codemode = @codemode.Codemode::Codemode(
+      async fn() -> &@codemode.VmServer {
+        defer {
+          cleaned.val = true
+        }
+        started.put(())
+        never.get()
+        fail("unreachable")
+      },
+      timeout_ms=if timed_out { 30 } else { 0 },
+    )
+    @async.with_timeout(3000, () => {
+      @async.with_task_group(group => {
+        let task = group.spawn(() => {
+          @async.handle_cancellation(() => codemode.execute("x"))
+        })
+        started.get()
+        if !timed_out {
+          task.cancel()
+        }
+        let result = task.wait()
+        assert_true(cleaned.val)
+        if timed_out {
+          assert_true(result is Some(Err(error={ kind: Timeout, .. }, ..)))
+        } else {
+          assert_true(result is None)
+        }
+      })
+    })
+  }
+}
+
+///|
+async test "ordinary cleanup errors propagate instead of becoming cancellation or timeout" {
+  for timed_out in [false, true] {
+    let channel = BlockingChannel::BlockingChannel()
+    let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+    let never : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+    let codemode = @codemode.Codemode::Codemode(
+      fn() -> &@codemode.VmServer { channel },
+      tools=[
+        {
+          name: "wait",
+          js_name: None,
+          description: "",
+          input_schema: None,
+          output_schema: None,
+          spread: false,
+          signature: None,
+          execute: _ => {
+            defer @async.protect_from_cancel(() => {
+              @async.pause()
+              fail("cleanup failed")
+            })
+            started.put(())
+            never.get()
+            Json::null()
+          },
+        },
+      ],
+      timeout_ms=if timed_out { 100 } else { 0 },
+    )
+    channel.inbox.put({
+      "type": "call",
+      "target": "tool",
+      "id": 1,
+      "name": "wait",
+    })
+    let failure = @async.with_timeout(3000, () => {
+      @async.with_task_group(group => {
+        let task = group.spawn(allow_failure=true, () => {
+          @async.handle_cancellation(() => codemode.execute("x"))
+        })
+        started.get()
+        if !timed_out {
+          task.cancel()
+        }
+        let error = try {
+          ignore(task.wait())
+          None
+        } catch {
+          error => Some(error.to_string())
+        }
+        error
+      })
+    })
+    assert_true(failure is Some(text) && text.contains("cleanup failed"))
+    assert_true(channel.closed)
+  }
+}
+
+///|
+priv struct StalledSend {
+  entered : @aqueue.Queue[Unit]
+  never : @aqueue.Queue[Unit]
+  mut closed : Bool
+}
+
+///|
+impl @codemode.VmServer for StalledSend with fn send(
+  self : StalledSend,
+  _ : Json,
+) -> Unit {
+  self.entered.put(())
+  self.never.get()
+}
+
+///|
+impl @codemode.VmServer for StalledSend with fn recv(_ : StalledSend) -> Json {
+  fail("unreachable")
+}
+
+///|
+impl @codemode.VmServer for StalledSend with fn close(self : StalledSend) -> Unit {
+  self.closed = true
+}
+
+///|
+async test "a blocked start send remains cancellable and obeys the deadline" {
+  for timed_out in [false, true] {
+    let vm = StalledSend::{
+      entered: @aqueue.Queue(kind=@aqueue.Unbounded),
+      never: @aqueue.Queue(kind=@aqueue.Unbounded),
+      closed: false,
+    }
+    let codemode = @codemode.Codemode::Codemode(
+      fn() -> &@codemode.VmServer { vm },
+      timeout_ms=if timed_out { 30 } else { 0 },
+    )
+    @async.with_timeout(3000, () => {
+      @async.with_task_group(group => {
+        let task = group.spawn(() => {
+          @async.handle_cancellation(() => codemode.execute("x"))
+        })
+        vm.entered.get()
+        if !timed_out {
+          task.cancel()
+        }
+        let result = task.wait()
+        assert_true(vm.closed)
+        if timed_out {
+          assert_true(result is Some(Err(error={ kind: Timeout, .. }, ..)))
+        } else {
+          assert_true(result is None)
+        }
+      })
+    })
+  }
 }

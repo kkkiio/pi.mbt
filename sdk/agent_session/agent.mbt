@@ -173,9 +173,7 @@ pub async fn Agent::run(
       self.messages.copy(),
       agent_tools,
       prompts,
-      tool_executor=(c, hook, abort) => {
-        @tools.run_tool(tool_map, c, hook, abort)
-      },
+      tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
       event_sink=sink,
       finish_turn_hook=self.finish_turn_hook,
     )
@@ -185,9 +183,7 @@ pub async fn Agent::run(
       system_prompt,
       self.messages.copy(),
       agent_tools,
-      tool_executor=(c, hook, abort) => {
-        @tools.run_tool(tool_map, c, hook, abort)
-      },
+      tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
       event_sink=sink,
       finish_turn_hook=self.finish_turn_hook,
     )

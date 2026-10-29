@@ -8,7 +8,8 @@
 pub struct WsStreams {
   priv ws : @websocket.Conn
   priv mut next_id : Int32
-  priv send_queue : @aqueue.Queue[Json]
+  priv send_queue : @aqueue.Queue[(Json, Bool)]
+  priv send_slots : @aqueue.Queue[Unit]
   priv recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
   priv mut closed : Bool
 }
@@ -18,10 +19,15 @@ pub struct WsStreams {
 /// `ws://host:port/`). `run` must be called to pump frames, usually in a
 /// background task; `with_ws_streams` composes connect + pump + close.
 pub async fn WsStreams::connect(url~ : String) -> WsStreams {
+  let send_slots : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+  for _ in 0..<10 {
+    ignore(send_slots.try_put(()) catch { _ => false })
+  }
   {
     ws: @websocket.Conn::connect(url),
     next_id: 1,
-    send_queue: @aqueue.Queue(kind=@aqueue.Blocking(10)),
+    send_queue: @aqueue.Queue(kind=@aqueue.Unbounded),
+    send_slots,
     recv_queue_map: Map([]),
     closed: false,
   }
@@ -54,15 +60,26 @@ pub async fn WsStreams::run(self : WsStreams) -> Unit {
   @async.with_task_group(tg => {
     tg.spawn_bg(() => {
       while true {
-        let msg = self.send_queue.get() catch {
+        let (msg, reserved) = self.send_queue.get() catch {
           @aqueue.QueueAlreadyClosed => break
           err => raise err
+        }
+        if reserved {
+          ignore(self.send_slots.try_put(()) catch { _ => false })
         }
         self.ws.send_text(msg.stringify()) catch {
           _ => break
         }
       }
     })
+    defer {
+      self.closed = true
+      for _, queue in self.recv_queue_map {
+        queue.close()
+      }
+      self.send_queue.close()
+      self.send_slots.close()
+    }
     while true {
       // Any recv failure — a close frame surfacing as `ConnectionClosed`,
       // or the transport dropping — ends every stream the same way.
@@ -83,11 +100,6 @@ pub async fn WsStreams::run(self : WsStreams) -> Unit {
         }
       }
     }
-    self.closed = true
-    for _, queue in self.recv_queue_map {
-      queue.close()
-    }
-    self.send_queue.close()
   })
 }
 
@@ -106,6 +118,8 @@ pub fn WsStreams::new_stream(self : WsStreams) -> WsStream {
   WsStream::{
     id,
     send_queue: self.send_queue,
+    send_slots: self.send_slots,
+    closed: false,
     recv_queue,
     recv_queue_map: self.recv_queue_map,
   }
@@ -114,6 +128,12 @@ pub fn WsStreams::new_stream(self : WsStreams) -> WsStream {
 ///|
 /// Close the websocket, ending `run` and every pending `recv`.
 pub fn WsStreams::close(self : WsStreams) -> Unit {
+  self.closed = true
+  for _, queue in self.recv_queue_map {
+    queue.close()
+  }
+  self.send_queue.close()
+  self.send_slots.close()
   self.ws.close()
 }
 
@@ -125,14 +145,25 @@ pub fn WsStreams::close(self : WsStreams) -> Unit {
 /// `close` running).
 pub struct WsStream {
   priv id : Int32
-  priv send_queue : @aqueue.Queue[Json]
+  priv send_queue : @aqueue.Queue[(Json, Bool)]
+  priv send_slots : @aqueue.Queue[Unit]
   priv recv_queue : @aqueue.Queue[Json]
   priv recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
+  priv mut closed : Bool
 }
 
 ///|
 pub impl @codemode.VmServer for WsStream with fn send(self, data : Json) -> Unit {
-  self.send_queue.put({ "stream_id": self.id, "data": data })
+  guard !self.closed else { fail("codemode stream is closed") }
+  self.send_slots.get()
+  if self.closed {
+    ignore(self.send_slots.try_put(()) catch { _ => false })
+    fail("codemode stream is closed")
+  }
+  errdefer ignore(self.send_slots.try_put(()) catch { _ => false })
+  ignore(
+    self.send_queue.try_put(({ "stream_id": self.id, "data": data }, true)),
+  )
 }
 
 ///|
@@ -148,11 +179,18 @@ pub impl @codemode.VmServer for WsStream with fn recv(self) -> Json {
 /// Closing tells the remote to stop its VM — pi's `remoteLauncher.stop()` —
 /// by queueing a final `{ "type": "stop" }` frame. `try_put` never suspends,
 /// so `close` stays safe to call from a cancelled coroutine (an `async`
-/// `send` would fail there); a full or closed queue drops the frame.
+/// `send` would fail there). Ordinary frames reserve bounded send slots;
+/// stop frames bypass those slots and remain queued while the transport is live.
 /// Harmless on normal completion: the stream already exited remotely.
 pub impl @codemode.VmServer for WsStream with fn close(self) {
+  if self.closed {
+    return
+  }
+  self.closed = true
   ignore(
-    self.send_queue.try_put({ "stream_id": self.id, "data": { "type": "stop" } }) catch {
+    self.send_queue.try_put(
+      ({ "stream_id": self.id, "data": { "type": "stop" } }, false),
+    ) catch {
       _ => false
     },
   )

@@ -67,7 +67,7 @@ pub(all) enum CodemodeErrorKind {
   /// The overall deadline expired, or a VM on the calling thread used up its interrupt budget.
   /// The execution ended and the VM was asked to stop; a worker or remote VM may still be computing.
   Timeout
-  /// The caller's signal fired or the sandbox was closed. The execution ended and the VM was asked to stop.
+  /// The remote VM reported an aborted execution. Local task cancellation propagates without a result.
   Aborted
   /// The VM or its transport failed outside the script's control (for example a wasm trap, a missing worker file, or a remote sandbox that failed).
   Sandbox

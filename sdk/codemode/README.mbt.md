@@ -36,3 +36,16 @@ sequenceDiagram
 ```
 
 The VM is expected to be isolated from the host and other VMs, both CPU and memory wise.
+
+## Cancellation
+
+`Codemode::execute` owns its VM and nested tool/global tasks. Script completion,
+stream failure, and timeout cancel unfinished calls and wait for their cleanup.
+The deadline includes VM launch and returns a `Timeout` result with accumulated
+output. External task cancellation propagates without producing a result; callers
+that own a top-level task may handle it with `async.handle_cancellation`.
+
+Every acquired VM is closed on exit. `VmServer.close` must synchronously release
+the stream and retain a stop notification for the remote, even when normal sends
+are backpressured. A nested tool uses native cancellation and `defer` for cleanup;
+necessary asynchronous cleanup may use `async.protect_from_cancel`.

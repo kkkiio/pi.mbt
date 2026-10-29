@@ -15,9 +15,7 @@ fn declared_tool(
     output_schema,
     spread: false,
     signature,
-    execute: fn(_args : Json?, _ctx : @codemode.CodemodeToolContext) -> Json {
-      Json::null()
-    },
+    execute: fn(_args : Json?) -> Json { Json::null() },
   }
 }
 

@@ -116,3 +116,67 @@ async test "execute codemode over a ws stream" {
     }
   })
 }
+
+///|
+async test "websocket stream cancellation retains stop behind a full send queue" {
+  @async.with_timeout(3000, () => {
+    @async.with_task_group(group => {
+      let server = @http.Server(@socket.Addr::parse("127.0.0.1:0"))
+      defer server.close()
+      let stopped : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+      group.spawn_bg(no_wait=true, () => {
+        let (conn, _) = server.accept()
+        defer conn.close()
+        let request = conn.read_request()
+        let ws = @websocket.Conn::from_http_server(request, conn)
+        defer ws.close()
+        for i in 0..<11 {
+          let msg = ws.recv()
+          let frame = @json.parse(msg.read_all().text())
+          if i < 10 {
+            assert_true(
+              frame is { "data": { "n": Number(n, ..), .. }, .. } &&
+              n == i.to_double(),
+            )
+          } else {
+            assert_true(
+              frame
+              is {
+                "stream_id": Number(1, ..),
+                "data": { "type": "stop", .. },
+                ..
+              },
+            )
+          }
+        }
+        stopped.put(())
+        @async.sleep(10000)
+      })
+      let streams = @ask_agent.WsStreams::connect(
+        url="ws://127.0.0.1:\{server.addr.port()}",
+      )
+      defer streams.close()
+      let stream = streams.new_stream()
+      for i in 0..<10 {
+        stream.send({ "n": i })
+      }
+      let entered : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+      let task = group.spawn(() => {
+        @async.handle_cancellation(() => {
+          defer stream.close()
+          entered.put(())
+          stream.send({ "n": 10 })
+        })
+      })
+      entered.get()
+      task.cancel()
+      assert_true(task.wait() is None)
+      stream.close()
+      group.spawn_bg(no_wait=true, () => streams.run())
+      stopped.get()
+      let next = streams.new_stream()
+      next.send({ "n": 11 })
+      next.close()
+    })
+  })
+}

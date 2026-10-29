@@ -43,6 +43,7 @@ priv struct ScriptedVm {
   sent : Array[Json]
   inbox : @aqueue.Queue[Json]
   mut results_left : Int32
+  mut closed : Bool
 }
 
 ///|
@@ -66,6 +67,7 @@ impl @codemode.VmServer for ScriptedVm with fn recv(self : ScriptedVm) -> Json {
 
 ///|
 impl @codemode.VmServer for ScriptedVm with fn close(self : ScriptedVm) -> Unit {
+  self.closed = true
   self.inbox.close()
 }
 
@@ -106,9 +108,8 @@ async fn run_codemode(
   code : String,
   tool_call_id~ : String = "call-1",
   on_update~ : @agent_loop.ToolExecUpdateCallback = (_, _) => (),
-  abort~ : @agent_loop.AbortSignal = @agent_loop.AbortSignal::never(),
 ) -> @agent_loop.ToolResult {
-  (tool.execute)(tool_call_id, { "code": Json::string(code) }, on_update, abort)
+  (tool.execute)(tool_call_id, { "code": Json::string(code) }, on_update)
 }
 
 ///|
@@ -378,12 +379,7 @@ async test "codemode failure appends the call summary to the script error" {
 /// supplied per case.
 fn stub_tool(
   name : String,
-  execute : async (
-    String,
-    Json,
-    @agent_loop.ToolExecUpdateCallback,
-    @agent_loop.AbortSignal,
-  ) -> @agent_loop.ToolResult,
+  execute : async (String, Json, @agent_loop.ToolExecUpdateCallback) -> @agent_loop.ToolResult,
 ) -> @tools.ToolDefinition {
   {
     name,
@@ -413,7 +409,7 @@ fn codemode_tool_with(
 /// 一个 nested call:工具结果返回 VM,台账行带 `<父调用id>/<n>` id、args 预览、
 /// ok 状态与 durationMs;partial update 依次是空台账、running、ok。
 async test "a nested call lands in details.calls and mirrors to on_update" {
-  let echo = stub_tool("echo", (_id, args, _on_update, _signal) => {
+  let echo = stub_tool("echo", (_id, args, _on_update) => {
     content: [@agent_loop.InputMessageContent::Text("echo:\{args.stringify()}")],
     details: {},
     is_error: false,
@@ -423,6 +419,7 @@ async test "a nested call lands in details.calls and mirrors to on_update" {
     sent: [],
     inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
     results_left: 1,
+    closed: false,
   }
   vm.inbox.put(call_frame(1, "echo", "{\"a\":1}"))
   let updates : Array[Json] = []
@@ -474,7 +471,7 @@ async test "two concurrent nested calls each get a ledger row" {
   let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
   let release : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
   let gate = fn(name : String) -> @tools.ToolDefinition {
-    stub_tool(name, (_id, _args, _on_update, _signal) => {
+    stub_tool(name, (_id, _args, _on_update) => {
       started.put(())
       release.get()
       {
@@ -489,6 +486,7 @@ async test "two concurrent nested calls each get a ledger row" {
     sent: [],
     inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
     results_left: 2,
+    closed: false,
   }
   vm.inbox.put(call_frame(1, "first", "{}"))
   vm.inbox.put(call_frame(2, "second", "{}"))
@@ -543,7 +541,7 @@ async test "two concurrent nested calls each get a ledger row" {
 async test "a nested call still running at script end is marked cancelled" {
   let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
   let never : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
-  let hang = stub_tool("hang", (_id, _args, _on_update, _signal) => {
+  let hang = stub_tool("hang", (_id, _args, _on_update) => {
     started.put(())
     never.get()
     fail("unreachable")
@@ -552,6 +550,7 @@ async test "a nested call still running at script end is marked cancelled" {
     sent: [],
     inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
     results_left: 0,
+    closed: false,
   }
   vm.inbox.put(call_frame(1, "hang", "{}"))
   let result = @async.with_task_group(group => {
@@ -574,13 +573,12 @@ async test "a nested call still running at script end is marked cancelled" {
 /// 失败的 nested call:台账 status=error、error 文本入档,脚本拿到
 /// reject(`ok:false` + payload 为错误文本)。
 async test "a failing nested call records the error and rejects the call" {
-  let boom = stub_tool("boom", (_id, _args, _on_update, _signal) => {
-    fail("nested boom")
-  })
+  let boom = stub_tool("boom", (_id, _args, _on_update) => fail("nested boom"))
   let vm = ScriptedVm::{
     sent: [],
     inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
     results_left: 1,
+    closed: false,
   }
   vm.inbox.put(call_frame(1, "boom", "{}"))
   let result = run_codemode(codemode_tool_with(vm, [boom]), "work()")
@@ -622,7 +620,7 @@ async test "nested call usage sums into the codemode result usage" {
       total: 0.3,
     },
   }
-  let metered = stub_tool("meter", (_id, _args, _on_update, _signal) => {
+  let metered = stub_tool("meter", (_id, _args, _on_update) => {
     content: [@agent_loop.InputMessageContent::Text("ok")],
     details: {},
     is_error: false,
@@ -632,6 +630,7 @@ async test "nested call usage sums into the codemode result usage" {
     sent: [],
     inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
     results_left: 1,
+    closed: false,
   }
   vm.inbox.put(call_frame(1, "meter", "{}"))
   let result = run_codemode(codemode_tool_with(vm, [metered]), "work()")
@@ -644,28 +643,38 @@ async test "nested call usage sums into the codemode result usage" {
 }
 
 ///|
-/// 中断信号:VM 收到 stop 帧后流关闭,执行结果为 Aborted 错误(工具结果层
-/// 面是 "Script aborted" 的 is_error 结果)。
-async test "aborting the run stops the vm and fails the script as aborted" {
+async test "cancelling the codemode tool propagates without a tool result" {
   let vm = ScriptedVm::{
     sent: [],
     inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
     results_left: 0,
+    closed: false,
   }
-  let controller = @agent_loop.AbortController::new()
-  let result = @async.with_task_group(group => {
-    group.spawn_bg(() => {
-      @async.sleep(30)
-      controller.abort()
-    })
-    run_codemode(codemode_tool(vm), "work()", abort=controller.signal())
+  let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+  let cleaned = Ref(false)
+  let never : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+  let tool = stub_tool("wait", (_, _, _) => {
+    defer {
+      cleaned.val = true
+    }
+    started.put(())
+    never.get()
+    fail("unreachable")
   })
-  assert_true(result.is_error)
-  assert_eq(
-    text_at(result, 1),
-    "Script error:\nScript aborted: Execution aborted\n\nNo tool calls were made.",
-  )
-  assert_true(vm.sent.iter().any(frame => frame is { "type": "stop", .. }))
+  vm.inbox.put(call_frame(1, "wait", "{}"))
+  @async.with_task_group(group => {
+    let task = group.spawn(() => {
+      @async.handle_cancellation(() => {
+        run_codemode(codemode_tool_with(vm, [tool]), "work()")
+      })
+    })
+    started.get()
+    task.cancel()
+    assert_true(task.wait() is None)
+    assert_true(cleaned.val)
+    assert_true(vm.closed)
+    assert_eq(vm.sent.length(), 1)
+  })
 }
 
 ///|
@@ -798,7 +807,7 @@ async test "malformed codemode-store entries are skipped when reading the store"
 /// 工具一节 `### \`id\``(id 与原名不同附原名)加 declaration sample;送进
 /// VM 的 `Tool.description`(ALL_TOOLS 条目)带 `codemode tool declaration:`。
 async test "codemode description embeds declarations for its nested tools" {
-  let unused = stub_tool("unused", (_id, _args, _on_update, _signal) => {
+  let unused = stub_tool("unused", (_id, _args, _on_update) => {
     content: [@agent_loop.InputMessageContent::Text("unused")],
     details: {},
     is_error: false,
@@ -830,4 +839,96 @@ async test "codemode description embeds declarations for its nested tools" {
     }
     assert_true(description.contains("codemode tool declaration:"))
   }
+}
+
+///|
+async test "session abort waits for nested codemode cleanup and journals one aborted result" {
+  let vm = ScriptedVm::{
+    sent: [],
+    inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
+    results_left: 0,
+    closed: false,
+  }
+  let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+  let never : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
+  let cleaned = Ref(false)
+  let wait = stub_tool("wait", (_, _, _) => {
+    defer @async.protect_from_cancel(() => {
+      @async.pause()
+      cleaned.val = true
+    })
+    started.put(())
+    never.get()
+    fail("unreachable")
+  })
+  let registry = @tools.ToolRegistry()
+  let journal = @agent_session.InMemorySessionJournal()
+  registry.register_tool(
+    @coding_agent.new_codemode_tool_definition(
+      tools=[wait],
+      journal=Some(journal),
+      vm_launcher=Some(fn() -> &@codemode.VmServer { vm }),
+    ),
+  )
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([
+    @faux.faux_message(
+      [@faux.faux_tool_call("codemode", { "code": "work()" })],
+      stop_reason=ToolUse,
+    ),
+  ])
+  let hooks = Ref(0)
+  let ends = Ref(0)
+  let session = @agent_session.AgentSession(
+    llm,
+    journal~,
+    tool_registry=registry,
+    active_tools=["codemode"],
+    finish_turn_hook=(_, _) => {
+      hooks.val += 1
+      None
+    },
+  )
+  ignore(
+    session.subscribe(event => if event is Loop(AgentEnd(_)) { ends.val += 1 }),
+  )
+  vm.inbox.put(call_frame(1, "wait", "{}"))
+  @async.with_timeout(3000, () => {
+    @async.with_task_group(group => {
+      group.spawn_bg(() => {
+        started.get()
+        session.abort()
+        session.abort()
+      })
+      session.prompt([
+        {
+          content: [@agent_loop.InputMessageContent::Text("run it")],
+          timestamp: 1,
+        },
+      ])
+    })
+  })
+  assert_true(cleaned.val)
+  assert_true(vm.closed)
+  assert_eq(hooks.val, 0)
+  assert_eq(ends.val, 1)
+  let results = journal
+    .get_entries()
+    .filter_map(entry => {
+      if entry.content is Message(ToolResult(result)) {
+        Some(result)
+      } else {
+        None
+      }
+    })
+  assert_eq(results.length(), 1)
+  assert_true(results[0].is_error)
+  assert_true(results[0].content is [Text("Operation aborted")])
+  assert_false(
+    journal
+    .get_entries()
+    .iter()
+    .any(entry => entry.content is Custom(custom_type="codemode-store", ..)),
+  )
+  assert_eq(vm.sent.length(), 1)
 }

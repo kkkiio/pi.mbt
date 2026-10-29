@@ -39,7 +39,6 @@ async test "bash tool kills the command when its coroutine is cancelled" {
         "call-abort",
         { "command": "sleep 0.5; echo done > '\{marker}'" },
         (_, _) => (),
-        @agent_loop.AbortSignal::never(),
       ),
     )
   }
@@ -51,7 +50,6 @@ async test "bash tool kills the command when its coroutine is cancelled" {
     "call-check",
     { "command": "test -f '\{marker}' && echo present || echo absent" },
     (_, _) => (),
-    @agent_loop.AbortSignal::never(),
   )
   assert_eq(text_of(check.content), "absent\n")
   remove_maybe(marker)
@@ -120,7 +118,6 @@ async test "aborting a running bash tool kills the command and records an aborte
       "test -f '\{done_file}' && echo finished || echo unfinished",
     },
     (_, _) => (),
-    @agent_loop.AbortSignal::never(),
   )
   let output = text_of(check.content)
   assert_true(output.contains("started"))

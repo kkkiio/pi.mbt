@@ -117,7 +117,7 @@ async test "a tool result survives cancellation while its last update is being d
     prompt_guidelines: [],
     parameters: { "type": "object", "properties": {} },
     constrained_sampling: @agent_loop.JsonSchema(strict=true),
-    execute: (_, _, update, _) => {
+    execute: (_, _, update) => {
       update([Text("progress")], {})
       {
         content: [Text("completed")],
@@ -549,7 +549,7 @@ async test "a tool update listener error cancels and cleans the running tool" {
     prompt_guidelines: [],
     parameters: { "type": "object", "properties": {} },
     constrained_sampling: @agent_loop.JsonSchema(strict=true),
-    execute: (_, _, update, _) => {
+    execute: (_, _, update) => {
       defer {
         cleaned = true
       }
