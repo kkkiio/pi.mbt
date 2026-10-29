@@ -21,8 +21,6 @@ npm install -g .      # symlink 到全局
 pim
 ```
 
-`Ctrl+O` 展开工具输出,`Ctrl+T` 切换思考显示,`Esc` 中断当前回合。
-
 `-p/--print` 单轮、非交互模式:
 
 ```bash
@@ -31,15 +29,7 @@ pim -p "What's the capital of France? Respond with only the city name."
 # Paris
 ```
 
-位置参数也是提示词;`@path` 形式的参数会把文件附进首条消息 —— 图片按
-魔数嗅探后内联(模型无视觉输入时降级为占位文本),文本文件展开为
-`<file name="...">` 引用:
-
-```bash
-pim "describe this screenshot" @shot.png @notes.txt
-```
-
-加上 `--mode json` 可以输出 JSONL 事件流:
+使用 `--mode json` 启动, 可以输出 JSONL 事件流:
 
 ```bash
 pim -p "What's the capital of France? Respond with only the city name." --mode json
@@ -58,10 +48,9 @@ pim -p "What's the capital of France? Respond with only the city name." --mode j
 | `PIM_SESSION_DIR` | 会话 JSONL 目录(等价于 `--session-dir`) |
 | `PIM_TOOLS`       | 启用的工具列表(逗号分隔,等价于 `--tools`) |
 
-会话默认落盘:不设 `PIM_SESSION_DIR`/`--session-dir` 时,提示词与工具输出会
-持久化到 `~/.pim/sessions/` 下(同时创建会话目录)。不想落盘(如敏感内容、
-一次性调试)请传 `--no-session`。多轮会话用 `--continue`(接着最近一次)或
-`--resume <前缀>`。
+配置目录, 默认是 `~/.pim`.
+
+会话默认会持久化, 保存到 `~/.pim/sessions/` 下(同时创建会话目录)。
 
 ### 认证配置
 
