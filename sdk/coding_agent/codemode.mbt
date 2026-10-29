@@ -14,18 +14,34 @@ extern "js" fn default_codemode_sidecar_path() -> String =
   #| () => {
   #|   const fs = process.getBuiltinModule("node:fs");
   #|   const path = process.getBuiltinModule("node:path");
+  #|   let entry = process.argv[1] ?? "";
+  #|   try {
+  #|     entry = fs.realpathSync(entry);
+  #|   } catch {}
   #|   const candidates = [
-  #|     path.join(path.dirname(process.argv[1] ?? ""), "codemode-sidecar.mjs"),
+  #|     path.join(path.dirname(entry), "codemode-sidecar.mjs"),
   #|     path.join(process.cwd(), "scripts", "codemode-sidecar.mjs"),
   #|   ];
   #|   return candidates.find((p) => fs.existsSync(p)) ?? candidates[0];
   #| }
 
 ///|
+let sidecars : Array[SidecarProcess] = []
+
+///|
+pub fn close_codemode_sidecar() -> Unit {
+  for process in sidecars {
+    process.kill()
+  }
+  sidecars.clear()
+}
+
+///|
 fn spawn_codemode_sidecar(
   script : String,
 ) -> NdJsonStreams[SidecarStdout, SidecarStdin] {
   let process = SidecarProcess::spawn(script)
+  sidecars.push(process)
   let streams = NdJsonStreams::new(process.stdout, process.stdin)
   ignore(@js_async.Promise::from_async(() => streams.run() catch { _ => () }))
   streams

@@ -25,6 +25,7 @@ pub async fn run(
   // 先建会话宿主(会创建 session 目录,可能抛 FsError),再碰终端:终端
   // 副作用只在 app.start() 里发生,这之前失败不需要恢复终端。
   let host = SessionHost::new(llm, cwd, session_dir)
+  defer @coding_agent.close_codemode_sidecar()
   defer host.close()
   let app = TuiApp::load(model, cwd, thinking)
   defer app.stop()

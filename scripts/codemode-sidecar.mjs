@@ -62,7 +62,6 @@ function startExecution(link, streamId, request) {
     link.send({ stream_id: streamId, close: true });
     for (const exchangeId of [...state.pending.keys()]) resolveExchange(exchangeId, null);
     link.streams.delete(streamId);
-    if (link.eof && link.streams.size === 0) process.exit(0);
   };
 
   let done;
@@ -118,7 +117,6 @@ function feedLines(link, text) {
 function runStdio() {
   const link = {
     streams: new Map(),
-    eof: false,
     send: (frame) => process.stdout.write(JSON.stringify(frame) + "\n"),
   };
   let pending = "";
@@ -134,9 +132,7 @@ function runStdio() {
   });
   process.stdin.on("end", () => {
     feedLines(link, pending);
-    pending = "";
-    link.eof = true;
-    if (link.streams.size === 0) process.exit(0);
+    process.exit(0);
   });
   process.stdin.resume();
 }

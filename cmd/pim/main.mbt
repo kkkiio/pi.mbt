@@ -260,6 +260,7 @@ async fn main {
       }
   }
   defer cleanup()
+  defer @coding_agent.close_codemode_sidecar()
   let active_tools : Array[String] = match matches.values {
     { "tools": [tools, ..], .. } => {
       let names : Array[String] = []
