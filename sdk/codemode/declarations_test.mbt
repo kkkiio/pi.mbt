@@ -549,3 +549,12 @@ test "render_declarations escapes comment terminators in descriptions" {
   ])
   assert_true(text.contains("/** a *\\/ b */"))
 }
+
+///|
+test "render_tool_signature prefers the declared js_name" {
+  let tool = { ..declared_tool("read file"), js_name: Some("readFile"), }
+  assert_eq(
+    @codemode.render_tool_signature(tool),
+    "readFile(args: unknown): Promise<unknown>;",
+  )
+}

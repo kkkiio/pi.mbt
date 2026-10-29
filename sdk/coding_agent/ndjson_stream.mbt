@@ -59,6 +59,8 @@ pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(
   }
   guard !self.closed else { return }
   @async.with_task_group(tg => {
+    let reader = tg.spawn(() => self.pump_reader(), no_wait=true)
+    self.cancel_reader = Some(() => reader.cancel())
     tg.spawn_bg(() => {
       while true {
         let (msg, reserved) = self.send_queue.get() catch {
@@ -69,12 +71,17 @@ pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(
           ignore(self.send_slots.try_put(()) catch { _ => false })
         }
         self.writer.write(@utf8.encode(msg.stringify() + "\n")) catch {
-          _ => break
+          _ => {
+            self.close()
+            break
+          }
         }
       }
     })
-    let reader = tg.spawn(() => self.pump_reader())
-    self.cancel_reader = Some(() => reader.cancel())
+    reader.wait() catch {
+      @async.WaitedTaskAlreadyCancelled => ()
+      err => raise err
+    }
   })
 }
 

@@ -100,7 +100,8 @@ pub fn render_tool_signature(
     Some(schema) => schema_to_type(schema, max_chars=Some(input_max_chars))
     None => "unknown"
   }
-  "\{to_codemode_identifier(tool.name)}(args: \{input}): Promise<\{render_tool_output_type(tool.output_schema)}>;"
+  let js_name = tool.js_name.unwrap_or(to_codemode_identifier(tool.name))
+  "\{js_name}(args: \{input}): Promise<\{render_tool_output_type(tool.output_schema)}>;"
 }
 
 ///|
