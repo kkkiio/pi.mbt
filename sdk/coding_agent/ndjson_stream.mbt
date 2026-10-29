@@ -62,8 +62,6 @@ pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(
       }
     })
     let pending : Array[Byte] = []
-    // Read one LF-terminated line, buffering partial reads. Returns the line
-    // bytes without the terminator; `None` at EOF before more data.
     let read_frame = () => {
       while true {
         for i, b in pending {

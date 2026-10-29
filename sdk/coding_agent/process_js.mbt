@@ -1,16 +1,4 @@
 ///|
-/// Spawn a Node child process whose stdin/stdout are usable as
-/// `@io.Writer`/`@io.Reader` — the byte channel `NdJsonStreams` multiplexes
-/// frames over.
-///
-/// Like `bash_js.mbt`, stdout `data` reaches MoonBit through a plain (not
-/// async) callback because a JS event handler has no coroutine context. The
-/// callback therefore only does `try_put` on an unbounded queue — never
-/// blocking, so backpressure is delegated to the child pipe: the sidecar
-/// protocol is low-volume and each frame is bounded by `MAX_FRAME_SIZE`.
-/// Child stderr is inherited so sidecar diagnostics reach pim's stderr.
-
-///|
 #external
 priv type JsSidecarChild
 
@@ -19,9 +7,6 @@ priv type JsSidecarChild
 priv type JsSidecarSpawnOptions
 
 ///|
-/// Spawn `node <script>` with the *running* Node executable
-/// (`process.execPath`), not whatever `node` resolves to on PATH — an
-/// installed `pim` package can rely on its own runtime.
 extern "js" fn node_spawn(
   args : FixedArray[String],
   options : JsSidecarSpawnOptions,
@@ -34,8 +19,6 @@ extern "js" fn sidecar_spawn_options() -> JsSidecarSpawnOptions =
   #| () => ({ stdio: ["pipe", "pipe", "inherit"] })
 
 ///|
-/// `on_data` runs in a JS `data` handler: it must stay synchronous. An empty
-/// chunk would read as EOF downstream, so it is filtered out here.
 extern "js" fn JsSidecarChild::on_stdout_data(
   self : JsSidecarChild,
   on_data : (Bytes) -> Unit,
@@ -45,9 +28,6 @@ extern "js" fn JsSidecarChild::on_stdout_data(
   #| })
 
 ///|
-/// `on_end` runs when the stdout byte stream is over: `end` for a clean EOF,
-/// `close` for process death (including a spawn failure, which emits `error`
-/// then `close`). It may fire more than once; the consumer must tolerate that.
 extern "js" fn JsSidecarChild::on_stdout_end(
   self : JsSidecarChild,
   on_end : () -> Unit,
@@ -73,8 +53,6 @@ extern "js" fn JsSidecarChild::kill(self : JsSidecarChild) -> Unit =
   #| (child) => { child.kill(); }
 
 ///|
-/// A spawned `node` child, exposed as a `@io.Reader`/`@io.Writer` pair for
-/// `NdJsonStreams`.
 struct SidecarProcess {
   child : JsSidecarChild
   stdout : SidecarStdout
@@ -111,8 +89,6 @@ pub fn SidecarProcess::kill(self : SidecarProcess) -> Unit {
 }
 
 ///|
-/// The child's stdout as a `@io.Reader`: JS `data` events are queued without
-/// blocking and EOF is reported once the queue is closed and drained.
 #warnings("-alert_internal")
 struct SidecarStdout {
   chunks : @aqueue.Queue[Bytes]
@@ -160,8 +136,6 @@ pub extend SidecarStdout with @io.Reader::{
 }
 
 ///|
-/// The child's stdin as a `@io.Writer`. Node buffers writes internally, so
-/// `write_once` always reports the whole chunk accepted.
 struct SidecarStdin {
   child : JsSidecarChild
 }

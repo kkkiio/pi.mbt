@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// WebSocket codemode sidecar example for multi-tenant hosts (sdk/ask_agent).
-// Every stream gets its own worker thread and QuickJS wasm instance; closing a
-// stream stops its worker. No auth, TLS, or tenant quotas: keep it behind them.
 import { Worker } from "node:worker_threads";
 import { WebSocketServer } from "ws";
 import { loadQuickJSWasm } from "@earendil-works/pi-codemode";
@@ -22,9 +19,7 @@ server.on("connection", (socket) => {
   const send = (frame) => {
     try {
       socket.send(JSON.stringify(frame));
-    } catch {
-      // The client is gone; its streams are stopped by the close handler.
-    }
+    } catch {}
   };
 
   const finish = (streamId, state) => {

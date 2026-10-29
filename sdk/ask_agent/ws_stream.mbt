@@ -51,8 +51,6 @@ pub async fn WsStreams::connect(url~ : String) -> WsStreams {
 pub async fn[X] with_ws_streams(url~ : String, f : async (WsStreams) -> X) -> X {
   let streams = WsStreams::connect(url~)
   @async.with_task_group(tg => {
-    // `no_wait`: teardown cancels the pump instead of waiting on a socket
-    // close to wake `recv`, which a transport close does not guarantee.
     tg.spawn_bg(no_wait=true, () => streams.run())
     defer streams.close()
     f(streams)
@@ -92,8 +90,6 @@ pub async fn WsStreams::run(self : WsStreams) -> Unit {
       self.send_slots.close()
     }
     while true {
-      // Any recv failure — a close frame surfacing as `ConnectionClosed`,
-      // or the transport dropping — ends every stream the same way.
       let message = self.ws.recv() catch { _ => break }
       guard message.kind is Text else {
         fail("ws streams: unexpected binary message")

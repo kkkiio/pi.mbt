@@ -91,9 +91,6 @@ fn to_codemode_declaration(
 }
 
 ///|
-/// pi's `renderToolSection`: `### \`id\``, or `### \`id\` (\`raw name\`)`
-/// when the script identifier differs from the tool name, followed by the
-/// tool's declaration sample.
 fn render_tool_section(tool : @codemode.CodemodeTool) -> String {
   let id = @codemode.to_codemode_identifier(tool.name)
   let heading = if id == tool.name {
@@ -191,23 +188,16 @@ struct CodemodeToolInput {
 pub extend CodemodeToolInput with @json.FromJson::{from_json}
 
 ///|
-/// pi's `CodemodeNestedCall`: one `tools.*` call's row in `details.calls`.
 priv struct CodemodeNestedCall {
-  /// `<codemode tool call id>/<n>`.
   id : String
   name : String
-  /// Compact JSON of the arguments, truncated for display.
   args : String
-  /// `"running" | "ok" | "error" | "cancelled"`.
   mut status : String
   mut duration_ms : Int32?
-  /// Error text, truncated for display.
   mut error : String?
 }
 
 ///|
-/// `{id, name, args, status, durationMs?, error?}` — optional fields only
-/// when set, matching pi's `CodemodeNestedCall`.
 fn nested_call_json(call : CodemodeNestedCall) -> Json {
   let obj : Map[String, Json] = {
     "id": Json::string(call.id),
@@ -225,28 +215,18 @@ fn nested_call_json(call : CodemodeNestedCall) -> Json {
 }
 
 ///|
-/// pi's `DEFAULT_MAX_OUTPUT_TOKENS`/`CHARS_PER_TOKEN`:脚本输出的默认 token
-/// 预算和字符折算。
 const DEFAULT_MAX_OUTPUT_TOKENS : Int64 = 10000
 
 ///|
 const CHARS_PER_TOKEN : Int64 = 4
 
 ///|
-/// pi's `ARGS_PREVIEW_CHARS`/`ERROR_PREVIEW_CHARS`:nested call 行上 args 与
-/// error 的截断长度。
 const ARGS_PREVIEW_CHARS : Int32 = 200
 
 ///|
 const ERROR_PREVIEW_CHARS : Int32 = 500
 
 ///|
-/// Run one script end to end: parse the source, run it on a fresh VM with
-/// the session's tools as `tools.*`, and fold the outcome into pi's
-/// tool-result shape. `on_update` receives the nested-call ledger as the
-/// partial result (`{ calls: [...] }`), first before the script starts —
-/// pi shows the row as running — then on every call start and finish.
-/// External task cancellation propagates after the VM and nested calls clean up.
 async fn execute_codemode_tool(
   launcher : async () -> &@codemode.VmChannel,
   tools : ArrayView[@tools.ToolDefinition],
@@ -308,7 +288,6 @@ async fn execute_codemode_tool(
   let output = match result {
     Ok(output~, ..) | Err(output~, ..) => output
   }
-  // pi appends the returned value like a `text()` call.
   let value_item : @codemode.CodemodeOutputItem? = match value {
     Some(String(text)) =>
       Some(@codemode.CodemodeOutputItem::Text(text~, console=false))
@@ -355,14 +334,6 @@ async fn execute_codemode_tool(
 }
 
 ///|
-/// pi's `sandboxTools`: every session tool except codemode itself becomes a
-/// `tools.<name>` whose `description` (the `ALL_TOOLS` entry) is the tool's
-/// `renderToolSample` output. `execute` records a `CodemodeNestedCall` row, republishes
-/// the ledger on the nested tool's own partial updates (nested partial
-/// content does not merge into the parent result — upstream shows it as a
-/// nested row update only), runs the tool in the execution's task group,
-/// sums its `usage`, and resolves like `toScriptValue`: the text content,
-/// or `details` when the text is empty.
 fn nested_codemode_tools(
   tools : ArrayView[@tools.ToolDefinition],
   tool_call_id : String,
@@ -451,7 +422,6 @@ fn nested_codemode_tools(
 }
 
 ///|
-/// pi's `textOf`: the text blocks of a tool result joined on newlines.
 fn tool_result_text(result : @agent_loop.ToolResult) -> String {
   let text = StringBuilder()
   let mut first = true
@@ -469,8 +439,6 @@ fn tool_result_text(result : @agent_loop.ToolResult) -> String {
 }
 
 ///|
-/// pi's `previewArgs`: compact JSON of the call arguments, truncated for
-/// display; `undefined` arguments preview as the empty string.
 fn preview_nested_args(args : Json?) -> String {
   match args {
     None => ""
@@ -479,7 +447,6 @@ fn preview_nested_args(args : Json?) -> String {
 }
 
 ///|
-/// pi's `truncateText`: `text[:max-3] + "..."` when over `max_chars`.
 fn truncate_preview(text : String, max_chars : Int32) -> String {
   if text.length() > max_chars {
     "\{text[:max_chars - 3]}..."
@@ -489,8 +456,6 @@ fn truncate_preview(text : String, max_chars : Int32) -> String {
 }
 
 ///|
-/// pi's `combineUsage`: sum two usages, keeping the optional token splits
-/// when either side reports them.
 fn combine_usage(
   first : @agent_loop.Usage,
   second : @agent_loop.Usage,
@@ -520,9 +485,6 @@ fn combine_usage(
 }
 
 ///|
-/// Lay out the script's output like pi's `formatOutput`: more than one text
-/// item gets a `==> text N/M <==` marker, `console.*` lines follow the rest in
-/// one `<console_output>` block.
 fn format_codemode_output(
   output : ArrayView[@codemode.CodemodeOutputItem],
   value_item~ : @codemode.CodemodeOutputItem?,
@@ -580,8 +542,6 @@ fn format_codemode_output(
 }
 
 ///|
-/// pi's `formatError` head: script errors show the script's own stack, the
-/// other kinds get a prefixed message.
 fn format_codemode_error(error : @codemode.CodemodeError) -> String {
   match error.kind {
     Script =>
@@ -595,7 +555,6 @@ fn format_codemode_error(error : @codemode.CodemodeError) -> String {
 }
 
 ///|
-/// pi's `formatCallSummary`:失败时附带 nested call 台账。
 fn format_call_summary(calls : ArrayView[@codemode.CodemodeCall]) -> String {
   if calls.is_empty() {
     return "No tool calls were made."
@@ -608,9 +567,6 @@ fn format_call_summary(calls : ArrayView[@codemode.CodemodeCall]) -> String {
 }
 
 ///|
-/// pi's `joinAdjacentText`:相邻 text 项合成一项,每段从新行开始。分隔判断
-/// 看上一个非空段而不是已拼接文本的结尾(读不断变长的拼接串是平方复杂度,
-/// pi #10678)。
 fn join_adjacent_text(
   items : Array[@agent_loop.InputMessageContent],
 ) -> Array[@agent_loop.InputMessageContent] {
@@ -647,16 +603,12 @@ fn join_adjacent_text(
 }
 
 ///|
-/// pi's `truncateOutput` 的返回值:`items` 是把文本项折叠后的最终项,
-/// `full_output_path` 是全文溢出文件(写成功才有)。
 priv struct TruncatedScriptOutput {
   items : Array[@agent_loop.InputMessageContent]
   full_output_path : String?
 }
 
 ///|
-/// pi's `truncateOutput`:合并文本超过 token 预算时,所有文本项折成一项
-/// (头尾各保留一半预算),完整文本写到溢出文件;图片项跟在后面。
 fn truncate_codemode_output(
   items : Array[@agent_loop.InputMessageContent],
   max_tokens : Int64,
@@ -713,7 +665,6 @@ fn truncate_codemode_output(
 }
 
 ///|
-/// pi's `IMAGE_EXTENSIONS`:`image()` 接受的图片类型对应的文件扩展名。
 fn codemode_image_extension(mime_type : String) -> String? {
   match mime_type {
     "image/png" => Some(".png")
@@ -725,7 +676,6 @@ fn codemode_image_extension(mime_type : String) -> String? {
 }
 
 ///|
-/// pi's `formatSize`(core/tools/truncate.ts)。
 fn format_size(bytes : Int32) -> String {
   if bytes < 1024 {
     "\{bytes}B"
@@ -739,10 +689,6 @@ fn format_size(bytes : Int32) -> String {
 }
 
 ///|
-/// pi's `saveImages`:每个图片项落盘成临时文件,并在图片前插一个 text 项
-/// 记录路径。图片在脚本里拿不到字节(脚本不能写文件,`write` 只收文本),
-/// 这是模型唯一够得着字节的方式。同一份 data 只保存一次;写失败降级为
-/// label 文本而不是丢掉结果。
 fn save_codemode_images(
   items : Array[@agent_loop.InputMessageContent],
   write_temp_file~ : TempFileWriter?,
@@ -773,9 +719,6 @@ fn save_codemode_images(
 }
 
 ///|
-/// pi's `saveImages` 的单张 label:保存成功是
-/// `[Image saved to PATH (mimeType, SIZE)]`,失败是
-/// `[Image (mimeType, SIZE) could not be saved: err]`。
 fn save_codemode_image(
   data : String,
   mime_type : String,
