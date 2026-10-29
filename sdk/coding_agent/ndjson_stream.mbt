@@ -12,6 +12,7 @@ pub struct NdJsonStreams[R, W] {
   priv send_slots : @aqueue.Queue[Unit]
   priv recv_queue_map : Map[Int32, @aqueue.Queue[Json]]
   priv mut closed : Bool
+  priv mut cancel_reader : (() -> Unit)?
 }
 
 ///|
@@ -30,6 +31,7 @@ pub fn[R, W] NdJsonStreams::new(reader : R, writer : W) -> NdJsonStreams[R, W] {
     send_slots,
     recv_queue_map: Map([]),
     closed: false,
+    cancel_reader: None,
   }
 }
 
@@ -46,6 +48,16 @@ const MAX_FRAME_SIZE : Int32 = 16 * 1024 * 1024 // 16MB
 pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(
   self : NdJsonStreams[R, W],
 ) -> Unit {
+  defer {
+    self.closed = true
+    self.cancel_reader = None
+    for _, queue in self.recv_queue_map {
+      queue.close()
+    }
+    self.send_queue.close()
+    self.send_slots.close()
+  }
+  guard !self.closed else { return }
   @async.with_task_group(tg => {
     tg.spawn_bg(() => {
       while true {
@@ -61,60 +73,58 @@ pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(
         }
       }
     })
-    let pending : Array[Byte] = []
-    let read_frame = () => {
-      while true {
-        for i, b in pending {
-          if b == b'\n' {
-            let line = pending.drain(0, i + 1)
-            return Some(Bytes::from_iter(line[:i].iter()))
-          }
+    let reader = tg.spawn(() => self.pump_reader())
+    self.cancel_reader = Some(() => reader.cancel())
+  })
+}
+
+///|
+async fn[R : @io.Reader, W] NdJsonStreams::pump_reader(
+  self : NdJsonStreams[R, W],
+) -> Unit {
+  let pending : Array[Byte] = []
+  let read_frame = () => {
+    while true {
+      for i, b in pending {
+        if b == b'\n' {
+          let line = pending.drain(0, i + 1)
+          return Some(Bytes::from_iter(line[:i].iter()))
         }
-        if pending.length() > MAX_FRAME_SIZE {
-          fail("ndjson streams: frame larger than \{MAX_FRAME_SIZE} bytes")
-        }
-        match self.reader.read_some(max_len=65536) {
-          Some(chunk) => pending.push_iter(chunk.iter())
-          None => {
-            guard pending.is_empty() else {
-              fail("ndjson streams: truncated final frame")
-            }
-            return None
-          }
-        }
-      } nobreak {
-        fail("unreachable")
       }
+      if pending.length() > MAX_FRAME_SIZE {
+        fail("ndjson streams: frame larger than \{MAX_FRAME_SIZE} bytes")
+      }
+      match self.reader.read_some(max_len=65536) {
+        Some(chunk) => pending.push_iter(chunk.iter())
+        None => {
+          guard pending.is_empty() else {
+            fail("ndjson streams: truncated final frame")
+          }
+          return None
+        }
+      }
+    } nobreak {
+      fail("unreachable")
     }
-    defer {
-      self.closed = true
-      for _, queue in self.recv_queue_map {
+  }
+  while read_frame() is Some(line) {
+    let frame = @json.parse(@utf8.decode_lossy(line[:]))
+    guard frame is { "stream_id": Number(stream_id, ..), .. } else { continue }
+    let id = stream_id.to_int()
+    if frame is { "close": True, .. } {
+      if self.recv_queue_map.remove_and_get(id) is Some(queue) {
         queue.close()
       }
-      self.send_queue.close()
-      self.send_slots.close()
+      continue
     }
-    while read_frame() is Some(line) {
-      let frame = @json.parse(@utf8.decode_lossy(line[:]))
-      guard frame is { "stream_id": Number(stream_id, ..), .. } else {
-        continue
-      }
-      let id = stream_id.to_int()
-      if frame is { "close": True, .. } {
-        if self.recv_queue_map.remove_and_get(id) is Some(queue) {
-          queue.close()
-        }
-        continue
-      }
-      guard frame is { "data": data, .. } else { continue }
-      if self.recv_queue_map.get(id) is Some(queue) {
-        queue.put(data) catch {
-          @aqueue.QueueAlreadyClosed => ()
-          err => raise err
-        }
+    guard frame is { "data": data, .. } else { continue }
+    if self.recv_queue_map.get(id) is Some(queue) {
+      queue.put(data) catch {
+        @aqueue.QueueAlreadyClosed => ()
+        err => raise err
       }
     }
-  })
+  }
 }
 
 ///|
@@ -146,6 +156,10 @@ pub fn[R, W] NdJsonStreams::new_stream(
 /// pending `recv`.
 pub fn[R, W] NdJsonStreams::close(self : NdJsonStreams[R, W]) -> Unit {
   self.closed = true
+  match self.cancel_reader {
+    Some(cancel) => cancel()
+    None => ()
+  }
   for _, queue in self.recv_queue_map {
     queue.close()
   }

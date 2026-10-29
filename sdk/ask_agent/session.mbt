@@ -16,7 +16,7 @@ pub fn new_ask_agent_session(
   }
   let codemode_tool = new_codemode_tool_definition(
     streams,
-    tools=active_tools.filter_map(name => tool_registry.get_tool(name)),
+    tools~,
     journal=Some(journal),
   )
   tool_registry.register_tool(codemode_tool)

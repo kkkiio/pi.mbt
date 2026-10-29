@@ -61,3 +61,18 @@ async test "cancelled streams retain close frames when all send slots are occupi
     })
   })
 }
+
+///|
+async test "closing the demultiplexer unblocks the pump" {
+  @async.with_timeout(3000, () => {
+    let (remote_read, _remote_write) = @io.pipe()
+    let (_client_read, client_write) = @io.pipe()
+    let streams = @coding_agent.NdJsonStreams::new(remote_read, client_write)
+    @async.with_task_group(group => {
+      let task = group.spawn(() => streams.run())
+      @async.sleep(50)
+      streams.close()
+      ignore(task.wait() catch { _ => () })
+    })
+  })
+}
