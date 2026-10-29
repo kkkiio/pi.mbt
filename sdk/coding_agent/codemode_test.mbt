@@ -1,5 +1,5 @@
 ///|
-/// A scripted `@codemode.VmServer`: `recv` returns each queued frame (a
+/// A scripted `@codemode.VmChannel`: `recv` returns each queued frame (a
 /// message or a batch array) and raises once the feed is empty; `send` is
 /// captured so tests can inspect the `StartVmRequest`.
 priv struct FakeVm {
@@ -8,12 +8,12 @@ priv struct FakeVm {
 }
 
 ///|
-impl @codemode.VmServer for FakeVm with fn send(self : FakeVm, data : Json) -> Unit {
+impl @codemode.VmChannel for FakeVm with fn send(self : FakeVm, data : Json) -> Unit {
   self.sent.push(data)
 }
 
 ///|
-impl @codemode.VmServer for FakeVm with fn recv(self : FakeVm) -> Json {
+impl @codemode.VmChannel for FakeVm with fn recv(self : FakeVm) -> Json {
   if self.feed is [] {
     fail("channel closed")
   } else {
@@ -22,12 +22,12 @@ impl @codemode.VmServer for FakeVm with fn recv(self : FakeVm) -> Json {
 }
 
 ///|
-impl @codemode.VmServer for FakeVm with fn close(self : FakeVm) -> Unit {
+impl @codemode.VmChannel for FakeVm with fn close(self : FakeVm) -> Unit {
   self.feed.clear()
 }
 
 ///|
-/// A `@codemode.VmServer` that never answers: `recv` blocks on a queue until
+/// A `@codemode.VmChannel` that never answers: `recv` blocks on a queue until
 /// `close` releases it, which is how the deadline's `stop` reaches the loop.
 priv struct BlockingVm {
   sent : Array[Json]
@@ -35,7 +35,7 @@ priv struct BlockingVm {
 }
 
 ///|
-/// A `@codemode.VmServer` driven through `inbox`: `send` is captured, and
+/// A `@codemode.VmChannel` driven through `inbox`: `send` is captured, and
 /// after `results_left` `{type:"result"}` sends it feeds a `done` frame
 /// itself — the call-result round trip is then deterministic. A nonpositive
 /// `results_left` never auto-finishes.
@@ -47,7 +47,7 @@ priv struct ScriptedVm {
 }
 
 ///|
-impl @codemode.VmServer for ScriptedVm with fn send(
+impl @codemode.VmChannel for ScriptedVm with fn send(
   self : ScriptedVm,
   data : Json,
 ) -> Unit {
@@ -61,12 +61,12 @@ impl @codemode.VmServer for ScriptedVm with fn send(
 }
 
 ///|
-impl @codemode.VmServer for ScriptedVm with fn recv(self : ScriptedVm) -> Json {
+impl @codemode.VmChannel for ScriptedVm with fn recv(self : ScriptedVm) -> Json {
   self.inbox.get()
 }
 
 ///|
-impl @codemode.VmServer for ScriptedVm with fn close(self : ScriptedVm) -> Unit {
+impl @codemode.VmChannel for ScriptedVm with fn close(self : ScriptedVm) -> Unit {
   self.closed = true
   self.inbox.close()
 }
@@ -77,7 +77,7 @@ fn call_frame(id : Int32, name : String, args : String) -> Json {
 }
 
 ///|
-impl @codemode.VmServer for BlockingVm with fn send(
+impl @codemode.VmChannel for BlockingVm with fn send(
   self : BlockingVm,
   data : Json,
 ) -> Unit {
@@ -85,20 +85,20 @@ impl @codemode.VmServer for BlockingVm with fn send(
 }
 
 ///|
-impl @codemode.VmServer for BlockingVm with fn recv(self : BlockingVm) -> Json {
+impl @codemode.VmChannel for BlockingVm with fn recv(self : BlockingVm) -> Json {
   self.queue.get()
 }
 
 ///|
-impl @codemode.VmServer for BlockingVm with fn close(self : BlockingVm) -> Unit {
+impl @codemode.VmChannel for BlockingVm with fn close(self : BlockingVm) -> Unit {
   self.queue.close()
 }
 
 ///|
-fn codemode_tool(vm : &@codemode.VmServer) -> @tools.ToolDefinition {
+fn codemode_tool(vm : &@codemode.VmChannel) -> @tools.ToolDefinition {
   @coding_agent.new_codemode_tool_definition(
     tools=[],
-    vm_launcher=Some(fn() -> &@codemode.VmServer { vm }),
+    vm_launcher=Some(fn() -> &@codemode.VmChannel { vm }),
   )
 }
 
@@ -396,12 +396,12 @@ fn stub_tool(
 
 ///|
 fn codemode_tool_with(
-  vm : &@codemode.VmServer,
+  vm : &@codemode.VmChannel,
   tools : Array[@tools.ToolDefinition],
 ) -> @tools.ToolDefinition {
   @coding_agent.new_codemode_tool_definition(
     tools~,
-    vm_launcher=Some(fn() -> &@codemode.VmServer { vm }),
+    vm_launcher=Some(fn() -> &@codemode.VmChannel { vm }),
   )
 }
 
@@ -690,7 +690,7 @@ async test "codemode store writes persist to the journal and feed the next run" 
   let tool = @coding_agent.new_codemode_tool_definition(
     tools=[],
     journal=Some(journal),
-    vm_launcher=Some(fn() -> &@codemode.VmServer { FakeVm::{ feed, sent, } }),
+    vm_launcher=Some(fn() -> &@codemode.VmChannel { FakeVm::{ feed, sent, } }),
   )
   let first = run_codemode(tool, "store-run()", tool_call_id="run-1")
   assert_false(first.is_error)
@@ -739,7 +739,7 @@ async test "a failed codemode run appends no codemode-store entry" {
   let tool = @coding_agent.new_codemode_tool_definition(
     tools=[],
     journal=Some(journal),
-    vm_launcher=Some(fn() -> &@codemode.VmServer { vm }),
+    vm_launcher=Some(fn() -> &@codemode.VmChannel { vm }),
   )
   let result = run_codemode(tool, "work()")
   assert_true(result.is_error)
@@ -785,7 +785,7 @@ async test "malformed codemode-store entries are skipped when reading the store"
   let tool = @coding_agent.new_codemode_tool_definition(
     tools=[],
     journal=Some(journal),
-    vm_launcher=Some(fn() -> &@codemode.VmServer { vm }),
+    vm_launcher=Some(fn() -> &@codemode.VmChannel { vm }),
   )
   let result = run_codemode(tool, "work()")
   assert_false(result.is_error)
@@ -867,7 +867,7 @@ async test "session abort waits for nested codemode cleanup and journals one abo
     @coding_agent.new_codemode_tool_definition(
       tools=[wait],
       journal=Some(journal),
-      vm_launcher=Some(fn() -> &@codemode.VmServer { vm }),
+      vm_launcher=Some(fn() -> &@codemode.VmChannel { vm }),
     ),
   )
   let llm = @faux.FauxLLM::FauxLLM()

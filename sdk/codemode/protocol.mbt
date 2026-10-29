@@ -24,8 +24,6 @@ pub(all) enum VmToHostMessage {
 ///|
 pub(all) enum HostToVmMessage {
   CallResult(CallResponse)
-  Stop
-  Null
 }
 
 ///|
@@ -370,8 +368,6 @@ pub impl FromJson for VmToHostMessage with fn from_json(json, path) {
 pub extend VmToHostMessage with @json.FromJson::{from_json}
 
 ///|
-/// pi's `CodemodeRemoteReply`: the `result` frame, `{ "type": "stop" }`,
-/// or `null`.
 pub impl @json.ToJson for HostToVmMessage with fn to_json(self) -> Json {
   match self {
     CallResult(response) => {
@@ -382,8 +378,6 @@ pub impl @json.ToJson for HostToVmMessage with fn to_json(self) -> Json {
       }
       Json::object(obj)
     }
-    Stop => { "type": "stop" }
-    Null => Json::null()
   }
 }
 
@@ -392,15 +386,12 @@ pub extend HostToVmMessage with @json.ToJson::{to_json}
 
 ///|
 pub impl FromJson for HostToVmMessage with fn from_json(json, path) {
-  match json {
-    Null => Null
-    Object(fields) =>
-      match fields.get("type") {
-        Some(String("stop")) => Stop
-        Some(String("result")) => CallResult(@json.from_json(json, path~))
-        _ => decode_error(path.add_key("type"), "HostToVmMessage: unknown type")
-      }
-    _ => decode_error(path, "HostToVmMessage: expected object or null")
+  guard json is Object(fields) else {
+    decode_error(path, "HostToVmMessage: expected object")
+  }
+  match fields.get("type") {
+    Some(String("result")) => CallResult(@json.from_json(json, path~))
+    _ => decode_error(path.add_key("type"), "HostToVmMessage: unknown type")
   }
 }
 

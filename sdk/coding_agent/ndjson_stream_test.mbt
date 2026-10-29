@@ -1,9 +1,7 @@
 ///|
-/// `close` 对应上游 `remoteLauncher.stop()`:最后一帧
-/// `{ "stream_id", "data": {"type":"stop"} }` 不落盘而直接进 writer 队列 —
-/// `try_put` 不挂起,被取消的协程也能把 stop 送到线上。这里用一对内存
-/// pipe 证明帧真的到了"线上"。
-async test "closing a stream emits a stop frame on the wire" {
+/// `close` 把 `{ "stream_id", "close": true }` 直接放进 writer 队列 —
+/// `try_put` 不挂起,被取消的协程也能把帧送到线上。
+async test "closing a stream emits a close frame on the wire" {
   @async.with_task_group(group => {
     let (remote_read, _remote_write) = @io.pipe()
     let (client_read, client_write) = @io.pipe()
@@ -15,15 +13,14 @@ async test "closing a stream emits a stop frame on the wire" {
       fail("no frame reached the wire")
     }
     let frame = @json.parse(line)
-    guard frame
-      is { "stream_id": Number(1, ..), "data": { "type": "stop", .. }, .. } else {
+    guard frame is { "stream_id": Number(1, ..), "close": True, .. } else {
       fail("unexpected frame \{frame.stringify()}")
     }
   })
 }
 
 ///|
-async test "cancelled streams retain stop frames when all send slots are occupied" {
+async test "cancelled streams retain close frames when all send slots are occupied" {
   @async.with_timeout(3000, () => {
     @async.with_task_group(group => {
       let (remote_read, _remote_write) = @io.pipe()
@@ -57,7 +54,7 @@ async test "cancelled streams retain stop frames when all send slots are occupie
             n == i.to_double(),
           )
         } else {
-          assert_true(frame is { "data": { "type": "stop", .. }, .. })
+          assert_true(frame is { "close": True, .. })
         }
       }
       streams.close()

@@ -45,7 +45,7 @@ The deadline includes VM launch and returns a `Timeout` result with accumulated
 output. External task cancellation propagates without producing a result; callers
 that own a top-level task may handle it with `async.handle_cancellation`.
 
-Every acquired VM is closed on exit. `VmServer.close` must synchronously release
-the stream and retain a stop notification for the remote, even when normal sends
-are backpressured. A nested tool uses native cancellation and `defer` for cleanup;
-necessary asynchronous cleanup may use `async.protect_from_cancel`.
+Every acquired VM is closed on exit. `VmChannel.close` synchronously releases
+the stream and queues a close frame for the remote. A nested tool uses native
+cancellation and `defer` for cleanup; necessary asynchronous cleanup may use
+`async.protect_from_cancel`.

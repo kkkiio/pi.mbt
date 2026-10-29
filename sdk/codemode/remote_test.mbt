@@ -7,7 +7,7 @@ priv struct FakeChannel {
 }
 
 ///|
-impl @codemode.VmServer for FakeChannel with fn send(
+impl @codemode.VmChannel for FakeChannel with fn send(
   self : FakeChannel,
   data : Json,
 ) -> Unit {
@@ -15,7 +15,7 @@ impl @codemode.VmServer for FakeChannel with fn send(
 }
 
 ///|
-impl @codemode.VmServer for FakeChannel with fn recv(self : FakeChannel) -> Json {
+impl @codemode.VmChannel for FakeChannel with fn recv(self : FakeChannel) -> Json {
   if self.feed is [] {
     fail("channel closed")
   } else {
@@ -24,7 +24,7 @@ impl @codemode.VmServer for FakeChannel with fn recv(self : FakeChannel) -> Json
 }
 
 ///|
-impl @codemode.VmServer for FakeChannel with fn close(self : FakeChannel) -> Unit {
+impl @codemode.VmChannel for FakeChannel with fn close(self : FakeChannel) -> Unit {
   self.feed.clear()
 }
 
@@ -45,7 +45,7 @@ async test "a batch frame feeds its messages in order" {
     ],
   ])
   let codemode = @codemode.Codemode::Codemode(
-    fn() -> &@codemode.VmServer { channel },
+    fn() -> &@codemode.VmChannel { channel },
     timeout_ms=0,
   )
   guard codemode.execute("x")
@@ -66,7 +66,7 @@ async test "a batch frame feeds its messages in order" {
 async test "eof before a terminal frame is a sandbox error" {
   let channel = FakeChannel([])
   let codemode = @codemode.Codemode::Codemode(
-    fn() -> &@codemode.VmServer { channel },
+    fn() -> &@codemode.VmChannel { channel },
     timeout_ms=0,
   )
   guard codemode.execute("x")
@@ -79,7 +79,7 @@ async test "eof before a terminal frame is a sandbox error" {
 }
 
 ///|
-/// A `@codemode.VmServer` whose `recv` blocks until `inbox` gets a frame or
+/// A `@codemode.VmChannel` whose `recv` blocks until `inbox` gets a frame or
 /// `close` releases it — how `stop`/abort reach the loop. `send` is captured.
 priv struct BlockingChannel {
   sent : Array[Json]
@@ -88,7 +88,7 @@ priv struct BlockingChannel {
 }
 
 ///|
-impl @codemode.VmServer for BlockingChannel with fn send(
+impl @codemode.VmChannel for BlockingChannel with fn send(
   self : BlockingChannel,
   data : Json,
 ) -> Unit {
@@ -96,12 +96,14 @@ impl @codemode.VmServer for BlockingChannel with fn send(
 }
 
 ///|
-impl @codemode.VmServer for BlockingChannel with fn recv(self : BlockingChannel) -> Json {
+impl @codemode.VmChannel for BlockingChannel with fn recv(
+  self : BlockingChannel,
+) -> Json {
   self.inbox.get()
 }
 
 ///|
-impl @codemode.VmServer for BlockingChannel with fn close(
+impl @codemode.VmChannel for BlockingChannel with fn close(
   self : BlockingChannel,
 ) -> Unit {
   self.closed = true
@@ -118,7 +120,7 @@ async test "cancelling execution propagates and closes the vm" {
   let channel = BlockingChannel::BlockingChannel()
   let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
   let codemode = @codemode.Codemode::Codemode(
-    async fn() -> &@codemode.VmServer {
+    async fn() -> &@codemode.VmChannel {
       started.put(())
       channel
     },
@@ -143,7 +145,7 @@ async test "a call in flight when the script ends is cancelled and cleaned up" {
   let never : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
   let cleaned = Ref(false)
   let codemode = @codemode.Codemode::Codemode(
-    fn() -> &@codemode.VmServer { channel },
+    fn() -> &@codemode.VmChannel { channel },
     tools=[
       {
         name: "wait",
@@ -215,7 +217,7 @@ async test "every execution exit cancels tools and globals before returning" {
       },
     }
     let codemode = @codemode.Codemode::Codemode(
-      fn() -> &@codemode.VmServer { channel },
+      fn() -> &@codemode.VmChannel { channel },
       tools=[wait],
       globals=[wait],
       timeout_ms=if ending == "timeout" { 100 } else { 0 },
@@ -299,7 +301,7 @@ async test "launch obeys both external cancellation and the execution deadline" 
     let never : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
     let cleaned = Ref(false)
     let codemode = @codemode.Codemode::Codemode(
-      async fn() -> &@codemode.VmServer {
+      async fn() -> &@codemode.VmChannel {
         defer {
           cleaned.val = true
         }
@@ -337,7 +339,7 @@ async test "ordinary cleanup errors propagate instead of becoming cancellation o
     let started : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
     let never : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
     let codemode = @codemode.Codemode::Codemode(
-      fn() -> &@codemode.VmServer { channel },
+      fn() -> &@codemode.VmChannel { channel },
       tools=[
         {
           name: "wait",
@@ -397,7 +399,7 @@ priv struct StalledSend {
 }
 
 ///|
-impl @codemode.VmServer for StalledSend with fn send(
+impl @codemode.VmChannel for StalledSend with fn send(
   self : StalledSend,
   _ : Json,
 ) -> Unit {
@@ -406,12 +408,12 @@ impl @codemode.VmServer for StalledSend with fn send(
 }
 
 ///|
-impl @codemode.VmServer for StalledSend with fn recv(_ : StalledSend) -> Json {
+impl @codemode.VmChannel for StalledSend with fn recv(_ : StalledSend) -> Json {
   fail("unreachable")
 }
 
 ///|
-impl @codemode.VmServer for StalledSend with fn close(self : StalledSend) -> Unit {
+impl @codemode.VmChannel for StalledSend with fn close(self : StalledSend) -> Unit {
   self.closed = true
 }
 
@@ -424,7 +426,7 @@ async test "a blocked start send remains cancellable and obeys the deadline" {
       closed: false,
     }
     let codemode = @codemode.Codemode::Codemode(
-      fn() -> &@codemode.VmServer { vm },
+      fn() -> &@codemode.VmChannel { vm },
       timeout_ms=if timed_out { 30 } else { 0 },
     )
     @async.with_timeout(3000, () => {

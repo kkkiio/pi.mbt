@@ -60,8 +60,7 @@ async test "ws streams demultiplex frames and end on connection close" {
 
 ///|
 /// A full `Codemode::execute` over a `WsStream`: the request frame starts
-/// the script and one message batch settles it with `done`, followed by the
-/// `exit` stream marker.
+/// the script, one message batch settles it with `done`, then the stream closes.
 async test "execute codemode over a ws stream" {
   @async.with_task_group(group => {
     let server = @http.Server(@socket.Addr::parse("127.0.0.1:0"))
@@ -76,14 +75,14 @@ async test "execute codemode over a ws stream" {
       try {
         while true {
           let msg = ws.recv()
-          guard @json.parse(msg.read_all().text())
-            is { "stream_id": id, "data": data, .. } else {
+          let frame = @json.parse(msg.read_all().text())
+          if frame is { "close": True, .. } {
+            continue
+          }
+          guard frame is { "stream_id": id, "data": data, .. } else {
             fail("bad frame")
           }
-          // `stop` is a stream-close marker, not a request: the real
-          // `serveCodemodeRemote` answers it silently, so the fake ignores it
-          // instead of replying done+exit.
-          if data is { "type": "result", .. } || data is { "type": "stop", .. } {
+          if data is { "type": "result", .. } {
             continue
           }
           ws.send_text(
@@ -95,9 +94,7 @@ async test "execute codemode over a ws stream" {
                 ],
               } : Json).stringify(),
           )
-          ws.send_text(
-            ({ "stream_id": id, "data": { "type": "exit" } } : Json).stringify(),
-          )
+          ws.send_text(({ "stream_id": id, "close": true } : Json).stringify())
         }
       } catch {
         _ => ()
@@ -105,7 +102,7 @@ async test "execute codemode over a ws stream" {
     })
     let result = @ask_agent.with_ws_streams(url="ws://127.0.0.1:\{port}", streams => {
       let codemode = @codemode.Codemode::Codemode(
-        fn() -> &@codemode.VmServer { streams.new_stream() },
+        fn() -> &@codemode.VmChannel { streams.new_stream() },
         tools=[],
         timeout_ms=0,
       )
@@ -118,7 +115,7 @@ async test "execute codemode over a ws stream" {
 }
 
 ///|
-async test "websocket stream cancellation retains stop behind a full send queue" {
+async test "websocket stream cancellation retains close behind a full send queue" {
   @async.with_timeout(3000, () => {
     @async.with_task_group(group => {
       let server = @http.Server(@socket.Addr::parse("127.0.0.1:0"))
@@ -140,12 +137,7 @@ async test "websocket stream cancellation retains stop behind a full send queue"
             )
           } else {
             assert_true(
-              frame
-              is {
-                "stream_id": Number(1, ..),
-                "data": { "type": "stop", .. },
-                ..
-              },
+              frame is { "stream_id": Number(1, ..), "close": True, .. },
             )
           }
         }

@@ -7,16 +7,16 @@
 // For every `exchange(messages)` call the sidecar emits
 // `{ "stream_id", "data": <messages> }` — the batch itself, which the
 // client's message loop flattens — and, once `serveCodemodeRemote`'s
-// promise settles, `{ "stream_id", "data": { "type": "exit" } }`.
+// promise settles, `{ "stream_id", "close": true }`.
 //
 // Replies from the client come back as bare `data` frames, upstream
 // `remoteLauncher` style: `{ "type": "result", "id": <call id>, ... }`
-// answers the exchange that carried `call` `<call id>`, and
-// `{ "type": "stop" }` answers every pending exchange with `stop`.
+// answers the exchange that carried `call` `<call id>`. `{ "stream_id",
+// "close": true }` answers every pending exchange with `stop`.
 // An exchange that carries no `call` resolves `null` at once, like upstream.
 // A request that cannot even start, or a remote that ends before a terminal
 // `done`/`crash`/`failure`, reports a `failure` batch with
-// `{ kind: "sandbox" }` before `exit`.
+// `{ kind: "sandbox" }` before closing the stream.
 //
 // Transports:
 //   node codemode-sidecar.mjs               stdin/stdout, one frame per line
@@ -96,7 +96,7 @@ function startExecution(link, streamId, request) {
     } else if (!state.settled && !state.stopped) {
       sendFailure("Remote sandbox returned before the script settled");
     }
-    link.send({ stream_id: streamId, data: { type: "exit" } });
+    link.send({ stream_id: streamId, close: true });
     for (const exchangeId of [...state.pending.keys()]) resolveExchange(exchangeId, null);
     link.streams.delete(streamId);
     if (link.eof && link.streams.size === 0) process.exit(0);
@@ -115,12 +115,6 @@ function startExecution(link, streamId, request) {
   );
 
   state.answer = (data) => {
-    // Bare VM-bridge frames: `result` answers the exchange that carried the
-    // call, `stop` answers every pending exchange with `stop`.
-    if (data.type === "stop") {
-      stopAll();
-      return;
-    }
     if (data.type === "result" && typeof data.id === "number") {
       const exchangeId = state.calls.get(data.id);
       if (exchangeId !== undefined) resolveExchange(exchangeId, data);
@@ -129,19 +123,22 @@ function startExecution(link, streamId, request) {
 }
 
 // `frame` is `{ stream_id, data }`: `data` is a CodemodeRemoteRequest to
-// start, or a VM-bridge frame (`{type:"result",id}` / `{type:"stop"}`) for a
-// running stream.
+// start, or a VM-bridge frame (`{type:"result",id}`) for a running stream.
+// `{ stream_id, close: true }` ends a running stream.
 function handleFrame(link, frame) {
   const { stream_id: streamId, data } = frame;
   if (typeof streamId !== "number") return;
   const state = link.streams.get(streamId);
   if (state) {
+    if (frame.close === true) {
+      state.stopAll();
+      return;
+    }
     if (data !== null && typeof data === "object" && state.answer) state.answer(data);
     return;
   }
-  // Only a start request opens a stream — `{ data: {...} }`. Late
-  // `result`/`stop` frames for a settled stream are dropped, like upstream's
-  // `waiting.get(id)` miss.
+  // Only a start request opens a stream — `{ data: {...} }`. Late frames for a
+  // settled stream are dropped, like upstream's `waiting.get(id)` miss.
   if (data === null || typeof data !== "object" || data.data === null || typeof data.data !== "object") return;
   startExecution(link, streamId, data);
 }
@@ -202,7 +199,7 @@ async function runWebSocket(port) {
         try {
           socket.send(JSON.stringify(frame));
         } catch {
-          // closed socket: the frames (exit/failure) have nowhere to go
+          // closed socket: the frames (close/failure) have nowhere to go
         }
       },
     };

@@ -1,6 +1,6 @@
 ///|
 struct Codemode {
-  vm_launcher : async () -> &VmServer
+  vm_launcher : async () -> &VmChannel
   tools : Map[String, CodemodeTool]
   globals : Map[String, CodemodeTool]
   timeout_ms : Int32
@@ -10,7 +10,7 @@ struct Codemode {
 ///|
 /// Create a new codemode instance.
 pub fn Codemode::Codemode(
-  vm_launcher : async () -> &VmServer,
+  vm_launcher : async () -> &VmChannel,
   tools~ : Array[CodemodeTool] = [],
   globals~ : Array[CodemodeTool] = [],
   timeout_ms~ : Int32 = 300000,
@@ -229,16 +229,12 @@ pub async fn Codemode::execute(
 }
 
 ///|
-pub(open) trait VmServer {
+pub(open) trait VmChannel {
   /// Send one whole JSON message to the peer.
   async fn send(Self, Json) -> Unit
-  /// Receive the next whole JSON message. 
-  ///
-  /// The end of the stream (peer closed, transport lost) raises a ReaderClosed error.
+  /// Receive the next whole JSON message.
   async fn recv(Self) -> Json
-  /// Stop the remote execution and release the stream without suspending.
-  /// Must be idempotent and safe during task cancellation. A live transport
-  /// must retain the stop notification even when ordinary sends are backpressured.
+  /// Stop the remote execution and release the stream.
   fn close(Self) -> Unit
 }
 
@@ -256,7 +252,7 @@ priv struct PendingCall {
 async fn Codemode::dispatch_call(
   self : Codemode,
   tg : @async.TaskGroup[CodemodeResult],
-  vm : &VmServer,
+  vm : &VmChannel,
   pending : Map[Int32, PendingCall],
   calls : Array[CodemodeCall],
   is_tool~ : Bool,

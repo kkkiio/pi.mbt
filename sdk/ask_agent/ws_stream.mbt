@@ -2,9 +2,8 @@
 /// Multiplexed `{ "stream_id", "data" }` JSON frames over one WebSocket
 /// connection — pim's own wire shape for a codemode remote. `run` pumps
 /// the connection; `new_stream` allocates a `WsStream`, a transparent
-/// `@codemode.VmServer` for `Codemode::execute`: `data` payloads pass through
-/// untouched — a VM message, an array batch, or `{ "type": "exit" }`
-/// ending the stream.
+/// `@codemode.VmChannel` for `Codemode::execute`: `data` payloads pass through
+/// untouched; `{ "stream_id", "close": true }` ends a stream.
 pub struct WsStreams {
   priv ws : @websocket.Conn
   priv mut next_id : Int32
@@ -89,11 +88,20 @@ pub async fn WsStreams::run(self : WsStreams) -> Unit {
       }
       let text = message.read_all().text() catch { _ => break }
       let frame = @json.parse(text)
-      guard frame is { "stream_id": Number(stream_id, ..), "data": data, .. } else {
+      guard frame is { "stream_id": Number(stream_id, ..), .. } else {
         fail("ws streams: invalid frame \{frame.stringify()}")
       }
-      if self.recv_queue_map.get(stream_id.to_int()) is Some(queue) {
-        // A concurrently closed stream drops the frame.
+      let id = stream_id.to_int()
+      if frame is { "close": True, .. } {
+        if self.recv_queue_map.remove_and_get(id) is Some(queue) {
+          queue.close()
+        }
+        continue
+      }
+      guard frame is { "data": data, .. } else {
+        fail("ws streams: invalid frame \{frame.stringify()}")
+      }
+      if self.recv_queue_map.get(id) is Some(queue) {
         queue.put(data) catch {
           @aqueue.QueueAlreadyClosed => ()
           err => raise err
@@ -138,11 +146,9 @@ pub fn WsStreams::close(self : WsStreams) -> Unit {
 }
 
 ///|
-/// One stream of a `WsStreams` connection, transparent as a `@codemode.VmServer`:
+/// One stream of a `WsStreams` connection, transparent as a `@codemode.VmChannel`:
 /// `send` wraps `data` in a `{ "stream_id", "data" }` frame; `recv` returns
-/// each `data` payload as-is — a VM message or an array batch — and raises
-/// once the remote ends the execution (`exit` frame, connection close, or
-/// `close` running).
+/// each `data` payload as-is and raises once the stream closes.
 pub struct WsStream {
   priv id : Int32
   priv send_queue : @aqueue.Queue[(Json, Bool)]
@@ -153,7 +159,7 @@ pub struct WsStream {
 }
 
 ///|
-pub impl @codemode.VmServer for WsStream with fn send(self, data : Json) -> Unit {
+pub impl @codemode.VmChannel for WsStream with fn send(self, data : Json) -> Unit {
   guard !self.closed else { fail("codemode stream is closed") }
   self.send_slots.get()
   if self.closed {
@@ -167,30 +173,19 @@ pub impl @codemode.VmServer for WsStream with fn send(self, data : Json) -> Unit
 }
 
 ///|
-pub impl @codemode.VmServer for WsStream with fn recv(self) -> Json {
-  let data = self.recv_queue.get()
-  if data is { "type": "exit", .. } {
-    fail("ws stream: remote ended the execution")
-  }
-  data
+pub impl @codemode.VmChannel for WsStream with fn recv(self) -> Json {
+  self.recv_queue.get()
 }
 
 ///|
-/// Closing tells the remote to stop its VM — pi's `remoteLauncher.stop()` —
-/// by queueing a final `{ "type": "stop" }` frame. `try_put` never suspends,
-/// so `close` stays safe to call from a cancelled coroutine (an `async`
-/// `send` would fail there). Ordinary frames reserve bounded send slots;
-/// stop frames bypass those slots and remain queued while the transport is live.
-/// Harmless on normal completion: the stream already exited remotely.
-pub impl @codemode.VmServer for WsStream with fn close(self) {
+/// Queue a `{ "stream_id", "close": true }` frame and release the stream.
+pub impl @codemode.VmChannel for WsStream with fn close(self) {
   if self.closed {
     return
   }
   self.closed = true
   ignore(
-    self.send_queue.try_put(
-      ({ "stream_id": self.id, "data": { "type": "stop" } }, false),
-    ) catch {
+    self.send_queue.try_put(({ "stream_id": self.id, "close": true }, false)) catch {
       _ => false
     },
   )
@@ -199,4 +194,4 @@ pub impl @codemode.VmServer for WsStream with fn close(self) {
 }
 
 ///|
-pub extend WsStream with @codemode.VmServer::{send, recv, close}
+pub extend WsStream with @codemode.VmChannel::{send, recv, close}

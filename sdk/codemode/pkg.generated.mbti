@@ -54,7 +54,7 @@ pub impl ToJson for CallResponse
 pub impl @json.FromJson for CallResponse
 
 type Codemode
-pub fn Codemode::Codemode(async () -> &VmServer, tools? : Array[CodemodeTool], globals? : Array[CodemodeTool], timeout_ms? : Int32, memory_limit_bytes? : Double?) -> Self
+pub fn Codemode::Codemode(async () -> &VmChannel, tools? : Array[CodemodeTool], globals? : Array[CodemodeTool], timeout_ms? : Int32, memory_limit_bytes? : Double?) -> Self
 pub async fn Codemode::execute(Self, String, store? : Map[String, Json], timeout_ms? : Int32?) -> CodemodeResult
 
 pub(all) struct CodemodeCall {
@@ -145,8 +145,6 @@ pub fn Global::to_json(Self) -> Json
 
 pub(all) enum HostToVmMessage {
   CallResult(CallResponse)
-  Stop
-  Null
 }
 pub fn HostToVmMessage::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 pub fn HostToVmMessage::to_json(Self) -> Json
@@ -218,7 +216,7 @@ pub impl @json.FromJson for WriteItem
 // Type aliases
 
 // Traits
-pub(open) trait VmServer {
+pub(open) trait VmChannel {
   async fn send(Self, Json) -> Unit
   async fn recv(Self) -> Json
   fn close(Self) -> Unit

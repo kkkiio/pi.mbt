@@ -2,7 +2,7 @@
 /// Multiplexed `{ "stream_id", "data" }` NDJSON frames over a byte stream —
 /// pim's wire shape toward `scripts/codemode-sidecar.mjs`, which runs
 /// pi-codemode's `serveCodemodeRemote` behind it. `run` pumps the stream;
-/// `new_stream` allocates a `NdJsonStream`, a transparent `@codemode.VmServer`
+/// `new_stream` allocates a `NdJsonStream`, a transparent `@codemode.VmChannel`
 /// ready for `Codemode::execute`.
 pub struct NdJsonStreams[R, W] {
   priv reader : R
@@ -98,13 +98,19 @@ pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(
     }
     while read_frame() is Some(line) {
       let frame = @json.parse(@utf8.decode_lossy(line[:]))
-      guard frame is { "stream_id": Number(stream_id, ..), "data": data, .. } else { // malformed frame: drop it rather than killing the shared pump
+      guard frame is { "stream_id": Number(stream_id, ..), .. } else {
         continue
       }
-      if self.recv_queue_map.get(stream_id.to_int()) is Some(queue) {
+      let id = stream_id.to_int()
+      if frame is { "close": True, .. } {
+        if self.recv_queue_map.remove_and_get(id) is Some(queue) {
+          queue.close()
+        }
+        continue
+      }
+      guard frame is { "data": data, .. } else { continue }
+      if self.recv_queue_map.get(id) is Some(queue) {
         queue.put(data) catch {
-          // The stream was closed between routing and enqueue; the frame
-          // is stale and safe to drop.
           @aqueue.QueueAlreadyClosed => ()
           err => raise err
         }
@@ -150,11 +156,9 @@ pub fn[R, W] NdJsonStreams::close(self : NdJsonStreams[R, W]) -> Unit {
 }
 
 ///|
-/// One stream of an `NdJsonStreams` pump — a transparent `@codemode.VmServer`:
+/// One stream of an `NdJsonStreams` pump — a transparent `@codemode.VmChannel`:
 /// `send` wraps `data` in a `{ "stream_id", "data" }` frame; `recv` returns
-/// each `data` payload as-is — a VM message or an array batch — and raises
-/// once the remote ends the execution (`exit` frame, EOF, or `close`
-/// running).
+/// each `data` payload as-is and raises once the remote closes the stream.
 pub struct NdJsonStream {
   priv id : Int32
   priv send_queue : @aqueue.Queue[(Json, Bool)]
@@ -165,7 +169,7 @@ pub struct NdJsonStream {
 }
 
 ///|
-pub impl @codemode.VmServer for NdJsonStream with fn send(self, data : Json) -> Unit {
+pub impl @codemode.VmChannel for NdJsonStream with fn send(self, data : Json) -> Unit {
   guard !self.closed else { fail("codemode stream is closed") }
   self.send_slots.get()
   if self.closed {
@@ -179,30 +183,19 @@ pub impl @codemode.VmServer for NdJsonStream with fn send(self, data : Json) -> 
 }
 
 ///|
-pub impl @codemode.VmServer for NdJsonStream with fn recv(self) -> Json {
-  let data = self.recv_queue.get()
-  if data is { "type": "exit", .. } {
-    fail("ndjson stream: remote ended the execution")
-  }
-  data
+pub impl @codemode.VmChannel for NdJsonStream with fn recv(self) -> Json {
+  self.recv_queue.get()
 }
 
 ///|
-/// Closing tells the remote to stop its VM — pi's `remoteLauncher.stop()` —
-/// by queueing a final `{ "type": "stop" }` frame. `try_put` never suspends,
-/// so `close` stays safe to call from a cancelled coroutine (an `async`
-/// `send` would fail there). Ordinary frames reserve bounded send slots;
-/// stop frames bypass those slots and remain queued while the transport is live.
-/// Harmless on normal completion: the stream already exited remotely.
-pub impl @codemode.VmServer for NdJsonStream with fn close(self) {
+/// Queue a `{ "stream_id", "close": true }` frame and release the stream.
+pub impl @codemode.VmChannel for NdJsonStream with fn close(self) {
   if self.closed {
     return
   }
   self.closed = true
   ignore(
-    self.send_queue.try_put(
-      ({ "stream_id": self.id, "data": { "type": "stop" } }, false),
-    ) catch {
+    self.send_queue.try_put(({ "stream_id": self.id, "close": true }, false)) catch {
       _ => false
     },
   )
@@ -211,4 +204,4 @@ pub impl @codemode.VmServer for NdJsonStream with fn close(self) {
 }
 
 ///|
-pub extend NdJsonStream with @codemode.VmServer::{send, recv, close}
+pub extend NdJsonStream with @codemode.VmChannel::{send, recv, close}

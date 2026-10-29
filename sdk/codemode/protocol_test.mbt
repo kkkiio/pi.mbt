@@ -242,17 +242,6 @@ test "error result sends the message verbatim" {
 }
 
 ///|
-test "stop asks the vm to halt" {
-  roundtrip(@codemode.HostToVmMessage::Stop, expected={ "type": "stop" })
-}
-
-///|
-/// A bare `null` is a valid reply the remote transport may produce.
-test "a bare null is a valid host reply" {
-  roundtrip(@codemode.HostToVmMessage::Null, expected=Json::null())
-}
-
-///|
 test "start request with all fields" {
   roundtrip(
     @codemode.StartVmRequest::{

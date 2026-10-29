@@ -88,7 +88,7 @@ fn spawn_codemode_sidecar(
 /// `vm_launcher` replaces the sidecar spawn when set — a real transport
 /// seam, not just a test hook: hosts that reach the VM over another
 /// transport (e.g. the ws streams in sdk/ask_agent) inject their own
-/// `&@codemode.VmServer` source, and `sidecar_path` is then unused.
+/// `&@codemode.VmChannel` source, and `sidecar_path` is then unused.
 /// `journal` is the session journal `store()`/`load()` persistence rides
 /// on; `None` drops writes.
 pub fn new_codemode_tool_definition(
@@ -96,13 +96,13 @@ pub fn new_codemode_tool_definition(
   journal~ : &@agent_session.SessionJournal? = None,
   sidecar_path~ : String = codemode_sidecar_path(),
   timeout_ms~ : Int32 = 0,
-  vm_launcher~ : (async () -> &@codemode.VmServer)? = None,
+  vm_launcher~ : (async () -> &@codemode.VmChannel)? = None,
 ) -> @tools.ToolDefinition {
-  let launcher : async () -> &@codemode.VmServer = match vm_launcher {
+  let launcher : async () -> &@codemode.VmChannel = match vm_launcher {
     Some(launcher) => launcher
     None => {
       let sidecar = @async.Lazy(() => spawn_codemode_sidecar(sidecar_path))
-      async fn() -> &@codemode.VmServer { sidecar.wait().new_stream() }
+      async fn() -> &@codemode.VmChannel { sidecar.wait().new_stream() }
     }
   }
   {
@@ -350,7 +350,7 @@ const ERROR_PREVIEW_CHARS : Int32 = 500
 /// pi shows the row as running — then on every call start and finish.
 /// External task cancellation propagates after the VM and nested calls clean up.
 async fn execute_codemode_tool(
-  launcher : async () -> &@codemode.VmServer,
+  launcher : async () -> &@codemode.VmChannel,
   tools : ArrayView[@tools.ToolDefinition],
   journal : &@agent_session.SessionJournal?,
   timeout_ms~ : Int32,
