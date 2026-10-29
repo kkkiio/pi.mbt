@@ -207,6 +207,19 @@ async fn main {
       }
     }
   }
+  let active_tools : Array[String] = match matches.values {
+    { "tools": [tools, ..], .. } => {
+      let names : Array[String] = []
+      for name in tools.split(",") {
+        let name = name.trim()
+        if !name.is_empty() {
+          names.push(name.to_owned())
+        }
+      }
+      names
+    }
+    _ => [@coding_agent.BASH_TOOL_NAME, @coding_agent.CODEMODE_TOOL_NAME]
+  }
   // TUI 模式:会话(含 journal)由 tui_app 的 SessionHost 负责,这里不再自建。
   if interactive {
     @tui_app.run(
@@ -217,6 +230,7 @@ async fn main {
       session_dir,
       resume_path~,
       initial=messages,
+      active_tools~,
     ) catch {
       err => fatal("Error: \{clean_error_message("\{err}")}")
     }
@@ -261,19 +275,6 @@ async fn main {
   }
   defer cleanup()
   defer @coding_agent.close_codemode_sidecar()
-  let active_tools : Array[String] = match matches.values {
-    { "tools": [tools, ..], .. } => {
-      let names : Array[String] = []
-      for name in tools.split(",") {
-        let name = name.trim()
-        if !name.is_empty() {
-          names.push(name.to_owned())
-        }
-      }
-      names
-    }
-    _ => [@coding_agent.BASH_TOOL_NAME, @coding_agent.CODEMODE_TOOL_NAME]
-  }
   let session = @coding_agent.new_coding_session(
     llm,
     cwd~,
