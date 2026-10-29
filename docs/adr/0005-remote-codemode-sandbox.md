@@ -46,7 +46,7 @@ VM 获取成功后立即注册 `defer vm.close()`。`close` 必须同步、幂�
 
 真实脚本在独立的 VM Server 中通过 `serveCodemodeRemote` + `quickjs-wasi`（WebAssembly 版 QuickJS）运行。
 
-在 `sdk/coding_agent` 中，宿主通过 `NdJsonStreams` 在单条字节流上以 `{ "stream_id", "data" }` 多路复用多个 `NdJsonStream`（实现 `@codemode.VmChannel`），对接 `scripts/codemode-sidecar.mjs`（支持 stdio 管道与 `--ws <port>` WebSocket 两种传输方式）。
+在 `sdk/coding_agent` 中，宿主通过 `NdJsonStreams` 在单条字节流上以 `{ "stream_id", "data" }` 多路复用多个 `NdJsonStream`（实现 `@codemode.VmChannel`），对接 `scripts/codemode-sidecar.mjs`（stdio 管道）；WebSocket 示例见 `examples/codemode-sidecar-ws.mjs`。
 
 ### 3. VM Server 的生命周期与部署形态交由上层宿主决定
 

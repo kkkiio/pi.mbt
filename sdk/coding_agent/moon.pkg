@@ -3,6 +3,7 @@ import {
   "KKKIIO/pi/sdk/agent_session",
   "KKKIIO/pi/sdk/tools",
   "KKKIIO/pi/sdk/codemode",
+  "KKKIIO/pi/sdk/tools/codemode_tool",
   "moonbitlang/async",
   "moonbitlang/async/io",
   "moonbitlang/async/js_async",

@@ -172,3 +172,34 @@ async test "websocket stream cancellation retains close behind a full send queue
     })
   })
 }
+
+///|
+async test "ws streams wrap an existing connection" {
+  @async.with_task_group(group => {
+    let server = @http.Server(@socket.Addr::parse("127.0.0.1:0"))
+    let port = server.addr.port()
+    group.spawn_bg(() => {
+      defer server.close()
+      let (conn, _) = server.accept()
+      defer conn.close()
+      let request = conn.read_request()
+      let ws = @websocket.Conn::from_http_server(request, conn)
+      defer ws.close()
+      let msg = ws.recv()
+      guard @json.parse(msg.read_all().text())
+        is { "stream_id": id, "data": data, .. } else {
+        fail("bad frame")
+      }
+      ws.send_text(
+        ({ "stream_id": id, "data": [{ "echo": data }] } : Json).stringify(),
+      )
+    })
+    let ws = @websocket.Conn::connect("ws://127.0.0.1:\{port}")
+    let streams = @ask_agent.WsStreams::WsStreams(ws)
+    group.spawn_bg(no_wait=true, () => streams.run())
+    defer streams.close()
+    let stream = streams.new_stream()
+    stream.send({ "n": 1 })
+    assert_eq(stream.recv(), [{ "echo": { "n": 1 } }])
+  })
+}

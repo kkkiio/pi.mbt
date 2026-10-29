@@ -34,6 +34,7 @@
 │   ├── providers/            # LLM provider
 │   │   └── faux/             # 脚本化假 provider(测试基建)
 │   └── tools/                # 工具定义
+│       └── codemode_tool/    # codemode 工具:描述、执行、输出整形
 └── tests/
     ├── cram/                 # CLI 契约离线测试转录(由 moon cram test 执行)
     │   ├── cli.md

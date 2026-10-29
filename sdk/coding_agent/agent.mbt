@@ -16,7 +16,7 @@ pub fn new_coding_session(
     journal=Some(journal),
   )
   tool_registry.register_tool(codemode_tool)
-  let session = @agent_session.AgentSession(
+  @agent_session.AgentSession(
     llm,
     system_prompt_contributes=[
       coding_assistant_system_prompt_contributor(),
@@ -29,5 +29,4 @@ pub fn new_coding_session(
     tool_registry~,
     active_tools~,
   )
-  session
 }

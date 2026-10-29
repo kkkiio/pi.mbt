@@ -18,10 +18,8 @@
 // `done`/`crash`/`failure`, reports a `failure` batch with
 // `{ kind: "sandbox" }` before closing the stream.
 //
-// Transports:
-//   node codemode-sidecar.mjs               stdin/stdout, one frame per line
-//   node codemode-sidecar.mjs --ws <port>   WebSocket; each message is one or
-//                                           more newline-separated frames
+// Transport: stdin/stdout, one frame per line. The WebSocket variant for
+// multi-tenant hosts is examples/codemode-sidecar-ws.mjs.
 //
 // Requires node >= 22.19 (pi-codemode's engine floor).
 import { serveCodemodeRemote, loadQuickJSWasm } from "@earendil-works/pi-codemode";
@@ -61,8 +59,6 @@ function startExecution(link, streamId, request) {
       resolveExchange(exchangeId, { type: "stop" });
     }
   };
-  // A link that is gone (socket closed) asks every execution on it to stop:
-  // their pending exchanges resolve `stop`, which ends serveCodemodeRemote.
   state.stopAll = stopAll;
 
   const exchange = (messages) =>
@@ -188,47 +184,4 @@ function runStdio() {
   process.stdin.resume();
 }
 
-async function runWebSocket(port) {
-  const { WebSocketServer } = await import("ws");
-  const wss = new WebSocketServer({ port });
-  wss.on("connection", (socket) => {
-    const link = {
-      streams: new Map(),
-      eof: false,
-      send: (frame) => {
-        try {
-          socket.send(JSON.stringify(frame));
-        } catch {
-          // closed socket: the frames (close/failure) have nowhere to go
-        }
-      },
-    };
-    socket.on("message", (data) => feedLines(link, data.toString()));
-    socket.on("close", () => {
-      // A disconnected client can no longer receive replies: stop its
-      // executions rather than orphaning their VMs. Process exit is stdio
-      // only — `link.eof` stays false so a settle() never exits the server.
-      for (const state of link.streams.values()) {
-        state.stopAll?.();
-      }
-    });
-  });
-  wss.on("listening", () => {
-    process.stderr.write(`codemode-sidecar listening on ws://127.0.0.1:${port}\n`);
-  });
-}
-
-const args = process.argv.slice(2);
-if (args[0] === "--ws") {
-  const port = Number.parseInt(args[1] ?? "", 10);
-  if (!Number.isInteger(port)) {
-    process.stderr.write("usage: codemode-sidecar.mjs [--ws <port>]\n");
-    process.exit(2);
-  }
-  runWebSocket(port).catch((error) => {
-    process.stderr.write(`codemode-sidecar: ${errorMessage(error)}\n`);
-    process.exit(1);
-  });
-} else {
-  runStdio();
-}
+runStdio();

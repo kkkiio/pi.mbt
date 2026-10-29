@@ -1,18 +1,28 @@
 ///|
-/// Assemble an SDK session with explicit tools, streaming and a finish-turn hook.
+/// Assemble an SDK session that exposes `codemode` over `streams`.
 /// No default tools, filesystem, OS or network capabilities are registered.
 pub fn new_ask_agent_session(
   llm : &@agent_loop.LLM,
-  system_prompt~ : String,
+  streams : WsStreams,
+  system_prompt_contributes~ : Array[@agent_session.SystemPromptContributor] = [],
   journal~ : &@agent_session.SessionJournal = @agent_session.InMemorySessionJournal(),
-  tool_registry~ : @tools.ToolRegistry,
+  tools~ : ArrayView[@tools.ToolDefinition] = [],
   active_tools~ : ArrayView[String],
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
-  on_generation~ : async (@agent_loop.GenerationEvent) -> Unit = fn(_) { () },
 ) -> @agent_session.AgentSession {
-  let session = @agent_session.AgentSession(
+  let tool_registry = @tools.ToolRegistry()
+  for tool in tools {
+    tool_registry.register_tool(tool)
+  }
+  let codemode_tool = new_codemode_tool_definition(
+    streams,
+    tools=active_tools.filter_map(name => tool_registry.get_tool(name)),
+    journal=Some(journal),
+  )
+  tool_registry.register_tool(codemode_tool)
+  @agent_session.AgentSession(
     llm,
-    system_prompt_contributes=[_ => system_prompt],
+    system_prompt_contributes~,
     journal~,
     tool_registry~,
     active_tools~,
@@ -22,10 +32,4 @@ pub fn new_ask_agent_session(
       enabled: false,
     },
   )
-  session.subscribe(event => {
-    if event is Loop(MessageUpdate(update)) {
-      on_generation(update)
-    }
-  })
-  session
 }

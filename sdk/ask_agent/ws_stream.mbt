@@ -14,22 +14,34 @@ pub struct WsStreams {
 }
 
 ///|
-/// Connect to a codemode-remote WebSocket endpoint at `url` (for example
-/// `ws://host:port/`). `run` must be called to pump frames, usually in a
-/// background task; `with_ws_streams` composes connect + pump + close.
-pub async fn WsStreams::connect(url~ : String) -> WsStreams {
+/// Wrap an already connected WebSocket for multiplexed codemode streams.
+/// `run` must be called to pump frames, usually in a background task.
+///
+/// The ownership of `ws` will be transferred to this function.
+/// So caller must not use the connection anymore, nor close it.
+pub fn WsStreams::WsStreams(ws : @websocket.Conn) -> WsStreams {
   let send_slots : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
   for _ in 0..<10 {
     ignore(send_slots.try_put(()) catch { _ => false })
   }
   {
-    ws: @websocket.Conn::connect(url),
+    ws,
     next_id: 1,
     send_queue: @aqueue.Queue(kind=@aqueue.Unbounded),
     send_slots,
     recv_queue_map: Map([]),
     closed: false,
   }
+}
+
+///|
+/// Connect to a codemode-remote WebSocket endpoint at `url` (for example
+/// `ws://host:port/`). `run` must be called to pump frames, usually in a
+/// background task; `with_ws_streams` composes connect + pump + close.
+///
+/// The returned `WsStreams` owns the connection; `close` releases it.
+pub async fn WsStreams::connect(url~ : String) -> WsStreams {
+  WsStreams::WsStreams(@websocket.Conn::connect(url))
 }
 
 ///|
