@@ -34,6 +34,12 @@ async fn main {
           long="thinking",
           about="thinking effort level: low, high (default), or max",
         ),
+        OptionArg(
+          "tools",
+          long="tools",
+          env="PIM_TOOLS",
+          about="comma-separated tools to enable (default: bash,codemode)",
+        ),
       ],
       positionals=[
         PositionArg(
@@ -254,7 +260,25 @@ async fn main {
       }
   }
   defer cleanup()
-  let session = @coding_agent.new_coding_session(llm, cwd~, journal~)
+  let active_tools : Array[String] = match matches.values {
+    { "tools": [tools, ..], .. } => {
+      let names : Array[String] = []
+      for name in tools.split(",") {
+        let name = name.trim()
+        if !name.is_empty() {
+          names.push(name.to_owned())
+        }
+      }
+      names
+    }
+    _ => [@coding_agent.BASH_TOOL_NAME, @coding_agent.CODEMODE_TOOL_NAME]
+  }
+  let session = @coding_agent.new_coding_session(
+    llm,
+    cwd~,
+    journal~,
+    active_tools~,
+  )
   let mut last_message : @agent_loop.AgentMessage? = None
   if mode is Json {
     // JSONL 模式:每个 AgentSessionEvent 一行 JSON 输出到 stdout(对齐 pi --mode json)。

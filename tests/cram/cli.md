@@ -28,6 +28,7 @@ Options:
   --session-dir <session_dir>  directory to store session JSONL files (default: <config>/sessions/<cwd>) [env: PIM_SESSION_DIR]
   --mode <mode>                output mode: text or json (default text)
   --thinking <thinking>        thinking effort level: low, high (default), or max
+  --tools <tools>              comma-separated tools to enable (default: bash,codemode) [env: PIM_TOOLS]
 ```
 
 ## 会话参数
