@@ -34,6 +34,10 @@ function startExecution(link, streamId, request) {
 
   const exchange = (messages) =>
     new Promise((resolve) => {
+      if (state.stopped) {
+        resolve({ type: "stop" });
+        return;
+      }
       const id = state.nextExchange++;
       const call = messages.find((m) => m?.type === "call");
       const callId = call ? call.id : null;

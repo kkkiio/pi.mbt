@@ -28,6 +28,13 @@ extern "js" fn JsSidecarChild::on_stdout_data(
   #| })
 
 ///|
+extern "js" fn JsSidecarChild::on_stdin_error(
+  self : JsSidecarChild,
+  on_error : () -> Unit,
+) -> Unit =
+  #| (child, onError) => child.stdin.on("error", () => onError())
+
+///|
 extern "js" fn JsSidecarChild::on_stdout_end(
   self : JsSidecarChild,
   on_end : () -> Unit,
@@ -70,6 +77,7 @@ pub fn SidecarProcess::spawn(script : String) -> SidecarProcess {
     ignore(chunks.try_put(chunk) catch { _ => false })
   })
   child.on_stdout_end(() => chunks.close())
+  child.on_stdin_error(() => chunks.close())
   {
     child,
     stdout: {
