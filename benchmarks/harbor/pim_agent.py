@@ -79,6 +79,7 @@ class Pim(BaseInstalledAgent):
                 # start with "-", which argparse would otherwise read as a new
                 # flag and reject with "a value is required for '--print'".
                 "pim --session-dir /logs/agent/pim/sessions --thinking max "
+                "--tools bash "
                 f"--print={shlex.quote(instruction)} "
                 f"2>&1 </dev/null | stdbuf -oL tee /logs/agent/{self._OUTPUT_FILENAME}"
             ),

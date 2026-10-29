@@ -22,13 +22,22 @@ pub fn SessionHost::new(
   llm : &@agent_loop.LLM,
   cwd : String,
   session_dir : String?,
+  active_tools~ : ArrayView[String] = [
+    @coding_agent.BASH_TOOL_NAME,
+    @coding_agent.CODEMODE_TOOL_NAME,
+  ],
 ) -> SessionHost raise @coding_agent.FsError {
   let (journal, close_journal, session_path) = open_journal(session_dir)
   SessionHost::{
     llm,
     cwd,
     session_dir,
-    session: @coding_agent.new_coding_session(llm, cwd~, journal~),
+    session: @coding_agent.new_coding_session(
+      llm,
+      cwd~,
+      journal~,
+      active_tools~,
+    ),
     close_journal,
     session_path,
   }

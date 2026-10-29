@@ -6,6 +6,7 @@ default:
 
 check:
     moon check --deny-warn
+    moon check --deny-warn --target js
 
 fmt:
     moon fmt
@@ -16,6 +17,7 @@ build:
 
 test:
     moon test
+    moon test --target js
     just cram
 
 # Build dist/pim.js, the npm dist of the root package (see scripts/pack-npm.sh).
@@ -27,7 +29,7 @@ screenshot:
     python3 scripts/screenshot/capture.py
 
 cram:
-    moon build
+    moon build --target js
     moon cram test --work-directory . tests/cram
 
 eval:

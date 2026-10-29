@@ -76,7 +76,7 @@ jobs:
         # no longer needs a container build against an old glibc.
         run: |
           moon update
-          moon check --deny-warn
+          moon check --target js --deny-warn
           moon build --target js --release
           bun build --compile --target=bun-linux-x64 \
             --outfile "$RUNNER_TEMP/pim" \

@@ -15,7 +15,7 @@ moon cram test tests/live
 full stdout content.
 
 ```mooncram
-$ moon run cmd/pim -- -p "What's the capital of France? Respond with only the city name."
+$ moon run --target js cmd/pim -- -p "What's the capital of France? Respond with only the city name."
 Paris
 ```
 
@@ -24,7 +24,7 @@ Paris
 `--mode json` streams one event per line, so we can verify the agent really _acts_: the task forces the `bash` tool, and the `tool_execution_start` / `tool_execution_end` records join the stream.
 
 ```mooncram
-$ moon run cmd/pim -- --mode json -p "Use the bash tool to run exactly: echo pim-cram. Then respond with only the command output." 2>/dev/null \
+$ moon run --target js cmd/pim -- --mode json -p "Use the bash tool to run exactly: echo pim-cram. Then respond with only the command output." 2>/dev/null \
 >   | moon run --target native -e 'import {
 >   "moonbitlang/jsonl@0.2.1",
 >   "moonbitlang/async",

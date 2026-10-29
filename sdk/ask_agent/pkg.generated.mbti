@@ -1,0 +1,43 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/ask_agent"
+
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/agent_session",
+  "KKKIIO/pi/sdk/codemode",
+  "KKKIIO/pi/sdk/tools",
+  "moonbitlang/async/websocket",
+}
+
+// Values
+pub const CODEMODE_TOOL_NAME : String = "codemode"
+
+pub fn new_ask_agent_session(&@agent_loop.LLM, WsStreams, system_prompt_contributes? : Array[(ArrayView[String]) -> String], journal? : &@agent_session.SessionJournal, tools? : ArrayView[@tools.ToolDefinition], active_tools~ : ArrayView[String], finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?) -> @agent_session.AgentSession
+
+pub fn new_codemode_tool_definition(WsStreams, tools~ : ArrayView[@tools.ToolDefinition], journal? : &@agent_session.SessionJournal?, timeout_ms? : Int32, write_temp_file? : ((String, Bytes) -> Result[String, String])?) -> @tools.ToolDefinition
+
+pub async fn[X] with_ws_streams(url~ : String, async (WsStreams) -> X) -> X
+
+// Errors
+
+// Types and methods
+pub struct WsStream {
+  // private fields
+}
+pub fn WsStream::close(Self) -> Unit
+pub async fn WsStream::recv(Self) -> Json
+pub async fn WsStream::send(Self, Json) -> Unit
+pub impl @codemode.VmChannel for WsStream
+
+pub struct WsStreams {
+  // private fields
+}
+pub fn WsStreams::WsStreams(@websocket.Conn) -> Self
+pub fn WsStreams::close(Self) -> Unit
+pub async fn WsStreams::connect(url~ : String) -> Self
+pub fn WsStreams::new_stream(Self) -> WsStream
+pub async fn WsStreams::run(Self) -> Unit
+
+// Type aliases
+
+// Traits

@@ -1,0 +1,15 @@
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/agent_session",
+  "KKKIIO/pi/sdk/codemode",
+  "KKKIIO/pi/sdk/tools",
+  "moonbitlang/async",
+  "moonbitlang/core/encoding/base64",
+  "moonbitlang/core/encoding/utf8",
+  "moonbitlang/core/json",
+}
+
+import {
+  "KKKIIO/pi/sdk/providers/faux",
+  "moonbitlang/async/aqueue",
+} for "test"

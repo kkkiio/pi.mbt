@@ -4,6 +4,7 @@ package "KKKIIO/pi/sdk/coding_agent"
 import {
   "KKKIIO/pi/sdk/agent_loop",
   "KKKIIO/pi/sdk/agent_session",
+  "KKKIIO/pi/sdk/codemode",
   "KKKIIO/pi/sdk/tools",
   "moonbitlang/async/io",
   "moonbitlang/core/debug",
@@ -14,6 +15,10 @@ import {
 
 // Values
 pub const BASH_TOOL_NAME : String = "bash"
+
+pub const CODEMODE_TOOL_NAME : String = "codemode"
+
+pub fn codemode_sidecar_path() -> String
 
 pub fn coding_assistant_system_prompt_contributor() -> (ArrayView[String]) -> String
 
@@ -48,6 +53,8 @@ pub fn list_sessions(String) -> Array[String] raise FsError
 pub fn load_agents_files(String) -> Array[ProjectContextFile]
 
 pub fn new_bash_tool_definition(cwd? : String, exec? : async (BashExecParams) -> Int32) -> @tools.ToolDefinition
+
+pub fn new_codemode_tool_definition(tools~ : ArrayView[@tools.ToolDefinition], journal? : &@agent_session.SessionJournal?, sidecar_path? : String, timeout_ms? : Int32, vm_launcher? : (async () -> &@codemode.VmServer)?) -> @tools.ToolDefinition
 
 pub fn new_coding_session(&@agent_loop.LLM, cwd~ : String, journal? : &@agent_session.SessionJournal, active_tools? : ArrayView[String]) -> @agent_session.AgentSession
 
@@ -135,6 +142,9 @@ pub impl ToJson for BashToolDetails
 type BashToolInput derive(@json.FromJson)
 pub fn BashToolInput::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 
+type CodemodeToolInput derive(@json.FromJson)
+pub fn CodemodeToolInput::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+
 pub struct FsFile {
   fd : Int32
 }
@@ -175,6 +185,22 @@ pub async fn LazyFile::write(Self, &@io.Data) -> Unit
 pub async fn LazyFile::write_once(Self, Bytes, offset~ : Int32, len~ : Int32) -> Int32
 pub async fn LazyFile::write_reader(Self, &@io.Reader) -> Unit
 pub impl @io.Writer for LazyFile
+
+pub struct NdJsonStream {
+  // private fields
+}
+pub fn NdJsonStream::close(Self) -> Unit
+pub async fn NdJsonStream::recv(Self) -> Json
+pub async fn NdJsonStream::send(Self, Json) -> Unit
+pub impl @codemode.VmServer for NdJsonStream
+
+pub struct NdJsonStreams[R, W] {
+  // private fields
+}
+pub fn[R, W] NdJsonStreams::close(Self[R, W]) -> Unit
+pub fn[R, W] NdJsonStreams::new(R, W) -> Self[R, W]
+pub fn[R, W] NdJsonStreams::new_stream(Self[R, W]) -> NdJsonStream
+pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(Self[R, W]) -> Unit
 
 pub struct OutputAccumulator {
   max_lines : Int32
@@ -242,6 +268,22 @@ pub(all) enum SessionStart {
   Latest
   Named(String)
 }
+
+type SidecarProcess
+pub fn SidecarProcess::kill(Self) -> Unit
+pub fn SidecarProcess::spawn(String) -> Self
+
+type SidecarStdin
+pub impl @io.Writer for SidecarStdin
+
+type SidecarStdout
+pub async fn SidecarStdout::drop(Self, Int32) -> Int32
+pub async fn SidecarStdout::read(Self, FixedArray[Byte], offset? : Int32, max_len? : Int32) -> Int32
+pub async fn SidecarStdout::read_all(Self) -> &@io.Data
+pub async fn SidecarStdout::read_exactly(Self, Int32) -> Bytes
+pub async fn SidecarStdout::read_some(Self, max_len? : Int32) -> Bytes?
+pub async fn SidecarStdout::read_until(Self, StringView) -> String?
+pub impl @io.Reader for SidecarStdout
 
 pub struct Skill {
   name : String

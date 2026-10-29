@@ -19,6 +19,9 @@ mkdir -p "$dist"
 } > "$dist/pim.js"
 chmod +x "$dist/pim.js"
 
+# The codemode sidecar resolves as `codemode-sidecar.mjs` next to pim.js.
+cp "scripts/codemode-sidecar.mjs" "$dist/codemode-sidecar.mjs"
+
 # Smoke the packaged entry exactly as npm will run it.
 "$dist/pim.js" --help > /dev/null
 echo "packed $dist/pim.js ($(wc -c < "$dist/pim.js") bytes)"
