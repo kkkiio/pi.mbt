@@ -8,6 +8,7 @@ pub fn new_ask_agent_session(
   journal~ : &@agent_session.SessionJournal = @agent_session.InMemorySessionJournal(),
   tools~ : ArrayView[@tools.ToolDefinition] = [],
   active_tools~ : ArrayView[String],
+  retry_settings~ : @agent_session.RetrySettings = @agent_session.RetrySettings::default(),
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
 ) -> @agent_session.AgentSession {
   let tool_registry = @tools.ToolRegistry()
@@ -27,9 +28,6 @@ pub fn new_ask_agent_session(
     tool_registry~,
     active_tools~,
     finish_turn_hook~,
-    retry_settings={
-      ..@agent_session.RetrySettings::default(),
-      enabled: false,
-    },
+    retry_settings~,
   )
 }
