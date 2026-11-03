@@ -50,7 +50,7 @@ pub fn new_codemode_tool_definition(
 ///|
 const DESCRIPTION_INTRO : String =
   #|Run JavaScript that calls other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level `await` and `return` work. No Node, file system, network, or timers.
-  #|- `await tools.<name>({ ...args })` resolves to a string and rejects with an Error on failure. Calls still running when the script ends are cancelled.
+  #|- `await tools.<name>({ ...args })` resolves to a string for text results, or `{ content: [...] }` for results containing images, and rejects with an Error on failure. Forward image blocks with `image(result.content[i])`; only script output reaches the model. Calls still running when the script ends are cancelled.
   #|- Optional first line: `// @options: {"max_output_tokens": 10000, "timeout_ms": 60000}`
 
 ///|
@@ -83,7 +83,30 @@ fn to_codemode_declaration(
       "\{tool.description.trim()}\n\n\{bullets.join("\n")}"
     },
     input_schema: Some(tool.parameters),
-    output_schema: Some({ "type": "string" }),
+    output_schema: Some({
+      "anyOf": [
+        { "type": "string" },
+        {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "type": { "enum": ["text", "image"] },
+                  "text": { "type": "string" },
+                  "data": { "type": "string" },
+                  "mimeType": { "type": "string" },
+                },
+                "required": ["type"],
+              },
+            },
+          },
+          "required": ["content"],
+        },
+      ],
+    }),
     spread: false,
     signature: None,
     execute: fn(_args : Json?) -> Json { Json::null() },
@@ -410,7 +433,9 @@ fn nested_codemode_tools(
         }
         record.status = "ok"
         publish()
-        if text == "" {
+        if result.content.iter().any(content => content is Image(..)) {
+          { "content": Json(result.content) }
+        } else if text == "" {
           result.details
         } else {
           Json::string(text)
@@ -426,14 +451,16 @@ fn tool_result_text(result : @agent_loop.ToolResult) -> String {
   let text = StringBuilder()
   let mut first = true
   for content in result.content {
-    if content is @agent_loop.InputMessageContent::Text(part) {
-      if first {
-        first = false
-      } else {
-        text.write_string("\n")
-      }
-      text.write_string(part)
+    let part = match content {
+      @agent_loop.InputMessageContent::Text(part) => part
+      @agent_loop.InputMessageContent::Image(..) => "[image omitted]"
     }
+    if first {
+      first = false
+    } else {
+      text.write_string("\n")
+    }
+    text.write_string(part)
   }
   text.to_string()
 }

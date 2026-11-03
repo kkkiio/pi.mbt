@@ -148,3 +148,70 @@ async test "codemode image output is saved to a temp file with a label" {
     None => ()
   }
 }
+
+///|
+async test "nested tool images reach model content through the real pi sandbox" {
+  let view : @tools.ToolDefinition = {
+    name: "view_page",
+    label: "view_page",
+    prompt_guidelines: [],
+    description: "Return a page image",
+    parameters: { "type": "object", "properties": {} },
+    constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
+      strict=true,
+    ),
+    execute: (_, _, _) => {
+      content: [
+        @agent_loop.InputMessageContent::Text("Original page 31"),
+        @agent_loop.InputMessageContent::Image(
+          data="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+          mime_type="image/png",
+        ),
+      ],
+      details: {},
+      is_error: false,
+      usage: None,
+    },
+  }
+  let tool = @coding_agent.new_codemode_tool_definition(tools=[view])
+  defer @coding_agent.close_codemode_sidecar()
+  let result = run_codemode(
+    tool,
+    (
+      #|const result = await tools.view_page({});
+      #|for (const block of result.content) {
+      #|  if (block.type === "image") image(block);
+      #|  else if (block.type === "text") text(block.text);
+      #|}
+    ),
+  )
+  assert_false(result.is_error, msg=Json(result.content).stringify())
+  assert_true(
+    result.content
+    .iter()
+    .any(item => {
+      item
+      is Image(
+        data="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+        mime_type="image/png"
+      )
+    }),
+  )
+  assert_true(
+    result.content
+    .iter()
+    .any(item => item is Text(text) && text.contains("Original page 31")),
+  )
+  for item in result.content {
+    if item is Text(text) && text.before("[Image saved to ") is Some(_) {
+      guard text.after("[Image saved to ") is Some(rest) &&
+        rest.before(" (image/png,") is Some(path) else {
+        fail("expected saved image path")
+      }
+      @coding_agent.remove_file(path.to_owned())
+      if path.rev_before("/") is Some(directory) {
+        @coding_agent.remove_dir(directory.to_owned())
+      }
+    }
+  }
+}

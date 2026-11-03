@@ -726,7 +726,7 @@ async test "codemode description embeds declarations for its nested tools" {
   assert_true(tool.description.contains("### `bash`"))
   assert_true(tool.description.contains("### `web_search` (`web-search`)"))
   assert_true(tool.description.contains("declare const tools"))
-  assert_true(tool.description.contains("Promise<string>"))
+  assert_true(tool.description.contains("Promise<string |"))
   let result = run_codemode(tool, "work()")
   assert_false(result.is_error)
   guard vm.sent[0] is { "data": { "tools": Array(nested_tools), .. }, .. } else {
@@ -878,4 +878,118 @@ async test "images stay inline without a temp file writer" {
   guard result.content is [_, @agent_loop.InputMessageContent::Image(..)] else {
     fail("expected the image inline without a label")
   }
+}
+
+///|
+async test "nested image results preserve content blocks in the VM result" {
+  let cases : Array[Array[@agent_loop.InputMessageContent]] = [
+    [@agent_loop.InputMessageContent::Image(data="AQID", mime_type="image/png")],
+    [
+      @agent_loop.InputMessageContent::Text("Original page 31"),
+      @agent_loop.InputMessageContent::Image(data="AQID", mime_type="image/png"),
+      @agent_loop.InputMessageContent::Text("Crop"),
+      @agent_loop.InputMessageContent::Image(
+        data="BAUG",
+        mime_type="image/jpeg",
+      ),
+    ],
+  ]
+  for content in cases {
+    let view = stub_tool("view_page", (_, _, _) => {
+      content,
+      details: { "other": true },
+      is_error: false,
+      usage: None,
+    })
+    let vm = ScriptedVm::{
+      sent: [],
+      inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
+      results_left: 1,
+      closed: false,
+    }
+    vm.inbox.put(call_frame(1, "view_page", "{}"))
+    let result = run_codemode(codemode_tool_with(vm, [view]), "work()")
+    assert_false(result.is_error)
+    let mut found = false
+    for frame in vm.sent {
+      if frame is { "type": "result", "ok": True, "payload": String(value), .. } {
+        assert_eq(@json.parse(value), { "content": Json(content) })
+        found = true
+      }
+    }
+    assert_true(found)
+    assert_true(result.content.iter().all(item => item is Text(_)))
+  }
+}
+
+///|
+async test "nested text results keep strings and empty results keep details" {
+  let cases : Array[(@agent_loop.ToolResult, Json)] = [
+    (
+      {
+        content: [
+          @agent_loop.InputMessageContent::Text("one"),
+          @agent_loop.InputMessageContent::Text("two"),
+        ],
+        details: {},
+        is_error: false,
+        usage: None,
+      },
+      Json::string("one\ntwo"),
+    ),
+    (
+      { content: [], details: { "value": 42 }, is_error: false, usage: None, },
+      { "value": 42 },
+    ),
+  ]
+  for (tool_result, expected) in cases {
+    let tool = stub_tool("echo", (_, _, _) => tool_result)
+    let vm = ScriptedVm::{
+      sent: [],
+      inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
+      results_left: 1,
+      closed: false,
+    }
+    vm.inbox.put(call_frame(1, "echo", "{}"))
+    assert_false(
+      run_codemode(codemode_tool_with(vm, [tool]), "work()").is_error,
+    )
+    let mut found = false
+    for frame in vm.sent {
+      if frame is { "type": "result", "ok": True, "payload": String(value), .. } {
+        assert_eq(@json.parse(value), expected)
+        found = true
+      }
+    }
+    assert_true(found)
+  }
+}
+
+///|
+async test "nested image errors reject with an omission notice" {
+  let tool = stub_tool("view", (_, _, _) => {
+    content: [
+      @agent_loop.InputMessageContent::Text("failed"),
+      @agent_loop.InputMessageContent::Image(data="AQID", mime_type="image/png"),
+    ],
+    details: {},
+    is_error: true,
+    usage: None,
+  })
+  let vm = ScriptedVm::{
+    sent: [],
+    inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
+    results_left: 1,
+    closed: false,
+  }
+  vm.inbox.put(call_frame(1, "view", "{}"))
+  ignore(run_codemode(codemode_tool_with(vm, [tool]), "work()"))
+  assert_true(
+    vm.sent
+    .iter()
+    .any(frame => {
+      frame is { "type": "result", "ok": False, "payload": String(message), .. } &&
+      message.contains("failed\n[image omitted]")
+    }),
+  )
 }
