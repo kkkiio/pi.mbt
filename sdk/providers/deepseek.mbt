@@ -57,42 +57,19 @@ pub impl LLMProvider for DeepSeekProvider with fn new_llm(
   model_id,
   thinking~ : String = "high",
 ) {
-  let model = DeepSeekModel::of(model_id)
   DeepSeekResponsesAPILLM(
     self.api_key,
     model_id~,
     thinking~,
-    supports_images=model.supports_images(),
+    supports_images=match model_id {
+      "deepseek-v4-flash" | "deepseek-flash" => true
+      _ => false
+    },
   )
 }
 
 ///|
 pub extend DeepSeekProvider with LLMProvider::{new_llm}
-
-///|
-/// DeepSeek 模型能力表,按 API model id 查;未识别的 model id 回退 `Unknown`
-/// (按无视觉输入处理 —— image 块在编码前降级为占位文本)。
-priv enum DeepSeekModel {
-  /// deepseek-v4.1-flash(API id `deepseek-v4-flash`):支持图片输入。
-  V4Flash
-  Unknown
-}
-
-///|
-fn DeepSeekModel::of(model_id : String) -> DeepSeekModel {
-  match model_id {
-    "deepseek-v4-flash" => V4Flash
-    _ => Unknown
-  }
-}
-
-///|
-fn DeepSeekModel::supports_images(self : DeepSeekModel) -> Bool {
-  match self {
-    V4Flash => true
-    Unknown => false
-  }
-}
 
 ///|
 struct DeepSeekResponsesAPILLM {
