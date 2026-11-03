@@ -49,3 +49,27 @@ Every acquired VM is closed on exit. `VmChannel.close` synchronously releases
 the stream and queues a close frame for the remote. A nested tool uses native
 cancellation and `defer` for cleanup; necessary asynchronous cleanup may use
 `async.protect_from_cancel`.
+
+## Nested tool images
+
+The agent's `codemode` tool keeps text-only results as strings. A successful
+nested result containing images resolves to `{ content: [...] }`, preserving
+all text and image blocks in order. This uses pi's MCP content-block shape;
+`image(block)` accepts an image block directly. Only explicitly emitted output
+reaches the model:
+
+```js
+const result = await tools.view_page({ page: 31, bbox: null });
+if (typeof result === "string") {
+  text(result);
+} else {
+  for (const block of result.content) {
+    if (block.type === "image") image(block);
+    else if (block.type === "text") text(block.text);
+  }
+}
+```
+
+Failed nested calls still reject with an Error. Images in those error results
+are represented by `[image omitted]` in the error message. Empty results retain
+the existing fallback to the tool's `details`.
