@@ -214,41 +214,42 @@ async test "image blocks encode as input_image for vision models" {
     ],
     tools: [],
   }
-  // `DeepSeekModel::of` maps the v4.1 flash API id to a vision-capable model.
-  let llm = @providers.DeepSeekProvider(api_key="offline").new_llm(
-    "deepseek-v4-flash",
-  )
-  let message = llm.generate(context, sink=_ => ())
-  assert_true(message.stop_reason is @agent_loop.StopReason::Stop)
-  assert_eq(fixture.calls(), 1)
-  guard @json.parse(fixture.request_body()) is { "input": input, .. } else {
-    abort("request carried no input")
+  for index, model_id in ["deepseek-v4-flash", "deepseek-flash"] {
+    let llm = @providers.DeepSeekProvider(api_key="offline").new_llm(model_id)
+    let message = llm.generate(context, sink=_ => ())
+    assert_true(message.stop_reason is @agent_loop.StopReason::Stop)
+    assert_eq(fixture.calls(), index + 1)
+    guard @json.parse(fixture.request_body())
+      is { "model": String(sent_model), "input": input, .. } else {
+      abort("request carried no input")
+    }
+    assert_eq(sent_model, model_id)
+    json_inspect(input, content=[
+      {
+        "role": "user",
+        "content": [
+          { "type": "input_text", "text": "look" },
+          {
+            "type": "input_image",
+            "detail": "auto",
+            "image_url": "data:image/png;base64,aGVsbG8=",
+          },
+        ],
+      },
+      {
+        "type": "function_call_output",
+        "call_id": "call-1",
+        "output": [
+          { "type": "input_text", "text": "ok" },
+          {
+            "type": "input_image",
+            "detail": "auto",
+            "image_url": "data:image/png;base64,aGVsbG8=",
+          },
+        ],
+      },
+    ])
   }
-  json_inspect(input, content=[
-    {
-      "role": "user",
-      "content": [
-        { "type": "input_text", "text": "look" },
-        {
-          "type": "input_image",
-          "detail": "auto",
-          "image_url": "data:image/png;base64,aGVsbG8=",
-        },
-      ],
-    },
-    {
-      "type": "function_call_output",
-      "call_id": "call-1",
-      "output": [
-        { "type": "input_text", "text": "ok" },
-        {
-          "type": "input_image",
-          "detail": "auto",
-          "image_url": "data:image/png;base64,aGVsbG8=",
-        },
-      ],
-    },
-  ])
 }
 
 ///|
