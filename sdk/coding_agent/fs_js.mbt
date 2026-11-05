@@ -18,9 +18,10 @@
 /// writes), so there is nothing to gain from `node:fs/promises` plumbing.
 
 ///|
+#derive(Debug)
 pub(all) suberror FsError {
   FsError(String)
-} derive(Debug)
+}
 
 ///|
 pub extend FsError with @debug.Debug::{to_repr}

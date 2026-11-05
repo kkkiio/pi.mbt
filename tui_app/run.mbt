@@ -35,7 +35,11 @@ pub async fn run(
   // 对齐 pi 的 shutdown:drainInput → stop → dispose。defer FILO 反转后:
   // drain_input → app.stop(恢复终端)→ host.close(关 journal)。
   // drain 的错误不覆盖原有错误(它只是清理,失败不改变退出原因)。
-  defer (app.terminal.drain_input() catch { _ => () })
+  defer @async.protect_from_cancel(() => {
+    app.terminal.drain_input() catch {
+      _ => ()
+    }
+  })
   app.start()
   @async.with_task_group() <| group => {
     match resume_path {

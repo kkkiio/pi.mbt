@@ -10,13 +10,13 @@ import {
 }
 
 // Values
-pub fn agent_event_to_pi_json(@agent_loop.AgentEvent) -> Json raise
+pub fn agent_event_to_pi_json(@agent_loop.AgentEvent) -> @json.Json raise
 
 pub fn format_journal_timestamp(UInt64) -> String
 
 pub fn is_retryable_error_message(String) -> Bool
 
-pub fn to_pi_json(AgentSessionEvent) -> Json raise
+pub fn to_pi_json(AgentSessionEvent) -> @json.Json raise
 
 // Errors
 
@@ -97,17 +97,17 @@ pub(all) struct SessionEntry {
   content : SessionEntryContent
 }
 pub fn SessionEntry::auxiliary_usage(Self) -> @agent_loop.Usage?
-pub fn SessionEntry::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
-pub fn SessionEntry::to_json(Self) -> Json
-pub impl ToJson for SessionEntry
+pub fn SessionEntry::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SessionEntry::to_json(Self) -> @json.Json
 pub impl @json.FromJson for SessionEntry
+pub impl @json.ToJson for SessionEntry
 
 pub(all) enum SessionEntryContent {
   Message(@agent_loop.AgentMessage)
   ModelChange(provider~ : String, model_id~ : String)
-  Compaction(summary~ : String, first_kept_entry_id~ : String, tokens_before~ : Int32, details~ : Json?, usage~ : @agent_loop.Usage?)
-  Custom(custom_type~ : String, data~ : Json?)
-  Metadata(Json)
+  Compaction(summary~ : String, first_kept_entry_id~ : String, tokens_before~ : Int32, details~ : @json.Json?, usage~ : @agent_loop.Usage?)
+  Custom(custom_type~ : String, data~ : @json.Json?)
+  Metadata(@json.Json)
   ContextEdit(target_id~ : String)
 }
 

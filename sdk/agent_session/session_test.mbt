@@ -1342,4 +1342,5 @@ async test "a reloaded session projects the same context as the live one" {
 }
 
 ///|
-suberror SessionExtensionFailure derive(Debug)
+#derive(Debug)
+suberror SessionExtensionFailure

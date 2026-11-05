@@ -203,9 +203,10 @@ async fn append_codemode_store(
 }
 
 ///|
+#derive(FromJson)
 struct CodemodeToolInput {
   code : String
-} derive(FromJson)
+}
 
 ///|
 pub extend CodemodeToolInput with @json.FromJson::{from_json}

@@ -50,10 +50,11 @@ pub(all) struct BashExecParams {
 }
 
 ///|
+#derive(FromJson)
 struct BashToolInput {
   command : String
   timeout : Int32?
-} derive(FromJson)
+}
 
 ///|
 pub extend BashToolInput with @json.FromJson::{from_json}

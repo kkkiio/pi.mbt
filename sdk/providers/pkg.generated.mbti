@@ -25,34 +25,38 @@ pub fn DeepSeekResponsesAPILLM::DeepSeekResponsesAPILLM(String, model_id? : Stri
 pub async fn DeepSeekResponsesAPILLM::generate(Self, @agent_loop.Context, sink~ : async (@agent_loop.GenerationEvent) -> Unit) -> @agent_loop.AssistantMessage
 pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM
 
+#derive(@json.FromJson)
 pub struct ResponseOutputContent {
   text : String?
   refusal : String?
-} derive(@json.FromJson)
-pub fn ResponseOutputContent::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+}
+pub fn ResponseOutputContent::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 
+#derive(@json.FromJson)
 pub struct ResponseOutputMessage {
   id : String
   content : Array[ResponseOutputContent]
   role : String
   status : String
   phase : String?
-} derive(@json.FromJson)
-pub fn ResponseOutputMessage::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+}
+pub fn ResponseOutputMessage::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 
+#derive(@json.FromJson)
 pub struct ResponseReasoningItem {
   id : String
   summary : Array[ResponseTextPart]
   content : Array[ResponseTextPart]?
   encrypted_content : String?
   status : String?
-} derive(@json.FromJson)
-pub fn ResponseReasoningItem::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+}
+pub fn ResponseReasoningItem::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 
+#derive(@json.FromJson)
 pub struct ResponseTextPart {
   text : String
-} derive(@json.FromJson)
-pub fn ResponseTextPart::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+}
+pub fn ResponseTextPart::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 
 // Type aliases
 

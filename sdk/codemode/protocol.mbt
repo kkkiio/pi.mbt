@@ -42,10 +42,11 @@ pub(all) enum WriteItem {
 
 ///|
 /// The result the VM was processing when the script finished, 0 for its first run, and the calls issued by then.
+#derive(ToJson, FromJson)
 pub(all) struct CodemodeDuring {
   seq : Int32
   issued : Int32
-} derive(ToJson, FromJson)
+}
 
 ///|
 pub extend CodemodeDuring with @json.ToJson::{to_json}
@@ -125,10 +126,11 @@ pub(all) struct Tool {
 }
 
 ///|
+#derive(ToJson, FromJson)
 pub(all) struct Global {
   name : String
   spread : Bool
-} derive(ToJson, FromJson)
+}
 
 ///|
 pub extend Global with @json.ToJson::{to_json}

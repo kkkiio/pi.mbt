@@ -322,12 +322,13 @@ async fn main {
 
 ///|
 /// `pim` 的输出模式,对齐 pi 的 `--mode`。
+#derive(Eq)
 enum OutputMode {
   /// 只把 agent 的最终回复文本写到 stdout。
   Text
   /// 把每个会话事件投影成一行 JSON(JSONL)写到 stdout。
   Json
-} derive(Eq)
+}
 
 ///|
 /// 把 argparse 错误按 pi 风格输出到 stderr 并退出：

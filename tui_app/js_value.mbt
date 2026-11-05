@@ -40,7 +40,7 @@ pub fn[T] Value::set_with_string(self : Value, key : String, value : T) -> Unit 
 ///|
 /// `self(...args)`
 pub fn[Arg, Result] Value::apply(self : Value, args : Array[Arg]) -> Result {
-  self.apply_self_ffi(Value::cast_from(args)).cast()
+  self.apply_self_ffi(Value::cast_from(FixedArray::from_array(args))).cast()
 }
 
 ///|
@@ -50,13 +50,18 @@ pub fn[Arg, Result] Value::apply_with_string(
   key : String,
   args : Array[Arg],
 ) -> Result {
-  self.apply_ffi(Value::cast_from(key), Value::cast_from(args)).cast()
+  self
+  .apply_ffi(
+    Value::cast_from(key),
+    Value::cast_from(FixedArray::from_array(args)),
+  )
+  .cast()
 }
 
 ///|
 /// `new self(...args)`
 pub fn[Arg, Result] Value::new(self : Value, args : Array[Arg]) -> Result {
-  self.new_self_ffi(Value::cast_from(args)).cast()
+  self.new_self_ffi(Value::cast_from(FixedArray::from_array(args))).cast()
 }
 
 ///|
@@ -66,7 +71,12 @@ pub fn[Arg, Result] Value::new_with_string(
   key : String,
   args : Array[Arg],
 ) -> Result {
-  self.new_ffi(Value::cast_from(key), Value::cast_from(args)).cast()
+  self
+  .new_ffi(
+    Value::cast_from(key),
+    Value::cast_from(FixedArray::from_array(args)),
+  )
+  .cast()
 }
 
 ///|

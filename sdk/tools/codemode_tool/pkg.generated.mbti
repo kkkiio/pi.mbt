@@ -16,8 +16,9 @@ pub fn new_codemode_tool_definition(async () -> &@codemode.VmChannel, tools~ : A
 // Errors
 
 // Types and methods
-type CodemodeToolInput derive(@json.FromJson)
-pub fn CodemodeToolInput::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+#derive(@json.FromJson)
+type CodemodeToolInput
+pub fn CodemodeToolInput::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 
 // Type aliases
 pub type TempFileWriter = (String, Bytes) -> Result[String, String]
