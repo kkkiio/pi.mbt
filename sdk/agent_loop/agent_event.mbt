@@ -123,6 +123,7 @@ pub impl ToJson for InputMessageContent with fn to_json(
 pub extend InputMessageContent with ToJson::{to_json}
 
 ///|
+#derive(Debug)
 pub(all) struct AssistantMessage {
   content : Array[AssistantMessageContent]
   api : String
@@ -134,7 +135,7 @@ pub(all) struct AssistantMessage {
   usage : Usage?
   /// Unix timestamp in milliseconds, set when the message is created.
   timestamp : UInt64
-} derive(Debug)
+}
 
 ///|
 pub extend AssistantMessage with Debug::{to_repr}
@@ -189,11 +190,12 @@ pub impl ToJson for AssistantMessage with fn to_json(self : AssistantMessage) ->
 pub extend AssistantMessage with ToJson::{to_json}
 
 ///|
+#derive(Debug)
 pub(all) enum AssistantMessageContent {
   Text(String, signature~ : Json)
   Thinking(String, signature~ : Json)
   ToolCall(ToolCall, signature~ : Json)
-} derive(Debug)
+}
 
 ///|
 pub extend AssistantMessageContent with Debug::{to_repr}
@@ -241,11 +243,12 @@ pub impl ToJson for AssistantMessageContent with fn to_json(
 pub extend AssistantMessageContent with ToJson::{to_json}
 
 ///|
+#derive(Debug)
 pub(all) struct ToolCall {
   id : String
   name : String
   arguments : Json
-} derive(Debug)
+}
 
 ///|
 pub extend ToolCall with Debug::{to_repr}

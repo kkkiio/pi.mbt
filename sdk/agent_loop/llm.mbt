@@ -51,6 +51,7 @@ pub(all) enum GrammarFormat {
 /// known, `stop_reason` is `Pending`, and `content` grows as deltas arrive.
 /// Providers must emit `Start` before any other event; consumers drop
 /// mid-stream events that arrive earlier (pi's `if (partialMessage)` guard).
+#derive(Debug)
 pub(all) enum GenerationEvent {
   Start(partial~ : AssistantMessage)
   TextStart(content_index~ : Int32, partial~ : AssistantMessage)
@@ -86,12 +87,13 @@ pub(all) enum GenerationEvent {
     tool_call~ : ToolCall,
     partial~ : AssistantMessage
   )
-} derive(Debug)
+}
 
 ///|
 pub extend GenerationEvent with Debug::{to_repr}
 
 ///|
+#derive(Debug)
 pub(all) enum StopReason {
   /// Streaming is still in progress; replaced by a terminal reason when the
   /// turn ends. Must never appear in persisted journal entries.
@@ -103,12 +105,13 @@ pub(all) enum StopReason {
   /// The model was aborted by the user or system.
   Aborted
   Error
-} derive(Debug)
+}
 
 ///|
 pub extend StopReason with Debug::{to_repr}
 
 ///|
+#derive(Debug)
 pub(all) struct Usage {
   input : Int32
   output : Int32
@@ -121,7 +124,7 @@ pub(all) struct Usage {
   reasoning : Int32?
   total_tokens : Int32
   cost : UsageCost
-} derive(Debug)
+}
 
 ///|
 pub extend Usage with Debug::{to_repr}
@@ -149,13 +152,14 @@ pub impl ToJson for Usage with fn to_json(self : Usage) -> Json {
 pub extend Usage with ToJson::{to_json}
 
 ///|
+#derive(Debug)
 pub(all) struct UsageCost {
   input : Float
   output : Float
   cache_read : Float
   cache_write : Float
   total : Float
-} derive(Debug)
+}
 
 ///|
 pub extend UsageCost with Debug::{to_repr}

@@ -3,10 +3,11 @@ package "KKKIIO/pi/sdk/tools"
 
 import {
   "KKKIIO/pi/sdk/agent_loop",
+  "moonbitlang/core/json",
 }
 
 // Values
-pub async fn run_tool(Map[String, ToolDefinition], @agent_loop.ToolCall, (Array[@agent_loop.InputMessageContent], Json) -> Unit) -> @agent_loop.ToolResult
+pub async fn run_tool(Map[String, ToolDefinition], @agent_loop.ToolCall, (Array[@agent_loop.InputMessageContent], @json.Json) -> Unit) -> @agent_loop.ToolResult
 
 // Errors
 
@@ -16,9 +17,9 @@ pub(all) struct ToolDefinition {
   label : String
   prompt_guidelines : Array[String]
   description : String
-  parameters : Json
+  parameters : @json.Json
   constrained_sampling : @agent_loop.ConstrainedSampling
-  execute : async (String, Json, (Array[@agent_loop.InputMessageContent], Json) -> Unit) -> @agent_loop.ToolResult
+  execute : async (String, @json.Json, (Array[@agent_loop.InputMessageContent], @json.Json) -> Unit) -> @agent_loop.ToolResult
 }
 
 type ToolRegistry

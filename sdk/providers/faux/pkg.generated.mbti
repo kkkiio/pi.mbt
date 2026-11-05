@@ -3,6 +3,7 @@ package "KKKIIO/pi/sdk/providers/faux"
 
 import {
   "KKKIIO/pi/sdk/agent_loop",
+  "moonbitlang/core/json",
 }
 
 // Values
@@ -12,7 +13,7 @@ pub fn faux_text(String) -> @agent_loop.AssistantMessageContent
 
 pub fn faux_thinking(String) -> @agent_loop.AssistantMessageContent
 
-pub fn faux_tool_call(String, Json, id? : String) -> @agent_loop.AssistantMessageContent
+pub fn faux_tool_call(String, @json.Json, id? : String) -> @agent_loop.AssistantMessageContent
 
 // Errors
 

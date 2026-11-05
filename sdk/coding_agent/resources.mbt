@@ -1,13 +1,15 @@
 ///|
+#derive(Debug)
 pub struct ProjectContextFile {
   path : String
   content : String
-} derive(Debug)
+}
 
 ///|
 pub extend ProjectContextFile with @debug.Debug::{to_repr}
 
 ///|
+#derive(Debug)
 pub struct Skill {
   name : String
   description : String
@@ -16,7 +18,7 @@ pub struct Skill {
   /// skill out of the system prompt so only an explicit `/skill:<name>`
   /// command can load it.
   disable_model_invocation : Bool
-} derive(Debug)
+}
 
 ///|
 pub extend Skill with @debug.Debug::{to_repr}
@@ -151,11 +153,12 @@ fn skill_fallback_name(path : String) -> String {
 
 ///|
 /// The `SKILL.md` frontmatter fields pim understands. Unknown keys are ignored.
+#derive(Debug)
 pub struct SkillFrontmatter {
   name : String
   description : String
   disable_model_invocation : Bool
-} derive(Debug)
+}
 
 ///|
 pub extend SkillFrontmatter with @debug.Debug::{to_repr}
@@ -240,6 +243,7 @@ pub fn expand_skill_command(text : String, cwd~ : String) -> String {
 ///|
 /// A `/skill:` block as `expand_skill_command` writes it: what the model saw,
 /// and therefore what a journal replay shows.
+#derive(Debug)
 pub struct SkillInvocation {
   name : String
   location : String
@@ -248,7 +252,7 @@ pub struct SkillInvocation {
   body : String
   /// Text the user appended after the command, if any.
   args : String
-} derive(Debug)
+}
 
 ///|
 pub extend SkillInvocation with @debug.Debug::{to_repr}

@@ -11,10 +11,11 @@
 
 ///|
 /// 已处理的 `@file` 参数:拼接进首条用户消息的文本与图片附件。
+#derive(Eq, Debug)
 pub struct ProcessedFiles {
   text : String
   images : Array[AttachedImage]
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend ProcessedFiles with Eq::{not_equal, equal}
@@ -24,10 +25,11 @@ pub extend ProcessedFiles with @debug.Debug::{to_repr}
 
 ///|
 /// base64 内联的图片附件(mirrors pi's ImageContent)。
+#derive(Eq, Debug)
 pub struct AttachedImage {
   data : String
   mime_type : String
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend AttachedImage with Eq::{not_equal, equal}

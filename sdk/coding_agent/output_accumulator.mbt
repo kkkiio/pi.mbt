@@ -1,4 +1,5 @@
 ///|
+#derive(Eq, @debug.Debug)
 pub(all) struct TruncationResult {
   content : String
   truncated : Bool
@@ -11,7 +12,7 @@ pub(all) struct TruncationResult {
   first_line_exceeds_limit : Bool
   max_lines : Int32
   max_bytes : Int32
-} derive(Eq, @debug.Debug)
+}
 
 ///|
 pub extend TruncationResult with Eq::{not_equal, equal}
@@ -45,11 +46,12 @@ pub impl ToJson for TruncationResult with fn to_json(self : TruncationResult) ->
 pub extend TruncationResult with ToJson::{to_json}
 
 ///|
+#derive(Eq, @debug.Debug)
 pub(all) struct OutputSnapshot {
   content : String
   truncation : TruncationResult
   full_output_path : String?
-} derive(Eq, @debug.Debug)
+}
 
 ///|
 pub extend OutputSnapshot with Eq::{not_equal, equal}

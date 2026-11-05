@@ -27,6 +27,7 @@ pub fn list_sessions(dir : String) -> Array[String] raise FsError {
 
 ///|
 /// 前缀挑选的结果。
+#derive(Eq, Debug)
 pub(all) enum SessionPick {
   /// 唯一命中。
   Found(String)
@@ -34,7 +35,7 @@ pub(all) enum SessionPick {
   None
   /// 前缀命中多个,需要说得更具体。
   Ambiguous(Array[String])
-} derive(Eq, Debug)
+}
 
 ///|
 pub extend SessionPick with Eq::{not_equal, equal}

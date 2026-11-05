@@ -7,6 +7,7 @@ import {
   "KKKIIO/pi/sdk/codemode",
   "KKKIIO/pi/sdk/tools",
   "moonbitlang/async/websocket",
+  "moonbitlang/core/json",
 }
 
 // Values
@@ -25,8 +26,8 @@ pub struct WsStream {
   // private fields
 }
 pub fn WsStream::close(Self) -> Unit
-pub async fn WsStream::recv(Self) -> Json
-pub async fn WsStream::send(Self, Json) -> Unit
+pub async fn WsStream::recv(Self) -> @json.Json
+pub async fn WsStream::send(Self, @json.Json) -> Unit
 pub impl @codemode.VmChannel for WsStream
 
 pub struct WsStreams {
