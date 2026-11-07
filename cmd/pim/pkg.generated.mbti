@@ -12,7 +12,8 @@ pub fn write_stdout(String) -> Unit
 type AuthConfigError
 
 // Types and methods
-type OutputMode derive(Eq)
+#derive(Eq)
+type OutputMode
 
 // Type aliases
 

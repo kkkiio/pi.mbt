@@ -7,6 +7,7 @@ import {
   "KKKIIO/pi/sdk/coding_agent",
   "moonbitlang/async/aqueue",
   "moonbitlang/async/semaphore",
+  "moonbitlang/core/json",
   "moonbitlang/core/ref",
 }
 
@@ -49,7 +50,7 @@ pub fn prompt_editor_new(Tui, Theme, thinking? : String) -> PromptEditor
 
 pub fn render_markdown_themed(Theme, String, Int32, padding_x? : Int32, padding_y? : Int32, body_role? : String, body_italic? : Bool, preserve_ordered_markers? : Bool, preserve_backslash_escapes? : Bool) -> Array[String]
 
-pub async fn run(&@agent_loop.LLM, String, String, String, String?, resume_path? : String?, initial? : Array[@agent_loop.UserMessage]) -> Unit
+pub async fn run(&@agent_loop.LLM, String, String, String, String?, resume_path? : String?, initial? : Array[@agent_loop.UserMessage], active_tools~ : ArrayView[String]) -> Unit
 
 pub fn scroll_view(Component, follow_end? : Bool, primary? : Bool, overscroll? : String, scrollbar? : String, scrollbar_track_style? : ((String) -> String)?, scrollbar_thumb_style? : ((String) -> String)?) -> ScrollView
 
@@ -198,7 +199,7 @@ pub fn SessionHost::attach(Self, TuiApp) -> Unit
 pub fn SessionHost::close(Self) -> Unit
 pub fn SessionHost::interrupt(Self) -> Unit
 pub fn SessionHost::load_session(Self, String, TuiApp) -> Unit
-pub fn SessionHost::new(&@agent_loop.LLM, String, String?) -> Self raise @coding_agent.FsError
+pub fn SessionHost::new(&@agent_loop.LLM, String, String?, active_tools? : ArrayView[String]) -> Self raise @coding_agent.FsError
 pub fn SessionHost::new_session(Self) -> Unit raise @coding_agent.FsError
 pub async fn SessionHost::prompt(Self, Array[@agent_loop.UserMessage], TuiApp) -> Unit
 pub fn SessionHost::resume_session(Self, String, TuiApp) -> Unit
@@ -328,8 +329,8 @@ pub fn Transcript::new(Theme) -> Self
 pub fn Transcript::push_error(Self, String) -> Unit
 pub fn Transcript::push_note(Self, String) -> Unit
 pub fn Transcript::push_startup(Self) -> Unit
-pub fn Transcript::push_tool_call(Self, String, Json, id~ : String, timed? : Bool) -> Unit
-pub fn Transcript::push_tool_result(Self, String, String, Bool, id~ : String, details? : Json?) -> Unit
+pub fn Transcript::push_tool_call(Self, String, @json.Json, id~ : String, timed? : Bool) -> Unit
+pub fn Transcript::push_tool_result(Self, String, String, Bool, id~ : String, details? : @json.Json?) -> Unit
 pub fn Transcript::push_user(Self, String) -> Unit
 pub fn Transcript::render(Self, Int32) -> Array[String]
 pub fn Transcript::set_assistant_content(Self, Array[(String, Bool)]) -> Unit
@@ -338,7 +339,7 @@ pub fn Transcript::set_expanded_thinking(Self, Bool) -> Unit
 pub fn Transcript::start_assistant(Self) -> Unit
 pub fn Transcript::toggle_expanded(Self) -> Unit
 pub fn Transcript::toggle_expanded_thinking(Self) -> Unit
-pub fn Transcript::update_tool_result(Self, String, id~ : String, details~ : Json) -> Unit
+pub fn Transcript::update_tool_result(Self, String, id~ : String, details~ : @json.Json) -> Unit
 pub impl Widget for Transcript
 
 type TranscriptItem
@@ -402,9 +403,9 @@ pub fn TuiApp::stop(Self) -> Unit
 pub fn TuiApp::submit(Self, String) -> Unit
 pub async fn TuiApp::take_submission(Self) -> String
 pub fn TuiApp::tick(Self) -> Unit
-pub fn TuiApp::tool_call(Self, String, Json, id~ : String, timed? : Bool) -> Unit
-pub fn TuiApp::tool_result(Self, String, String, Bool, id~ : String, details? : Json?) -> Unit
-pub fn TuiApp::tool_update(Self, String, id~ : String, details~ : Json) -> Unit
+pub fn TuiApp::tool_call(Self, String, @json.Json, id~ : String, timed? : Bool) -> Unit
+pub fn TuiApp::tool_result(Self, String, String, Bool, id~ : String, details? : @json.Json?) -> Unit
+pub fn TuiApp::tool_update(Self, String, id~ : String, details~ : @json.Json) -> Unit
 pub async fn TuiApp::wait_for_exit(Self) -> Unit
 
 pub struct Unlisten {
