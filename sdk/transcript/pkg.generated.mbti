@@ -1,0 +1,20 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "KKKIIO/pi/sdk/transcript"
+
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/agent_session",
+}
+
+// Values
+pub fn from_entries(ArrayView[@agent_session.SessionEntry]) -> String
+
+pub fn from_messages(ArrayView[@agent_loop.AgentMessage]) -> String
+
+// Errors
+
+// Types and methods
+
+// Type aliases
+
+// Traits
