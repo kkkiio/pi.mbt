@@ -1,0 +1,15 @@
+import {
+  "KKKIIO/pi/sdk/agent_loop",
+  "KKKIIO/pi/sdk/agent_session",
+  "KKKIIO/pi/sdk/coding_agent",
+  "KKKIIO/pi/sdk/providers",
+  "KKKIIO/pi/sdk/tools",
+  "KKKIIO/pi/sdk/transcript",
+  "moonbitlang/async",
+  "moonbitlang/core/env",
+  "moonbitlang/core/json",
+}
+
+supported_targets = "+js"
+
+pkgtype(kind: "executable")
