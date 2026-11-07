@@ -249,12 +249,15 @@ async test "tool details and usage survive journal resume" {
     prompt_guidelines: [],
     description: "metadata probe",
     parameters: {},
+    output_schema: None,
+    exposure: @tools.ToolExposure::Direct,
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
     execute: (_, _, _) => {
       content: [Text("tool output")],
       details,
+      structured_content: None,
       usage: Some(usage),
       is_error: false,
     },

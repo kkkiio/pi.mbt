@@ -106,6 +106,8 @@ async test "tool_execution_update carries the partial result on the wire" {
     prompt_guidelines: [],
     description: "reports progress",
     parameters: { "type": "object", "properties": {} },
+    output_schema: None,
+    exposure: @tools.ToolExposure::Direct,
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),

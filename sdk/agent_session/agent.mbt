@@ -146,6 +146,11 @@ pub async fn Agent::run(
     guard self.tool_registry.get_tool(name) is Some(tool) else {
       fail("unknown tool: \{name}")
     }
+    // pi's `hidden` exposure: registered but unreachable; activating it has
+    // no effect.
+    if tool.exposure is @tools.ToolExposure::Hidden {
+      continue
+    }
     tools.push(tool)
   }
   let tool_map = tools.iter().map(t => (t.name, t)) |> Map::from_iter

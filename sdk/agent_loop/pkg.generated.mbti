@@ -145,6 +145,7 @@ pub(all) struct ToolResult {
   content : Array[InputMessageContent]
   details : @json.Json
   is_error : Bool
+  structured_content : @json.Json?
   usage : Usage?
 }
 pub fn ToolResult::to_json(Self) -> @json.Json

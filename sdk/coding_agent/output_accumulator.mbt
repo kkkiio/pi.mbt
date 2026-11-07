@@ -398,6 +398,87 @@ pub fn OutputAccumulator::snapshot(
 }
 
 ///|
+/// pi's `FullOutput`: the complete output for callers that can take more than
+/// the display snapshot, such as a tool's `structured_content`.
+pub(all) struct FullOutput {
+  content : String
+  truncated : Bool
+}
+
+///|
+/// The complete output. Call after `finish()` and `close_temp_file()`. Output
+/// longer than `max_bytes` keeps its first and last `max_bytes / 2` bytes
+/// around an omission marker, and `truncated` is set — pi's `readFullOutput`.
+pub fn OutputAccumulator::read_full_output(
+  self : OutputAccumulator,
+  max_bytes : Int32,
+) -> FullOutput raise FsError {
+  guard self.temp_file_path is Some(path) else {
+    let mut all = b""
+    for chunk in self.raw_chunks {
+      all = all + chunk
+    }
+    return { content: @utf8.decode_lossy(all), truncated: false, }
+  }
+  let size = file_size(path)
+  if size <= max_bytes.to_int64() {
+    return {
+      content: @utf8.decode_lossy(read_bytes_file(path)),
+      truncated: false,
+    }
+  }
+  let head_bytes = max_bytes / 2
+  let tail_bytes = max_bytes - head_bytes
+  let head = read_file_at(path, position=0, length=head_bytes)
+  let tail = read_file_at(
+    path,
+    position=size - tail_bytes.to_int64(),
+    length=tail_bytes,
+  )
+  // Cut at character boundaries: the head holds back an incomplete trailing
+  // sequence, and the tail skips leading continuation bytes.
+  let mut head_end = head.length()
+  if head_end > 0 {
+    let mut index = head_end - 1
+    let mut continuation_bytes = 0
+    while index >= 0 && continuation_bytes < 3 {
+      let byte = head[index].to_int()
+      if (byte & 0xc0) != 0x80 {
+        break
+      }
+      continuation_bytes += 1
+      index -= 1
+    }
+    if index >= 0 {
+      let leading = head[index].to_int()
+      let expected = if leading >= 0xc2 && leading <= 0xdf {
+        2
+      } else if leading >= 0xe0 && leading <= 0xef {
+        3
+      } else if leading >= 0xf0 && leading <= 0xf4 {
+        4
+      } else {
+        0
+      }
+      if expected > head_end - index {
+        head_end = index
+      }
+    }
+  }
+  let mut tail_start = 0
+  while tail_start < tail.length() && (tail[tail_start].to_int() & 0xc0) == 0x80 {
+    tail_start += 1
+  }
+  let head_text = @utf8.decode_lossy(head[:head_end])
+  let tail_text = @utf8.decode_lossy(tail[tail_start:])
+  let omitted = size - head.length().to_int64() - tail.length().to_int64()
+  {
+    content: "\{head_text}\n\n[... \{omitted} bytes omitted ...]\n\n\{tail_text}",
+    truncated: true,
+  }
+}
+
+///|
 pub fn OutputAccumulator::close_temp_file(self : OutputAccumulator) -> Unit {
   match self.temp_file {
     None => ()

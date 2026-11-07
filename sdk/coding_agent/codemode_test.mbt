@@ -150,6 +150,9 @@ async test "codemode image output is saved to a temp file with a label" {
 }
 
 ///|
+/// pi 的 `read`:图片经 `output_schema` + `structured_content` 以
+/// `{ type: "image", data, mimeType, note }` 块抵达脚本,`image()` 再转发给
+/// 模型(顺带落临时文件)。
 async test "nested tool images reach model content through the real pi sandbox" {
   let view : @tools.ToolDefinition = {
     name: "view_page",
@@ -157,6 +160,17 @@ async test "nested tool images reach model content through the real pi sandbox" 
     prompt_guidelines: [],
     description: "Return a page image",
     parameters: { "type": "object", "properties": {} },
+    output_schema: Some({
+      "type": "object",
+      "properties": {
+        "type": { "const": "image" },
+        "data": { "type": "string" },
+        "mimeType": { "type": "string" },
+        "note": { "type": "string" },
+      },
+      "required": ["type", "data", "mimeType", "note"],
+    }),
+    exposure: @tools.ToolExposure::Codemode,
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
@@ -170,6 +184,12 @@ async test "nested tool images reach model content through the real pi sandbox" 
       ],
       details: {},
       is_error: false,
+      structured_content: Some({
+        "type": "image",
+        "data": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
+        "mimeType": "image/png",
+        "note": "Original page 31",
+      }),
       usage: None,
     },
   }
@@ -179,10 +199,8 @@ async test "nested tool images reach model content through the real pi sandbox" 
     tool,
     (
       #|const result = await tools.view_page({});
-      #|for (const block of result.content) {
-      #|  if (block.type === "image") image(block);
-      #|  else if (block.type === "text") text(block.text);
-      #|}
+      #|image(result);
+      #|text(result.note);
     ),
   )
   assert_false(result.is_error, msg=Json(result.content).stringify())

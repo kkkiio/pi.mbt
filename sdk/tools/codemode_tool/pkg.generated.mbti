@@ -11,7 +11,11 @@ import {
 // Values
 pub const CODEMODE_TOOL_NAME : String = "codemode"
 
-pub fn new_codemode_tool_definition(async () -> &@codemode.VmChannel, tools~ : ArrayView[@tools.ToolDefinition], journal? : &@agent_session.SessionJournal?, timeout_ms? : Int32, write_temp_file? : ((String, Bytes) -> Result[String, String])?) -> @tools.ToolDefinition
+pub fn describe_script_call(@tools.ToolDefinition) -> String
+
+pub fn new_codemode_tool_definition(async () -> &@codemode.VmChannel, tools~ : ArrayView[@tools.ToolDefinition], journal? : &@agent_session.SessionJournal?, timeout_ms? : Int32, write_temp_file? : ((String, Bytes) -> Result[String, String])?, declared? : ArrayView[String]) -> @tools.ToolDefinition
+
+pub fn prepare_codemode_loadout(ArrayView[@tools.ToolDefinition], declared~ : ArrayView[String]) -> Array[@tools.ToolDefinition]
 
 // Errors
 

@@ -12,14 +12,19 @@ pub fn new_ask_agent_session(
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
 ) -> @agent_session.AgentSession {
   let tool_registry = @tools.ToolRegistry()
-  for tool in tools {
-    tool_registry.register_tool(tool)
-  }
   let codemode_tool = new_codemode_tool_definition(
     streams,
     tools~,
     journal=Some(journal),
+    declared=active_tools,
   )
+  for
+    tool in @codemode_tool.prepare_codemode_loadout(
+      tools,
+      declared=active_tools,
+    ) {
+    tool_registry.register_tool(tool)
+  }
   tool_registry.register_tool(codemode_tool)
   @agent_session.AgentSession(
     llm,

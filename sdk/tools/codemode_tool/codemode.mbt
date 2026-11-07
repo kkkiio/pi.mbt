@@ -7,12 +7,16 @@ pub const CODEMODE_TOOL_NAME = "codemode"
 pub type TempFileWriter = (String, Bytes) -> Result[String, String]
 
 ///|
+/// `declared` names the tools declared to the model (the active tool set):
+/// `direct`-exposed tools are callable from scripts only while declared. The
+/// `Nested tools:` listing shows `codemode`-exposed tools instead.
 pub fn new_codemode_tool_definition(
   launcher : async () -> &@codemode.VmChannel,
   tools~ : ArrayView[@tools.ToolDefinition],
   journal~ : &@agent_session.SessionJournal? = None,
   timeout_ms~ : Int32 = 0,
   write_temp_file~ : TempFileWriter? = None,
+  declared~ : ArrayView[String] = [],
 ) -> @tools.ToolDefinition {
   {
     name: CODEMODE_TOOL_NAME,
@@ -29,6 +33,8 @@ pub fn new_codemode_tool_definition(
       "required": ["code"],
       "additionalProperties": false,
     },
+    output_schema: None,
+    exposure: @tools.ToolExposure::ModelOnly,
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
@@ -39,6 +45,7 @@ pub fn new_codemode_tool_definition(
         journal,
         timeout_ms~,
         write_temp_file~,
+        declared,
         id,
         input,
         on_update,
@@ -48,10 +55,141 @@ pub fn new_codemode_tool_definition(
 }
 
 ///|
+/// pi's `prepareCodemodeLoadout` for mode "on": the description of every tool
+/// that is both declared and callable is rewritten to say how scripts call
+/// it, so the same declaration is not repeated under `Nested tools:`. `tools`
+/// are the definitions being registered and `declared` the names declared to
+/// the model (the active tool set). Returns `tools` unchanged when codemode
+/// itself is not declared.
+pub fn prepare_codemode_loadout(
+  tools : ArrayView[@tools.ToolDefinition],
+  declared~ : ArrayView[String],
+) -> Array[@tools.ToolDefinition] {
+  guard declared.contains(CODEMODE_TOOL_NAME) else { return tools.to_owned() }
+  tools
+  .iter()
+  .map(tool => {
+    if tool.name != CODEMODE_TOOL_NAME &&
+      declared.contains(tool.name) &&
+      is_callable(tool, declared) {
+      { ..tool, description: describe_script_call(tool), }
+    } else {
+      tool
+    }
+  })
+  .collect()
+}
+
+///|
+/// pi's `describeScriptCall`: the description of a tool that is both declared
+/// and callable from scripts — the description followed by how a codemode
+/// call resolves. The arguments are the tool's declared parameters, so they
+/// are not repeated.
+pub fn describe_script_call(tool : @tools.ToolDefinition) -> String {
+  let id = @codemode.to_codemode_identifier(tool.name)
+  let output = describe_output(
+    Some(tool.output_schema.unwrap_or(text_output_schema)),
+  )
+  "\{tool.description.trim()}\n\nCodemode: `tools.\{id}(args)` resolves to \{output}."
+}
+
+///|
+/// pi's `describeOutput`: what a script call resolves to, in one line —
+/// `a string`, the field names of an object (see `describe_fields`), or the
+/// rendered type for anything else.
+fn describe_output(schema : Json?) -> String {
+  let type_text = @codemode.render_tool_output_type(schema)
+  if type_text == "string" {
+    return "a string"
+  }
+  match schema {
+    Some(schema) if describe_fields(schema, 1) is Some(fields) => "`\{fields}`"
+    _ => "`\{collapse_whitespace(type_text)}`"
+  }
+}
+
+///|
+/// pi's `describeFields`: the field names of an object schema,
+/// `{ output, exit_code, full_output_path? }`, with the fields of
+/// object-typed fields `depth` levels deep. None for other schemas.
+fn describe_fields(schema : Json, depth : Int32) -> String? {
+  guard schema is Object(obj) &&
+    obj.get("type") is Some(String("object")) &&
+    obj.get("properties") is Some(Object(properties)) else {
+    return None
+  }
+  let required : Array[String] = match obj.get("required") {
+    Some(Array(entries)) =>
+      entries.filter_map(entry => {
+        if entry is String(name) {
+          Some(name)
+        } else {
+          None
+        }
+      })
+    _ => []
+  }
+  let fields : Array[String] = []
+  for name, field in properties {
+    let nested = if depth > 0 {
+      describe_fields(field, depth - 1)
+    } else {
+      None
+    }
+    let optional = if required.contains(name) { "" } else { "?" }
+    fields.push(
+      "\{name}\{optional}\{if nested is Some(n) { ": \{n}" } else { "" }}",
+    )
+  }
+  Some("{ \{fields.join(", ")} }")
+}
+
+///|
+/// Whether scripts may call `tool`, given the names `declared` to the model:
+/// `direct` tools while declared, `codemode` and `deferred` tools whenever
+/// registered, `model-only` and `hidden` tools never.
+fn is_callable(
+  tool : @tools.ToolDefinition,
+  declared : ArrayView[String],
+) -> Bool {
+  match tool.exposure {
+    @tools.ToolExposure::Direct => declared.contains(tool.name)
+    @tools.ToolExposure::Codemode | @tools.ToolExposure::Deferred => true
+    @tools.ToolExposure::ModelOnly | @tools.ToolExposure::Hidden => false
+  }
+}
+
+///|
+/// `\s+` runs collapse into one space, pi's `type.replace(/\s+/g, " ")`.
+fn collapse_whitespace(text : String) -> String {
+  let out = StringBuilder()
+  let mut pending = false
+  let mut started = false
+  for c in text.iter() {
+    if c is (' ' | '\t' | '\n' | '\r' | '\u{0B}' | '\u{0C}') {
+      pending = started
+    } else {
+      if pending {
+        out.write_char(' ')
+      }
+      pending = false
+      started = true
+      out.write_char(c)
+    }
+  }
+  out.to_string()
+}
+
+///|
 const DESCRIPTION_INTRO : String =
   #|Run JavaScript that calls other tools. The input is raw JavaScript (not JSON, no code fence), run as an async function body in a QuickJS sandbox: top-level `await` and `return` work. No Node, file system, network, or timers.
-  #|- `await tools.<name>({ ...args })` resolves to a string for text results, or `{ content: [...] }` for results containing images, and rejects with an Error on failure. Forward image blocks with `image(result.content[i])`; only script output reaches the model. Calls still running when the script ends are cancelled.
+  #|- `await tools.<name>({ ...args })` resolves to a string, or an object if the tool's declaration says so, and rejects with an Error on failure. A tool whose declaration returns an object resolves on failure too when it returned that object; check its fields. Calls still running when the script ends are cancelled.
   #|- Optional first line: `// @options: {"max_output_tokens": 10000, "timeout_ms": 60000}`
+
+///|
+/// pi's `TEXT_OUTPUT_SCHEMA`: the declared return type of a tool without an
+/// `output_schema`, whose calls resolve to their text output.
+let text_output_schema : Json = { "type": "string" }
 
 ///|
 fn describe_globals(write_temp_file : TempFileWriter?) -> String {
@@ -60,7 +198,7 @@ fn describe_globals(write_temp_file : TempFileWriter?) -> String {
   } else {
     "`image()` adds the image to the output."
   }
-  "Globals:\n- `text(value)`, `image(dataUrlOrImageBlock)`, `console.log(...)`, and top-level `return` add output; `exit()` ends the script. With several text items, each starts with a `==> text N/M <==` line, and `console` lines follow the other output in one `<console_output>` block. \{image_note}\n- `store(key, value)` and `load(key)` keep JSON values across codemode calls.\n- `ALL_TOOLS`: every callable tool's `{ name, description }`, where `description` is the same declaration sample as its `Nested tools:` section."
+  "Globals:\n- `text(value)`, `image(dataUrlOrImageBlock)`, `console.log(...)`, and top-level `return` add output; `exit()` ends the script. With several text items, each starts with a `==> text N/M <==` line, and `console` lines follow the other output in one `<console_output>` block. \{image_note}\n- `store(key, value)` and `load(key)` keep JSON values across codemode calls.\n- `ALL_TOOLS`: every callable tool's `{ name, description }`, where `description` is its `codemode tool declaration:` sample."
 }
 
 ///|
@@ -83,30 +221,7 @@ fn to_codemode_declaration(
       "\{tool.description.trim()}\n\n\{bullets.join("\n")}"
     },
     input_schema: Some(tool.parameters),
-    output_schema: Some({
-      "anyOf": [
-        { "type": "string" },
-        {
-          "type": "object",
-          "properties": {
-            "content": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "type": { "enum": ["text", "image"] },
-                  "text": { "type": "string" },
-                  "data": { "type": "string" },
-                  "mimeType": { "type": "string" },
-                },
-                "required": ["type"],
-              },
-            },
-          },
-          "required": ["content"],
-        },
-      ],
-    }),
+    output_schema: Some(tool.output_schema.unwrap_or(text_output_schema)),
     spread: false,
     signature: None,
     execute: fn(_args : Json?) -> Json { Json::null() },
@@ -134,8 +249,12 @@ fn codemode_description(
     describe_globals(write_temp_file),
   ]
   let tool_sections : Array[String] = []
+  // pi's `listed`: callable tools with `codemode` exposure. `direct` tools
+  // reach the model through their own declarations (see
+  // `prepare_codemode_loadout`), `deferred` ones through `ALL_TOOLS`.
   for tool in tools {
-    if tool.name == CODEMODE_TOOL_NAME {
+    if tool.name == CODEMODE_TOOL_NAME ||
+      tool.exposure != @tools.ToolExposure::Codemode {
       continue
     }
     tool_sections.push(render_tool_section(to_codemode_declaration(tool)))
@@ -257,6 +376,7 @@ async fn execute_codemode_tool(
   journal : &@agent_session.SessionJournal?,
   timeout_ms~ : Int32,
   write_temp_file~ : TempFileWriter?,
+  declared : ArrayView[String],
   tool_call_id : String,
   input : Json,
   on_update : @agent_loop.ToolExecUpdateCallback,
@@ -276,6 +396,7 @@ async fn execute_codemode_tool(
         ],
         details: {},
         is_error: true,
+        structured_content: None,
         usage: None,
       }
   }
@@ -287,7 +408,9 @@ async fn execute_codemode_tool(
   publish()
   let codemode = @codemode.Codemode::Codemode(
     launcher,
-    tools=nested_codemode_tools(tools, tool_call_id, calls, publish, usage),
+    tools=nested_codemode_tools(
+      tools, tool_call_id, calls, publish, usage, declared,
+    ),
     timeout_ms~,
   )
   let store = match journal {
@@ -354,7 +477,13 @@ async fn execute_codemode_tool(
   if truncated.full_output_path is Some(path) {
     details["fullOutputPath"] = Json::string(path)
   }
-  { content, details: Json::object(details), is_error: !ok, usage: usage.val, }
+  {
+    content,
+    details: Json::object(details),
+    is_error: !ok,
+    structured_content: None,
+    usage: usage.val,
+  }
 }
 
 ///|
@@ -364,10 +493,11 @@ fn nested_codemode_tools(
   calls : Array[CodemodeNestedCall],
   publish : () -> Unit,
   usage : Ref[@agent_loop.Usage?],
+  declared : ArrayView[String],
 ) -> Array[@codemode.CodemodeTool] {
   let nested : Array[@codemode.CodemodeTool] = []
   for tool in tools {
-    if tool.name == CODEMODE_TOOL_NAME {
+    if tool.name == CODEMODE_TOOL_NAME || !is_callable(tool, declared) {
       continue
     }
     let declaration = to_codemode_declaration(tool)
@@ -408,6 +538,7 @@ fn nested_codemode_tools(
               ],
               details: {},
               is_error: true,
+              structured_content: None,
               usage: None,
             }
         }
@@ -430,16 +561,18 @@ fn nested_codemode_tools(
           record.status = "error"
           record.error = Some(truncate_preview(error_text, ERROR_PREVIEW_CHARS))
           publish()
-          fail(error_text)
+          // pi's `toScriptValue`: an error result that carries
+          // `structured_content` still resolves to it (MCP `isError`).
+          match result.structured_content {
+            Some(value) if tool.output_schema is Some(_) => return value
+            _ => fail(error_text)
+          }
         }
         record.status = "ok"
         publish()
-        if result.content.iter().any(content => content is Image(..)) {
-          { "content": Json(result.content) }
-        } else if text == "" {
-          result.details
-        } else {
-          Json::string(text)
+        match result.structured_content {
+          Some(value) if tool.output_schema is Some(_) => value
+          _ => Json::string(text)
         }
       },
     })
@@ -448,22 +581,15 @@ fn nested_codemode_tools(
 }
 
 ///|
+/// pi's `textOf`: the text blocks joined by newlines; images are dropped.
 fn tool_result_text(result : @agent_loop.ToolResult) -> String {
-  let text = StringBuilder()
-  let mut first = true
+  let parts : Array[String] = []
   for content in result.content {
-    let part = match content {
-      @agent_loop.InputMessageContent::Text(part) => part
-      @agent_loop.InputMessageContent::Image(..) => "[image omitted]"
+    if content is @agent_loop.InputMessageContent::Text(part) {
+      parts.push(part)
     }
-    if first {
-      first = false
-    } else {
-      text.write_string("\n")
-    }
-    text.write_string(part)
   }
-  text.to_string()
+  parts.join("\n")
 }
 
 ///|

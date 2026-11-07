@@ -46,6 +46,8 @@ pub fn fetch_active_entries(String) -> Array[@agent_session.SessionEntry] raise 
 
 pub fn fetch_entries(String) -> Array[@agent_session.SessionEntry] raise Failure
 
+pub fn file_size(String) -> Int64 raise FsError
+
 pub fn home_dir() -> String
 
 pub fn is_regular_file(String) -> Bool
@@ -81,6 +83,8 @@ pub fn project_context_system_prompt_contributor(cwd~ : String) -> (ArrayView[St
 pub fn read_bytes_file(String) -> Bytes raise FsError
 
 pub fn read_dir(String) -> FixedArray[String] raise FsError
+
+pub fn read_file_at(String, position~ : Int64, length~ : Int32) -> Bytes raise FsError
 
 pub fn read_text_file(String) -> String raise FsError
 
@@ -157,6 +161,11 @@ pub async fn FsFile::write_once(Self, Bytes, offset~ : Int32, len~ : Int32) -> I
 pub async fn FsFile::write_reader(Self, &@io.Reader) -> Unit
 pub impl @io.Writer for FsFile
 
+pub(all) struct FullOutput {
+  content : String
+  truncated : Bool
+}
+
 pub struct JsonlSessionJournal[W] {
   writer : W
   entries : Array[@agent_session.SessionEntry]
@@ -229,6 +238,7 @@ pub fn OutputAccumulator::append(Self, BytesView) -> Unit raise
 pub fn OutputAccumulator::close_temp_file(Self) -> Unit
 pub fn OutputAccumulator::finish(Self) -> Unit raise
 pub fn OutputAccumulator::get_last_line_bytes(Self) -> Int32
+pub fn OutputAccumulator::read_full_output(Self, Int32) -> FullOutput raise FsError
 pub fn OutputAccumulator::snapshot(Self, persist_if_truncated? : Bool) -> OutputSnapshot raise
 
 #derive(Eq, @debug.Debug)
@@ -281,15 +291,6 @@ pub fn SidecarProcess::spawn(String) -> Self
 
 type SidecarStdin
 pub impl @io.Writer for SidecarStdin
-
-type SidecarStdout
-pub async fn SidecarStdout::drop(Self, Int32) -> Int32
-pub async fn SidecarStdout::read(Self, FixedArray[Byte], offset? : Int32, max_len? : Int32) -> Int32
-pub async fn SidecarStdout::read_all(Self) -> &@io.Data
-pub async fn SidecarStdout::read_exactly(Self, Int32) -> Bytes
-pub async fn SidecarStdout::read_some(Self, max_len? : Int32) -> Bytes?
-pub async fn SidecarStdout::read_until(Self, StringView) -> String?
-pub impl @io.Reader for SidecarStdout
 
 #derive(@debug.Debug)
 pub struct Skill {

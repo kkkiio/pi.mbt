@@ -287,6 +287,60 @@ extern "js" fn write_all_ffi(
   #| }
 
 ///|
+#module("node:fs")
+extern "js" fn read_sync(
+  fd : Int32,
+  buffer : Bytes,
+  offset : Int32,
+  length : Int32,
+  position : Double,
+) -> Int32 = "readSync"
+
+///|
+/// `fs.readSync` needs a preallocated buffer and takes the position explicitly;
+/// the wrapper owns both, so a short read near the end of file comes back as a
+/// shorter byte string.
+extern "js" fn read_at_ffi(
+  open : (String, String, Int32) -> Int32,
+  read : (Int32, Bytes, Int32, Int32, Double) -> Int32,
+  close : (Int32) -> Unit,
+  path : String,
+  position : Double,
+  length : Int32,
+) -> FsResult =
+  #| function(open, read, close, path, position, length) {
+  #|   try {
+  #|     const fd = open(path, "r", 0);
+  #|     try {
+  #|       const buffer = new Uint8Array(length);
+  #|       const n = read(fd, buffer, 0, length, position);
+  #|       return { ok: true, content: buffer.subarray(0, n) };
+  #|     } finally {
+  #|       close(fd);
+  #|     }
+  #|   } catch (error) {
+  #|     return { ok: false, content: error.message };
+  #|   }
+  #| }
+
+///|
+extern "js" fn file_size_ffi(
+  stat : (String) -> FsStats,
+  path : String,
+) -> FsResult =
+  #| function(stat, path) {
+  #|   try {
+  #|     return { ok: true, content: stat(path).size };
+  #|   } catch (error) {
+  #|     return { ok: false, content: error.message };
+  #|   }
+  #| }
+
+///|
+extern "js" fn FsResult::as_double(self : FsResult) -> Double =
+  #| (res) => res.content
+
+///|
 extern "js" fn mkdtemp_ffi(
   mkdtemp : (String) -> String,
   prefix : String,
@@ -334,6 +388,34 @@ pub fn read_bytes_file(path : String) -> Bytes raise FsError {
   let res = read_file_ffi(read_file_sync, path)
   guard res.is_ok() else { raise FsError(res.as_message()) }
   res.as_bytes()
+}
+
+///|
+/// Read `length` bytes of `path` starting at byte `position`. Returns fewer
+/// bytes near the end of file.
+pub fn read_file_at(
+  path : String,
+  position~ : Int64,
+  length~ : Int32,
+) -> Bytes raise FsError {
+  let res = read_at_ffi(
+    open_sync,
+    read_sync,
+    close_sync,
+    path,
+    position.to_double(),
+    length,
+  )
+  guard res.is_ok() else { raise FsError(res.as_message()) }
+  res.as_bytes()
+}
+
+///|
+/// The byte size of `path`.
+pub fn file_size(path : String) -> Int64 raise FsError {
+  let res = file_size_ffi(stat_sync, path)
+  guard res.is_ok() else { raise FsError(res.as_message()) }
+  res.as_double().to_int64()
 }
 
 ///|

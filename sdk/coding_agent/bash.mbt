@@ -27,6 +27,8 @@ pub fn new_bash_tool_definition(
       "required": ["command"],
       "additionalProperties": false,
     },
+    output_schema: Some(bash_output_schema),
+    exposure: @tools.ToolExposure::Direct,
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
@@ -35,6 +37,33 @@ pub fn new_bash_tool_definition(
     },
   }
 }
+
+///|
+/// pi's `bashOutputSchema`: the shape of `structured_content`, which codemode
+/// scripts resolve to. `output` is not limited like the model-facing output:
+/// it holds up to 1 MiB, and longer output keeps its first and last 512 KiB
+/// around an omission marker, with `truncated` set and the full output in
+/// `full_output_path`.
+let bash_output_schema : Json = {
+  "type": "object",
+  "properties": {
+    "output": {
+      "type": "string",
+      "description": "Combined stdout and stderr, possibly truncated",
+    },
+    "truncated": { "type": "boolean" },
+    "full_output_path": {
+      "type": "string",
+      "description": "Full output, when truncated",
+    },
+    "exit_code": { "type": "number" },
+    "wall_time_seconds": { "type": "number" },
+  },
+  "required": ["output", "truncated", "exit_code", "wall_time_seconds"],
+}
+
+///|
+const STRUCTURED_OUTPUT_MAX_BYTES : Int32 = 1024 * 1024
 
 ///|
 pub(all) struct BashExecParams {
@@ -74,6 +103,7 @@ async fn execute_bash_tool(
   if params.timeout is Some(timeout) && timeout <= 0 {
     fail("timeout should be greater than zero")
   }
+  let started_at = @async.now()
   let override_envs : Map[String, String] = Map([])
   let output = OutputAccumulator(
     max_lines=DEFAULT_MAX_LINES,
@@ -249,13 +279,36 @@ async fn execute_bash_tool(
 
   let snapshot = finish_output()
   let (outputText, details) = formatOutput(snapshot, "(no output)")
+  let wall_seconds = ((@async.now() - started_at + 50) / 100).to_double() / 10
+  let full_output = output.read_full_output(STRUCTURED_OUTPUT_MAX_BYTES)
+  let structured : Map[String, Json] = {
+    "output": Json::string(full_output.content),
+    "truncated": Json(full_output.truncated),
+    "exit_code": Json(exitCode),
+    "wall_time_seconds": Json(wall_seconds),
+  }
+  if full_output.truncated && snapshot.full_output_path is Some(path) {
+    structured["full_output_path"] = Json::string(path)
+  }
+  let structured_content = Some(Json::object(structured))
   if exitCode != 0 {
-    fail(appendStatus(outputText, "Command exited with code \{exitCode}"))
+    return {
+      content: [
+        @agent_loop.InputMessageContent::Text(
+          appendStatus(outputText, "Command exited with code \{exitCode}"),
+        ),
+      ],
+      details,
+      is_error: true,
+      structured_content,
+      usage: None,
+    }
   }
   {
     content: [@agent_loop.InputMessageContent::Text(outputText)],
     details,
     is_error: false,
+    structured_content,
     usage: None,
   }
 }

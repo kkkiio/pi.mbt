@@ -116,6 +116,8 @@ async test "a tool result survives cancellation while its last update is being d
     description: "returns a result and a progress update",
     prompt_guidelines: [],
     parameters: { "type": "object", "properties": {} },
+    output_schema: None,
+    exposure: @tools.ToolExposure::Direct,
     constrained_sampling: @agent_loop.JsonSchema(strict=true),
     execute: (_, _, update) => {
       update([Text("progress")], {})
@@ -123,6 +125,7 @@ async test "a tool result survives cancellation while its last update is being d
         content: [Text("completed")],
         details: {},
         is_error: false,
+        structured_content: None,
         usage: None,
       }
     },
@@ -548,6 +551,8 @@ async test "a tool update listener error cancels and cleans the running tool" {
     description: "streams until cancelled",
     prompt_guidelines: [],
     parameters: { "type": "object", "properties": {} },
+    output_schema: None,
+    exposure: @tools.ToolExposure::Direct,
     constrained_sampling: @agent_loop.JsonSchema(strict=true),
     execute: (_, _, update) => {
       defer {
@@ -555,7 +560,13 @@ async test "a tool update listener error cancels and cleans the running tool" {
       }
       update([Text("progress")], {})
       @async.sleep(1000)
-      { content: [], details: {}, is_error: false, usage: None, }
+      {
+        content: [],
+        details: {},
+        is_error: false,
+        structured_content: None,
+        usage: None,
+      }
     },
   })
   let llm = @faux.FauxLLM()
