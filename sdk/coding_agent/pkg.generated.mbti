@@ -18,6 +18,8 @@ pub const BASH_TOOL_NAME : String = "bash"
 
 pub const CODEMODE_TOOL_NAME : String = "codemode"
 
+pub fn close_codemode_sidecar() -> Unit
+
 pub fn codemode_sidecar_path() -> String
 
 pub fn coding_assistant_system_prompt_contributor() -> (ArrayView[String]) -> String
@@ -54,9 +56,9 @@ pub fn load_agents_files(String) -> Array[ProjectContextFile]
 
 pub fn new_bash_tool_definition(cwd? : String, exec? : async (BashExecParams) -> Int32) -> @tools.ToolDefinition
 
-pub fn new_codemode_tool_definition(tools~ : ArrayView[@tools.ToolDefinition], journal? : &@agent_session.SessionJournal?, sidecar_path? : String, timeout_ms? : Int32, vm_launcher? : (async () -> &@codemode.VmServer)?) -> @tools.ToolDefinition
+pub fn new_codemode_tool_definition(tools~ : ArrayView[@tools.ToolDefinition], journal? : &@agent_session.SessionJournal?, sidecar_path? : String, timeout_ms? : Int32, vm_launcher? : (async () -> &@codemode.VmChannel)?) -> @tools.ToolDefinition
 
-pub fn new_coding_session(&@agent_loop.LLM, cwd~ : String, journal? : &@agent_session.SessionJournal, active_tools? : ArrayView[String]) -> @agent_session.AgentSession
+pub fn new_coding_session(&@agent_loop.LLM, cwd~ : String, journal? : &@agent_session.SessionJournal, tools? : ArrayView[@tools.ToolDefinition], active_tools? : ArrayView[String]) -> @agent_session.AgentSession
 
 pub fn open_append_file(String, permission? : Int32) -> FsFile raise FsError
 
@@ -109,19 +111,21 @@ pub fn BashExecError::output(Self, &Logger) -> Unit
 pub fn BashExecError::to_string(Self) -> String
 pub impl Show for BashExecError
 
+#derive(@debug.Debug)
 pub(all) suberror FsError {
   FsError(String)
-} derive(@debug.Debug)
+}
 pub fn FsError::output(Self, &Logger) -> Unit
 pub fn FsError::to_repr(Self) -> @debug.Repr
 pub fn FsError::to_string(Self) -> String
 pub impl Show for FsError
 
 // Types and methods
+#derive(Eq, @debug.Debug)
 pub struct AttachedImage {
   data : String
   mime_type : String
-} derive(Eq, @debug.Debug)
+}
 pub fn AttachedImage::equal(Self, Self) -> Bool
 pub fn AttachedImage::not_equal(Self, Self) -> Bool
 pub fn AttachedImage::to_repr(Self) -> @debug.Repr
@@ -136,14 +140,12 @@ pub(all) struct BashExecParams {
 }
 
 type BashToolDetails
-pub fn BashToolDetails::to_json(Self) -> Json
-pub impl ToJson for BashToolDetails
+pub fn BashToolDetails::to_json(Self) -> @json.Json
+pub impl @json.ToJson for BashToolDetails
 
-type BashToolInput derive(@json.FromJson)
-pub fn BashToolInput::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
-
-type CodemodeToolInput derive(@json.FromJson)
-pub fn CodemodeToolInput::from_json(Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+#derive(@json.FromJson)
+type BashToolInput
+pub fn BashToolInput::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
 
 pub struct FsFile {
   fd : Int32
@@ -190,9 +192,9 @@ pub struct NdJsonStream {
   // private fields
 }
 pub fn NdJsonStream::close(Self) -> Unit
-pub async fn NdJsonStream::recv(Self) -> Json
-pub async fn NdJsonStream::send(Self, Json) -> Unit
-pub impl @codemode.VmServer for NdJsonStream
+pub async fn NdJsonStream::recv(Self) -> @json.Json
+pub async fn NdJsonStream::send(Self, @json.Json) -> Unit
+pub impl @codemode.VmChannel for NdJsonStream
 
 pub struct NdJsonStreams[R, W] {
   // private fields
@@ -229,36 +231,40 @@ pub fn OutputAccumulator::finish(Self) -> Unit raise
 pub fn OutputAccumulator::get_last_line_bytes(Self) -> Int32
 pub fn OutputAccumulator::snapshot(Self, persist_if_truncated? : Bool) -> OutputSnapshot raise
 
+#derive(Eq, @debug.Debug)
 pub(all) struct OutputSnapshot {
   content : String
   truncation : TruncationResult
   full_output_path : String?
-} derive(Eq, @debug.Debug)
+}
 pub fn OutputSnapshot::equal(Self, Self) -> Bool
 pub fn OutputSnapshot::not_equal(Self, Self) -> Bool
-pub fn OutputSnapshot::to_json(Self) -> Json
+pub fn OutputSnapshot::to_json(Self) -> @json.Json
 pub fn OutputSnapshot::to_repr(Self) -> @debug.Repr
-pub impl ToJson for OutputSnapshot
+pub impl @json.ToJson for OutputSnapshot
 
+#derive(Eq, @debug.Debug)
 pub struct ProcessedFiles {
   text : String
   images : Array[AttachedImage]
-} derive(Eq, @debug.Debug)
+}
 pub fn ProcessedFiles::equal(Self, Self) -> Bool
 pub fn ProcessedFiles::not_equal(Self, Self) -> Bool
 pub fn ProcessedFiles::to_repr(Self) -> @debug.Repr
 
+#derive(@debug.Debug)
 pub struct ProjectContextFile {
   path : String
   content : String
-} derive(@debug.Debug)
+}
 pub fn ProjectContextFile::to_repr(Self) -> @debug.Repr
 
+#derive(Eq, @debug.Debug)
 pub(all) enum SessionPick {
   Found(String)
   None
   Ambiguous(Array[String])
-} derive(Eq, @debug.Debug)
+}
 pub fn SessionPick::equal(Self, Self) -> Bool
 pub fn SessionPick::not_equal(Self, Self) -> Bool
 pub fn SessionPick::to_repr(Self) -> @debug.Repr
@@ -285,32 +291,36 @@ pub async fn SidecarStdout::read_some(Self, max_len? : Int32) -> Bytes?
 pub async fn SidecarStdout::read_until(Self, StringView) -> String?
 pub impl @io.Reader for SidecarStdout
 
+#derive(@debug.Debug)
 pub struct Skill {
   name : String
   description : String
   path : String
   disable_model_invocation : Bool
-} derive(@debug.Debug)
+}
 pub fn Skill::to_repr(Self) -> @debug.Repr
 
+#derive(@debug.Debug)
 pub struct SkillFrontmatter {
   name : String
   description : String
   disable_model_invocation : Bool
-} derive(@debug.Debug)
+}
 pub fn SkillFrontmatter::to_repr(Self) -> @debug.Repr
 
+#derive(@debug.Debug)
 pub struct SkillInvocation {
   name : String
   location : String
   references : String
   body : String
   args : String
-} derive(@debug.Debug)
+}
 pub fn SkillInvocation::block_text(Self) -> String
 pub fn SkillInvocation::to_repr(Self) -> @debug.Repr
 pub fn SkillInvocation::with_body(Self, String) -> Self
 
+#derive(Eq, @debug.Debug)
 pub(all) struct TruncationResult {
   content : String
   truncated : Bool
@@ -323,12 +333,12 @@ pub(all) struct TruncationResult {
   first_line_exceeds_limit : Bool
   max_lines : Int32
   max_bytes : Int32
-} derive(Eq, @debug.Debug)
+}
 pub fn TruncationResult::equal(Self, Self) -> Bool
 pub fn TruncationResult::not_equal(Self, Self) -> Bool
-pub fn TruncationResult::to_json(Self) -> Json
+pub fn TruncationResult::to_json(Self) -> @json.Json
 pub fn TruncationResult::to_repr(Self) -> @debug.Repr
-pub impl ToJson for TruncationResult
+pub impl @json.ToJson for TruncationResult
 
 // Type aliases
 

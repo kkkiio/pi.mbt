@@ -167,7 +167,7 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
           if flushed is Some(message) {
             break message
           }
-        } else {
+        } else if !trimmed.has_prefix(":") {
           data_lines.push(trimmed)
         }
         // 读到的是数据行,继续下一轮竞速。
