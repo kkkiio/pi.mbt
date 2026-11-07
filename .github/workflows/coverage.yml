@@ -54,13 +54,13 @@ jobs:
           moon coverage report -f summary > coverage_summary.txt
           # Put the coverage report in the pipeline output.
           cat coverage_summary.txt >> "$GITHUB_STEP_SUMMARY"
-          # `-o` is ignored on the send path: the tool writes its own temporary
-          # coverage.json and deletes it after the upload.
+          # Generate the coveralls payload only; the official action below
+          # uploads it and honors .coveralls.yml (paths-ignore).
           moon coverage report \
             -f coveralls \
-            --service-name github \
-            --service-job-id "$GITHUB_RUN_NUMBER" \
-            --service-pull-request "${{ github.event.number }}" \
-            --send-to coveralls
-        env:
-          COVERALLS_REPO_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+            -o coverage.json
+
+      - name: upload to coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          file: coverage.json
