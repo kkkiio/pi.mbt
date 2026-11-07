@@ -39,7 +39,7 @@ pub fn close_codemode_sidecar() -> Unit {
 ///|
 fn spawn_codemode_sidecar(
   script : String,
-) -> NdJsonStreams[SidecarStdout, SidecarStdin] {
+) -> NdJsonStreams[@js_async.ReadableStream, SidecarStdin] {
   let process = SidecarProcess::spawn(script)
   sidecars.push(process)
   let streams = NdJsonStreams::new(process.stdout, process.stdin)

@@ -19,30 +19,11 @@ extern "js" fn sidecar_spawn_options() -> JsSidecarSpawnOptions =
   #| () => ({ stdio: ["pipe", "pipe", "inherit"] })
 
 ///|
-extern "js" fn JsSidecarChild::on_stdout_data(
+extern "js" fn JsSidecarChild::stdout_to_web(
   self : JsSidecarChild,
-  on_data : (Bytes) -> Unit,
-) -> Unit =
-  #| (child, onData) => child.stdout.on("data", (buf) => {
-  #|   if (buf.byteLength > 0) onData(new Uint8Array(buf));
-  #| })
-
-///|
-extern "js" fn JsSidecarChild::on_stdin_error(
-  self : JsSidecarChild,
-  on_error : () -> Unit,
-) -> Unit =
-  #| (child, onError) => child.stdin.on("error", () => onError())
-
-///|
-extern "js" fn JsSidecarChild::on_stdout_end(
-  self : JsSidecarChild,
-  on_end : () -> Unit,
-) -> Unit =
-  #| (child, onEnd) => {
-  #|   child.stdout.on("end", onEnd);
-  #|   child.on("close", onEnd);
-  #| }
+) -> @js_async.JsReadableStream =
+  #| (child) => process.getBuiltinModule("node:stream")
+  #|   .Readable.toWeb(child.stdout)
 
 ///|
 extern "js" fn JsSidecarChild::stdin_write(
@@ -62,31 +43,25 @@ extern "js" fn JsSidecarChild::kill(self : JsSidecarChild) -> Unit =
 ///|
 struct SidecarProcess {
   child : JsSidecarChild
-  stdout : SidecarStdout
+  stdout : @js_async.ReadableStream
   stdin : SidecarStdin
 }
 
 ///|
 /// Spawn `node <script>`. The process keeps running until `kill` or until it
 /// exits on its own; either way `stdout` reads EOF.
-#warnings("-alert_internal")
+///
+/// `stdout` goes through `@js_async.ReadableStream`, whose reads suspend on
+/// `Promise::wait` — settling a JS promise is what re-arms the coroutine
+/// scheduler on this backend. A raw `stdout.on("data", ...)` callback would
+/// only enqueue the waiting coroutine without rescheduling it, stalling the
+/// stream whenever the scheduler's task chain has gone idle.
 pub fn SidecarProcess::spawn(script : String) -> SidecarProcess {
-  let chunks = @aqueue.Queue(kind=@aqueue.Unbounded)
   let child = node_spawn([script], sidecar_spawn_options())
-  child.on_stdout_data(chunk => {
-    ignore(chunks.try_put(chunk) catch { _ => false })
-  })
-  child.on_stdout_end(() => chunks.close())
-  child.on_stdin_error(() => chunks.close())
   {
     child,
-    stdout: {
-      chunks,
-      read_buf: @io.ReaderBuffer::new(),
-      leftover: b"",
-      leftover_offset: 0,
-    },
-    stdin: { child, },
+    stdout: @js_async.ReadableStream::from_js(child.stdout_to_web()),
+    stdin: SidecarStdin::{ child },
   }
 }
 
@@ -94,53 +69,6 @@ pub fn SidecarProcess::spawn(script : String) -> SidecarProcess {
 /// Signal the child to exit. Idempotent on the Node side.
 pub fn SidecarProcess::kill(self : SidecarProcess) -> Unit {
   self.child.kill()
-}
-
-///|
-#warnings("-alert_internal")
-struct SidecarStdout {
-  chunks : @aqueue.Queue[Bytes]
-  read_buf : @io.ReaderBuffer
-  mut leftover : Bytes
-  mut leftover_offset : Int32
-}
-
-///|
-pub impl @io.Reader for SidecarStdout with fn _get_internal_buffer(self) {
-  self.read_buf
-}
-
-///|
-#deprecated
-#doc(hidden)
-pub extend SidecarStdout with @io.Reader::{_direct_read, _get_internal_buffer}
-
-///|
-pub impl @io.Reader for SidecarStdout with fn _direct_read(
-  self,
-  dst,
-  offset~,
-  max_len~,
-) {
-  if self.leftover_offset >= self.leftover.length() {
-    let chunk = self.chunks.get() catch { _ => return 0 }
-    self.leftover = chunk
-    self.leftover_offset = 0
-  }
-  let n = @cmp.minimum(max_len, self.leftover.length() - self.leftover_offset)
-  dst.blit_from_bytes(offset, self.leftover, self.leftover_offset, n)
-  self.leftover_offset += n
-  n
-}
-
-///|
-pub extend SidecarStdout with @io.Reader::{
-  read,
-  read_some,
-  drop,
-  read_all,
-  read_until,
-  read_exactly,
 }
 
 ///|
