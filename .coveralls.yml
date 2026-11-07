@@ -1,9 +1,0 @@
-# Coveralls configuration.
-#
-# `paths-ignore` excludes files from coverage accounting entirely:
-# runnable examples are not exercised by the offline test suite, so
-# counting them only adds noise to patch totals.
-service_name: github
-paths-ignore:
-  - "examples/**"
-  - "cmd/**"

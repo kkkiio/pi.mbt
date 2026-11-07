@@ -54,11 +54,13 @@ jobs:
           moon coverage report -f summary > coverage_summary.txt
           # Put the coverage report in the pipeline output.
           cat coverage_summary.txt >> "$GITHUB_STEP_SUMMARY"
-          # Generate the coveralls payload only; the official action below
-          # uploads it and honors .coveralls.yml (paths-ignore).
+          # Generate the coveralls payload, then drop paths that don't need
+          # coverage (examples, cmd) before uploading. Neither `moon coverage
+          # report` nor the Coveralls YAML config supports path exclusion.
           moon coverage report \
             -f coveralls \
             -o coverage.json
+          node scripts/filter-coverage.mjs coverage.json
 
       - name: upload to coveralls
         uses: coverallsapp/github-action@v2
