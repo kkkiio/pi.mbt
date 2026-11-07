@@ -11,7 +11,7 @@
 
 name = "KKKIIO/pi"
 
-version = "0.4.2"
+version = "0.5.0"
 
 readme = "README.md"
 
