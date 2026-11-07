@@ -176,6 +176,33 @@ async test "openai web-page streaming example" {
 }
 
 ///|
+async test "sse comment lines are ignored" {
+  // DeepSeek 的 Responses 流会穿插 `: keep-alive` 心跳注释帧。
+  let response =
+    #|event: response.output_text.delta
+    #|data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"Paris"}
+    #|
+    #|: keep-alive
+    #|
+    #|: keep-alive
+    #|
+    #|event: response.completed
+    #|data: {"type":"response.completed","response":{"id":"resp_1","object":"response","created_at":1741290958,"status":"completed","error":null,"incomplete_details":null,"instructions":"You are a helpful assistant.","max_output_tokens":null,"model":"deepseek-v4-flash","output":[{"id":"msg_1","type":"message","status":"completed","role":"assistant","content":[{"type":"output_text","text":"Paris","annotations":[]}]}],"parallel_tool_calls":true,"previous_response_id":null,"reasoning":{"effort":null,"summary":null},"store":true,"temperature":1.0,"text":{"format":{"type":"text"}},"tool_choice":"auto","tools":[],"top_p":1.0,"truncation":"disabled","usage":{"input_tokens":37,"output_tokens":11,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":48},"user":null,"metadata":{}}}
+    #|
+
+  let messages = []
+  let final_message = @providers.read_responses_sse_stream(
+    @io.MemoryReader::MemoryReader(async fn(w) { w.write(response) }),
+    sink=event => messages.push(event),
+    api="openai-responses",
+    provider="deepseek",
+    model="deepseek-v4-flash",
+  )
+  assert_true(final_message.stop_reason is @agent_loop.StopReason::Stop)
+  assert_true(final_message.error_message is None)
+}
+
+///|
 async test "a stalled responses stream can be cancelled promptly" {
   let (reader, writer) = @io.pipe()
   let active : Ref[@async.Task[@agent_loop.AssistantMessage?]?] = Ref(None)
