@@ -413,30 +413,51 @@ pub fn OutputAccumulator::read_full_output(
   self : OutputAccumulator,
   max_bytes : Int32,
 ) -> FullOutput raise FsError {
-  guard self.temp_file_path is Some(path) else {
-    let mut all = b""
-    for chunk in self.raw_chunks {
-      all = all + chunk
-    }
-    return { content: @utf8.decode_lossy(all), truncated: false, }
-  }
-  let size = file_size(path)
-  if size <= max_bytes.to_int64() {
-    return {
-      content: @utf8.decode_lossy(read_bytes_file(path)),
-      truncated: false,
-    }
-  }
   let head_bytes = max_bytes / 2
   let tail_bytes = max_bytes - head_bytes
-  let head = read_file_at(path, position=0, length=head_bytes)
-  let tail = read_file_at(
-    path,
-    position=size - tail_bytes.to_int64(),
-    length=tail_bytes,
-  )
-  // Cut at character boundaries: the head holds back an incomplete trailing
-  // sequence, and the tail skips leading continuation bytes.
+  match self.temp_file_path {
+    None => {
+      let mut all = b""
+      for chunk in self.raw_chunks {
+        all = all + chunk
+      }
+      if all.length() <= max_bytes {
+        return { content: @utf8.decode_lossy(all), truncated: false, }
+      }
+      head_tail_output(
+        all[:head_bytes].to_owned(),
+        all[all.length() - tail_bytes:].to_owned(),
+        all.length() - head_bytes - tail_bytes,
+      )
+    }
+    Some(path) => {
+      let size = file_size(path)
+      if size <= max_bytes.to_int64() {
+        return {
+          content: @utf8.decode_lossy(read_bytes_file(path)),
+          truncated: false,
+        }
+      }
+      let head = read_file_at(path, position=0, length=head_bytes)
+      let tail = read_file_at(
+        path,
+        position=size - tail_bytes.to_int64(),
+        length=tail_bytes,
+      )
+      head_tail_output(
+        head,
+        tail,
+        (size - head.length().to_int64() - tail.length().to_int64()).to_int(),
+      )
+    }
+  }
+}
+
+///|
+/// `head` and `tail` joined around an `omitted`-byte marker, cut at UTF-8
+/// character boundaries: the head holds back an incomplete trailing sequence
+/// and the tail skips leading continuation bytes.
+fn head_tail_output(head : Bytes, tail : Bytes, omitted : Int32) -> FullOutput {
   let mut head_end = head.length()
   if head_end > 0 {
     let mut index = head_end - 1
@@ -471,7 +492,6 @@ pub fn OutputAccumulator::read_full_output(
   }
   let head_text = @utf8.decode_lossy(head[:head_end])
   let tail_text = @utf8.decode_lossy(tail[tail_start:])
-  let omitted = size - head.length().to_int64() - tail.length().to_int64()
   {
     content: "\{head_text}\n\n[... \{omitted} bytes omitted ...]\n\n\{tail_text}",
     truncated: true,

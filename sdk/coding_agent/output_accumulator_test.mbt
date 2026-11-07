@@ -64,3 +64,20 @@ async test "output accumulator persists the original bytes after truncation" {
   }
   @coding_agent.remove_dir(directory.to_owned())
 }
+
+///|
+/// `read_full_output` 的字节预算同样约束未溢出的内存输出,而不是只有落盘路径。
+async test "read_full_output applies its byte budget to in-memory output" {
+  let output = @coding_agent.OutputAccumulator(max_lines=10, max_bytes=100)
+  output.append(@utf8.encode("abcdefghijklmnopqrstuvwxyz"))
+  output.finish()
+  let full = output.read_full_output(20)
+  assert_true(full.truncated)
+  inspect(
+    full.content,
+    content="abcdefghij\n\n[... 6 bytes omitted ...]\n\nqrstuvwxyz",
+  )
+  let complete = output.read_full_output(26)
+  assert_false(complete.truncated)
+  inspect(complete.content, content="abcdefghijklmnopqrstuvwxyz")
+}

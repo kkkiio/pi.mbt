@@ -124,9 +124,6 @@ fn github_list_issues_tool() -> @tools.ToolDefinition {
       "type": "array",
       "items": { "type": "object", "additionalProperties": true },
     }),
-    // Registered but never declared: callable only through `tools.*` inside
-    // codemode scripts, and listed in the codemode description (pi's
-    // `codemode` exposure — the shape MCP tools get).
     exposure: @tools.ToolExposure::Codemode,
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,

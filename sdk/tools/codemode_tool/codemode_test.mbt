@@ -1221,3 +1221,59 @@ async test "exposure controls script reachability and the nested listing" {
   callable_names.sort_by(String::lexical_compare)
   assert_eq(callable_names, ["callable", "quiet"])
 }
+
+///|
+/// `declared` 在每次执行时读取:共享 ref 被 `set_active_tools` 更新后,
+/// direct 工具的可调用性随之变化,无需重建 codemode 工具。
+async test "a shared declared ref updates direct tool callability" {
+  let exec : async (String, Json, @agent_loop.ToolExecUpdateCallback) -> @agent_loop.ToolResult = (
+    _,
+    _,
+    _,
+  ) => {
+    content: [@agent_loop.InputMessageContent::Text("ok")],
+    details: {},
+    is_error: false,
+    structured_content: None,
+    usage: None,
+  }
+  let direct = stub_tool(
+    "direct_tool",
+    exec,
+    exposure=@tools.ToolExposure::Direct,
+  )
+  let declared : Ref[Array[String]] = Ref(["direct_tool"])
+  let vms : Array[ScriptedVm] = []
+  let tool = @codemode_tool.new_codemode_tool_definition(
+    async fn() -> &@codemode.VmChannel {
+      let vm = ScriptedVm::{
+        sent: [],
+        inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
+        results_left: 0,
+        closed: false,
+      }
+      vm.inbox.put({ "type": "done", "ok": true, "writes": "[]" })
+      vms.push(vm)
+      vm
+    },
+    tools=[direct],
+    declared~,
+  )
+  let sent_names = fn(vm : ScriptedVm) -> Array[String] raise {
+    guard vm.sent[0] is { "data": { "tools": Array(names), .. }, .. } else {
+      fail("expected a StartVmRequest with tools")
+    }
+    names.filter_map(n => {
+      if n is { "name": String(name), .. } {
+        Some(name)
+      } else {
+        None
+      }
+    })
+  }
+  ignore(run_codemode(tool, "work()"))
+  assert_eq(sent_names(vms[0]), ["direct_tool"])
+  declared.val = []
+  ignore(run_codemode(tool, "work()"))
+  assert_eq(sent_names(vms[1]), [])
+}

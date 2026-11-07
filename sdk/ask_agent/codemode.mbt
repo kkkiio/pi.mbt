@@ -8,7 +8,7 @@ pub fn new_codemode_tool_definition(
   journal~ : &@agent_session.SessionJournal? = None,
   timeout_ms~ : Int32 = 0,
   write_temp_file~ : @codemode_tool.TempFileWriter? = None,
-  declared~ : ArrayView[String] = [],
+  declared~ : Ref[Array[String]] = Ref([]),
 ) -> @tools.ToolDefinition {
   @codemode_tool.new_codemode_tool_definition(
     fn() -> &@codemode.VmChannel { streams.new_stream() },

@@ -30,8 +30,9 @@ pub struct Agent {
   mut system_prompt_cache : (String, Array[String])?
   mut messages : Array[@agent_loop.AgentMessage]
   mut finish_turn_hook : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?
+  on_active_tools_changed : (ArrayView[String]) -> Unit
 }
-pub fn Agent::Agent(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], messages? : ArrayView[@agent_loop.AgentMessage], finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool) -> Self
+pub fn Agent::Agent(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], messages? : ArrayView[@agent_loop.AgentMessage], finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool, on_active_tools_changed? : (ArrayView[String]) -> Unit) -> Self
 pub fn Agent::active_tool_names(Self) -> ArrayView[String]
 pub fn Agent::has_tool(Self, String) -> Bool
 pub fn Agent::messages(Self) -> ArrayView[@agent_loop.AgentMessage]
@@ -48,7 +49,7 @@ pub struct AgentSession {
   retry_settings : RetrySettings
   mut active_run : @ref.Ref[(@async.Task[Unit?]?, Bool)]?
 }
-pub fn AgentSession::AgentSession(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], journal? : &SessionJournal, tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], retry_settings? : RetrySettings, finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool) -> Self
+pub fn AgentSession::AgentSession(&@agent_loop.LLM, system_prompt_contributes? : Array[(ArrayView[String]) -> String], journal? : &SessionJournal, tool_registry? : @tools.ToolRegistry, active_tools? : ArrayView[String], retry_settings? : RetrySettings, finish_turn_hook? : async (ArrayView[@agent_loop.AgentMessage], ArrayView[@agent_loop.ToolResultMessage]) -> @agent_loop.AgentTurnDecision?, auto_refresh_system_prompt? : Bool, on_active_tools_changed? : (ArrayView[String]) -> Unit) -> Self
 pub fn AgentSession::abort(Self) -> Unit
 pub fn AgentSession::active_tool_names(Self) -> ArrayView[String]
 pub fn AgentSession::messages(Self) -> ArrayView[@agent_loop.AgentMessage]

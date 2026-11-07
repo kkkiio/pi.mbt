@@ -21,6 +21,7 @@ pub fn AgentSession::AgentSession(
   retry_settings~ : RetrySettings = RetrySettings::default(),
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
   auto_refresh_system_prompt~ : Bool = false,
+  on_active_tools_changed~ : (ArrayView[String]) -> Unit = _ => (),
 ) -> AgentSession {
   let agent = Agent::Agent(
     llm,
@@ -30,6 +31,7 @@ pub fn AgentSession::AgentSession(
     messages=project_messages(journal.get_entries()),
     finish_turn_hook~,
     auto_refresh_system_prompt~,
+    on_active_tools_changed~,
   )
   AgentSession::{
     journal,

@@ -7,16 +7,18 @@ pub const CODEMODE_TOOL_NAME = "codemode"
 pub type TempFileWriter = (String, Bytes) -> Result[String, String]
 
 ///|
-/// `declared` names the tools declared to the model (the active tool set):
-/// `direct`-exposed tools are callable from scripts only while declared. The
-/// `Nested tools:` listing shows `codemode`-exposed tools instead.
+/// `declared` names the tools declared to the model (the active tool set),
+/// read at every execution so a shared ref stays correct across
+/// `Agent::set_active_tools`: `direct`-exposed tools are callable from
+/// scripts only while declared. The `Nested tools:` listing shows
+/// `codemode`-exposed tools instead.
 pub fn new_codemode_tool_definition(
   launcher : async () -> &@codemode.VmChannel,
   tools~ : ArrayView[@tools.ToolDefinition],
   journal~ : &@agent_session.SessionJournal? = None,
   timeout_ms~ : Int32 = 0,
   write_temp_file~ : TempFileWriter? = None,
-  declared~ : ArrayView[String] = [],
+  declared~ : Ref[Array[String]] = Ref([]),
 ) -> @tools.ToolDefinition {
   {
     name: CODEMODE_TOOL_NAME,
@@ -45,7 +47,7 @@ pub fn new_codemode_tool_definition(
         journal,
         timeout_ms~,
         write_temp_file~,
-        declared,
+        declared.val,
         id,
         input,
         on_update,
@@ -249,9 +251,6 @@ fn codemode_description(
     describe_globals(write_temp_file),
   ]
   let tool_sections : Array[String] = []
-  // pi's `listed`: callable tools with `codemode` exposure. `direct` tools
-  // reach the model through their own declarations (see
-  // `prepare_codemode_loadout`), `deferred` ones through `ALL_TOOLS`.
   for tool in tools {
     if tool.name == CODEMODE_TOOL_NAME ||
       tool.exposure != @tools.ToolExposure::Codemode {
@@ -561,8 +560,6 @@ fn nested_codemode_tools(
           record.status = "error"
           record.error = Some(truncate_preview(error_text, ERROR_PREVIEW_CHARS))
           publish()
-          // pi's `toScriptValue`: an error result that carries
-          // `structured_content` still resolves to it (MCP `isError`).
           match result.structured_content {
             Some(value) if tool.output_schema is Some(_) => return value
             _ => fail(error_text)

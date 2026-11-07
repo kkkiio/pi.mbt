@@ -10,6 +10,7 @@ import {
   "moonbitlang/core/debug",
   "moonbitlang/core/json",
   "moonbitlang/core/random",
+  "moonbitlang/core/ref",
   "moonbitlang/core/set",
 }
 
@@ -58,7 +59,7 @@ pub fn load_agents_files(String) -> Array[ProjectContextFile]
 
 pub fn new_bash_tool_definition(cwd? : String, exec? : async (BashExecParams) -> Int32) -> @tools.ToolDefinition
 
-pub fn new_codemode_tool_definition(tools~ : ArrayView[@tools.ToolDefinition], journal? : &@agent_session.SessionJournal?, sidecar_path? : String, timeout_ms? : Int32, vm_launcher? : (async () -> &@codemode.VmChannel)?) -> @tools.ToolDefinition
+pub fn new_codemode_tool_definition(tools~ : ArrayView[@tools.ToolDefinition], journal? : &@agent_session.SessionJournal?, sidecar_path? : String, timeout_ms? : Int32, vm_launcher? : (async () -> &@codemode.VmChannel)?, declared? : @ref.Ref[Array[String]]) -> @tools.ToolDefinition
 
 pub fn new_coding_session(&@agent_loop.LLM, cwd~ : String, journal? : &@agent_session.SessionJournal, tools? : ArrayView[@tools.ToolDefinition], active_tools? : ArrayView[String]) -> @agent_session.AgentSession
 

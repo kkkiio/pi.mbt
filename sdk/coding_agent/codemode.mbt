@@ -54,7 +54,7 @@ pub fn new_codemode_tool_definition(
   sidecar_path~ : String = codemode_sidecar_path(),
   timeout_ms~ : Int32 = 0,
   vm_launcher~ : (async () -> &@codemode.VmChannel)? = None,
-  declared~ : ArrayView[String] = [],
+  declared~ : Ref[Array[String]] = Ref([]),
 ) -> @tools.ToolDefinition {
   let launcher : async () -> &@codemode.VmChannel = match vm_launcher {
     Some(launcher) => launcher

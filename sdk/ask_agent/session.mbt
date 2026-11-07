@@ -12,15 +12,17 @@ pub fn new_ask_agent_session(
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
 ) -> @agent_session.AgentSession {
   let tool_registry = @tools.ToolRegistry()
+  let all_tools = tools.to_owned()
+  let declared : Ref[Array[String]] = Ref(active_tools.to_owned())
   let codemode_tool = new_codemode_tool_definition(
     streams,
-    tools~,
+    tools=all_tools,
     journal=Some(journal),
-    declared=active_tools,
+    declared~,
   )
   for
     tool in @codemode_tool.prepare_codemode_loadout(
-      tools,
+      all_tools,
       declared=active_tools,
     ) {
     tool_registry.register_tool(tool)
@@ -34,5 +36,15 @@ pub fn new_ask_agent_session(
     active_tools~,
     finish_turn_hook~,
     retry_settings~,
+    on_active_tools_changed=names => {
+      declared.val = names.to_owned()
+      for
+        tool in @codemode_tool.prepare_codemode_loadout(
+          all_tools,
+          declared=names,
+        ) {
+        tool_registry.register_tool(tool)
+      }
+    },
   )
 }
