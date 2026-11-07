@@ -26,6 +26,13 @@ extern "js" fn JsSidecarChild::stdout_to_web(
   #|   .Readable.toWeb(child.stdout)
 
 ///|
+extern "js" fn JsSidecarChild::on_stdin_error(
+  self : JsSidecarChild,
+  on_error : () -> Unit,
+) -> Unit =
+  #| (child, onError) => child.stdin.on("error", () => onError())
+
+///|
 extern "js" fn JsSidecarChild::stdin_write(
   self : JsSidecarChild,
   data : Bytes,
@@ -58,11 +65,11 @@ struct SidecarProcess {
 /// stream whenever the scheduler's task chain has gone idle.
 pub fn SidecarProcess::spawn(script : String) -> SidecarProcess {
   let child = node_spawn([script], sidecar_spawn_options())
-  {
-    child,
-    stdout: @js_async.ReadableStream::from_js(child.stdout_to_web()),
-    stdin: SidecarStdin::{ child },
-  }
+  let stdout = @js_async.ReadableStream::from_js(child.stdout_to_web())
+  // `stdin.write` can raise EPIPE asynchronously when the sidecar dies;
+  // surface it as the end of stdout so the pump unwinds like a normal exit.
+  child.on_stdin_error(() => stdout.close())
+  { child, stdout, stdin: SidecarStdin::{ child, }, }
 }
 
 ///|

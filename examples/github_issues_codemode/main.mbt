@@ -96,8 +96,7 @@ extern "js" fn GhApiResult::stdout(self : GhApiResult) -> String = "(r) => r.std
 extern "js" fn GhApiResult::stderr(self : GhApiResult) -> String = "(r) => r.stderr"
 
 ///|
-extern "js" fn GhApiResult::spawn_error(self : GhApiResult) -> String =
-  "(r) => r.error"
+extern "js" fn GhApiResult::spawn_error(self : GhApiResult) -> String = "(r) => r.error"
 
 ///|
 fn github_list_issues_tool() -> @tools.ToolDefinition {
@@ -138,7 +137,9 @@ fn github_list_issues_tool() -> @tools.ToolDefinition {
       let endpoint = "repos/\{owner}/\{repo}/issues?state=open&per_page=100&page=\{page}"
       let result = gh_api(endpoint)
       if !result.spawn_error().is_empty() {
-        fail("`gh api` failed to run (is `gh` installed?): \{result.spawn_error()}")
+        fail(
+          "`gh api` failed to run (is `gh` installed?): \{result.spawn_error()}",
+        )
       }
       guard result.status() == 0 else {
         fail("`gh api \{endpoint}` failed: \{result.stderr()}")

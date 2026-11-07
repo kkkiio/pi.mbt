@@ -106,13 +106,12 @@ pub fn from_messages(messages : ArrayView[@agent_loop.AgentMessage]) -> String {
                 "status": String(status),
                 ..
               } {
-              if call is { "error": String(err), .. } {
-                buf.write_string(
-                  "    - \{name}(\{args}) -> \{status}: \{err}\n",
-                )
+              let entry = if call is { "error": String(err), .. } {
+                "\{name}(\{args}) -> \{status}: \{err}"
               } else {
-                buf.write_string("    - \{name}(\{args}) -> \{status}\n")
+                "\{name}(\{args}) -> \{status}"
               }
+              write_yaml_list_item(buf, entry, 4)
             }
           }
         }
@@ -151,28 +150,72 @@ fn write_yaml_field(
     buf.write_string("\{key}: \"\"\n")
     return
   }
-  let needs_block = trimmed.contains("\n") ||
-    trimmed.has_prefix("-") ||
-    trimmed.has_prefix("#") ||
-    trimmed.has_prefix("{") ||
-    trimmed.has_prefix("[") ||
-    trimmed.has_prefix(">") ||
-    trimmed.has_prefix("!") ||
-    trimmed.has_prefix(":") ||
-    trimmed.contains(": ") ||
-    trimmed.contains(" #")
-  if !needs_block {
+  if !needs_yaml_block(trimmed) {
     buf.write_string("\{key}: \{trimmed}\n")
     return
   }
-  let pad = " ".repeat(block_indent)
   buf.write_string("\{key}: |-\n")
-  for line_view in trimmed.split("\n") {
+  write_yaml_block_lines(buf, trimmed, block_indent)
+}
+
+///|
+fn write_yaml_list_item(
+  buf : StringBuilder,
+  value : String,
+  indent : Int32,
+) -> Unit {
+  let pad = " ".repeat(indent)
+  let trimmed = value.trim_end(chars="\n")
+  if !needs_yaml_block(trimmed) {
+    buf.write_string("\{pad}- \{trimmed}\n")
+    return
+  }
+  buf.write_string("\{pad}- |-\n")
+  write_yaml_block_lines(buf, trimmed, indent + 2)
+}
+
+///|
+fn write_yaml_block_lines(
+  buf : StringBuilder,
+  value : StringView,
+  indent : Int32,
+) -> Unit {
+  let pad = " ".repeat(indent)
+  for line_view in value.split("\n") {
     let line = line_view.trim_end(chars=" \t\r")
     if line.is_empty() {
       buf.write_string("\n")
     } else {
       buf.write_string("\{pad}\{line}\n")
     }
+  }
+}
+
+///|
+/// Whether `value` cannot survive a YAML round trip as a plain scalar:
+/// multiline text, leading indicator characters, `: `/` #`/`:` sequences
+/// that form mappings or comments, or text that reparses as a non-string
+/// (numbers, booleans, null, JSON fragments).
+fn needs_yaml_block(value : StringView) -> Bool {
+  if value.contains("\n") ||
+    value.contains(": ") ||
+    value.contains(" #") ||
+    value.has_suffix(":") ||
+    value.has_prefix(" ") {
+    return true
+  }
+  let indicators = [
+    "-", "?", ":", ",", "[", "]", "{", "}", "#", "&", "*", "!", "|", ">", "'", "\"",
+    "%", "@", "`", "~", "=",
+  ]
+  for ind in indicators {
+    if value.has_prefix(ind) {
+      return true
+    }
+  }
+  let parsed : Json = @json.parse(value) catch { _ => return false }
+  match parsed {
+    Json::String(text) => text != value.to_owned()
+    _ => true
   }
 }
