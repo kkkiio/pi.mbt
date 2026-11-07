@@ -84,6 +84,7 @@ fn end_hook_tool_result() -> @agent_loop.ToolResult {
     content: [@agent_loop.InputMessageContent::Text("done")],
     details: {},
     is_error: false,
+    structured_content: None,
     usage: None,
   }
 }

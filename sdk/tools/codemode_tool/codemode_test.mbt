@@ -282,6 +282,8 @@ async test "codemode failure appends the call summary to the script error" {
 fn stub_tool(
   name : String,
   execute : async (String, Json, @agent_loop.ToolExecUpdateCallback) -> @agent_loop.ToolResult,
+  output_schema~ : Json? = None,
+  exposure~ : @tools.ToolExposure = @tools.ToolExposure::Codemode,
 ) -> @tools.ToolDefinition {
   {
     name,
@@ -289,6 +291,8 @@ fn stub_tool(
     prompt_guidelines: [],
     description: "\{name} tool",
     parameters: { "type": "object", "properties": {} },
+    output_schema,
+    exposure,
     constrained_sampling: @agent_loop.ConstrainedSampling::JsonSchema(
       strict=true,
     ),
@@ -315,6 +319,7 @@ async test "a nested call lands in details.calls and mirrors to on_update" {
     content: [@agent_loop.InputMessageContent::Text("echo:\{args.stringify()}")],
     details: {},
     is_error: false,
+    structured_content: None,
     usage: None,
   })
   let vm = ScriptedVm::{
@@ -380,6 +385,7 @@ async test "two concurrent nested calls each get a ledger row" {
         content: [@agent_loop.InputMessageContent::Text("\{name}-ok")],
         details: {},
         is_error: false,
+        structured_content: None,
         usage: None,
       }
     })
@@ -526,6 +532,7 @@ async test "nested call usage sums into the codemode result usage" {
     content: [@agent_loop.InputMessageContent::Text("ok")],
     details: {},
     is_error: false,
+    structured_content: None,
     usage: Some(usage),
   })
   let vm = ScriptedVm::{
@@ -713,20 +720,57 @@ async test "codemode description embeds declarations for its nested tools" {
     content: [@agent_loop.InputMessageContent::Text("unused")],
     details: {},
     is_error: false,
+    structured_content: None,
     usage: None,
   })
   let bash = { ..unused, name: "bash", label: "bash", }
   let web = { ..unused, name: "web-search", label: "web-search", }
+  // issue #57: a tool that declares `output_schema` shows its real return
+  // type in the `declare const tools` signature instead of `Promise<string>`.
+  let read_source = {
+    ..unused,
+    name: "read_source",
+    label: "read_source",
+    parameters: {
+      "type": "object",
+      "properties": { "page": { "type": "number" } },
+      "required": ["page"],
+    },
+    output_schema: Some({
+      "type": "object",
+      "properties": {
+        "page": { "type": "number" },
+        "blocks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "text": { "type": "string" },
+            },
+            "required": ["id", "text"],
+          },
+        },
+      },
+      "required": ["page", "blocks"],
+    }),
+  }
   let vm = FakeVm::{
     feed: [{ "type": "done", "ok": true, "writes": "[]" }],
     sent: [],
   }
-  let tool = codemode_tool_with(vm, [bash, web])
+  let tool = codemode_tool_with(vm, [bash, web, read_source])
   assert_true(tool.description.contains("Nested tools:"))
   assert_true(tool.description.contains("### `bash`"))
   assert_true(tool.description.contains("### `web_search` (`web-search`)"))
+  assert_true(tool.description.contains("### `read_source`"))
   assert_true(tool.description.contains("declare const tools"))
-  assert_true(tool.description.contains("Promise<string |"))
+  assert_true(tool.description.contains(": Promise<string>;"))
+  assert_true(
+    tool.description.contains(
+      "read_source(args: { page: number; }): Promise<{ blocks: Array<{ id: string; text: string; }>; page: number; }>;",
+    ),
+  )
   let result = run_codemode(tool, "work()")
   assert_false(result.is_error)
   guard vm.sent[0] is { "data": { "tools": Array(nested_tools), .. }, .. } else {
@@ -734,7 +778,7 @@ async test "codemode description embeds declarations for its nested tools" {
       "expected a StartVmRequest with tools, sent=\{Json::array(vm.sent).stringify()}",
     )
   }
-  assert_eq(nested_tools.length(), 2)
+  assert_eq(nested_tools.length(), 3)
   for nested in nested_tools {
     guard nested is { "description": String(description), .. } else {
       fail("expected a tool description, got \{nested.stringify()}")
@@ -881,24 +925,46 @@ async test "images stay inline without a temp file writer" {
 }
 
 ///|
-async test "nested image results preserve content blocks in the VM result" {
-  let cases : Array[Array[@agent_loop.InputMessageContent]] = [
-    [@agent_loop.InputMessageContent::Image(data="AQID", mime_type="image/png")],
-    [
-      @agent_loop.InputMessageContent::Text("Original page 31"),
-      @agent_loop.InputMessageContent::Image(data="AQID", mime_type="image/png"),
-      @agent_loop.InputMessageContent::Text("Crop"),
-      @agent_loop.InputMessageContent::Image(
-        data="BAUG",
-        mime_type="image/jpeg",
-      ),
-    ],
+/// pi 的 `toScriptValue`:没声明 `output_schema` 的工具只把文本块交给脚本,
+/// 图片块被丢弃(pi 的 `textOf`)。
+async test "nested results without an output schema resolve to their text" {
+  let cases : Array[(Array[@agent_loop.InputMessageContent], Json)] = [
+    (
+      [
+        @agent_loop.InputMessageContent::Image(
+          data="AQID",
+          mime_type="image/png",
+        ),
+      ],
+      Json::string(""),
+    ),
+    (
+      [
+        @agent_loop.InputMessageContent::Text("Original page 31"),
+        @agent_loop.InputMessageContent::Image(
+          data="AQID",
+          mime_type="image/png",
+        ),
+        @agent_loop.InputMessageContent::Text("Crop"),
+      ],
+      Json::string("Original page 31\nCrop"),
+    ),
+    (
+      [
+        @agent_loop.InputMessageContent::Text("one"),
+        @agent_loop.InputMessageContent::Text("two"),
+      ],
+      Json::string("one\ntwo"),
+    ),
+    ([], Json::string("")),
   ]
-  for content in cases {
+  for pair in cases {
+    let (content, expected) = pair
     let view = stub_tool("view_page", (_, _, _) => {
       content,
       details: { "other": true },
       is_error: false,
+      structured_content: None,
       usage: None,
     })
     let vm = ScriptedVm::{
@@ -913,7 +979,7 @@ async test "nested image results preserve content blocks in the VM result" {
     let mut found = false
     for frame in vm.sent {
       if frame is { "type": "result", "ok": True, "payload": String(value), .. } {
-        assert_eq(@json.parse(value), { "content": Json(content) })
+        assert_eq(@json.parse(value), expected)
         found = true
       }
     }
@@ -923,50 +989,98 @@ async test "nested image results preserve content blocks in the VM result" {
 }
 
 ///|
-async test "nested text results keep strings and empty results keep details" {
-  let cases : Array[(@agent_loop.ToolResult, Json)] = [
-    (
-      {
-        content: [
-          @agent_loop.InputMessageContent::Text("one"),
-          @agent_loop.InputMessageContent::Text("two"),
-        ],
-        details: {},
-        is_error: false,
-        usage: None,
-      },
-      Json::string("one\ntwo"),
-    ),
-    (
-      { content: [], details: { "value": 42 }, is_error: false, usage: None, },
-      { "value": 42 },
-    ),
+/// pi 的 `toScriptValue`:声明了 `output_schema` 的工具 resolve 到
+/// `structured_content`;携带它的 error result 也 resolve 而不是 reject
+/// (台账仍记 error,如 bash 的非零退出)。
+async test "nested tools with an output schema resolve to structured content" {
+  let cases : Array[@agent_loop.ToolResult] = [
+    {
+      content: [@agent_loop.InputMessageContent::Text("page 31")],
+      details: {},
+      is_error: false,
+      structured_content: Some({
+        "page": 31,
+        "blocks": [{ "id": "b1", "text": "hello" }],
+      }),
+      usage: None,
+    },
+    {
+      content: [
+        @agent_loop.InputMessageContent::Text("Command exited with code 3"),
+      ],
+      details: {},
+      is_error: true,
+      structured_content: Some({ "output": "boom", "exit_code": 3 }),
+      usage: None,
+    },
   ]
-  for (tool_result, expected) in cases {
-    let tool = stub_tool("echo", (_, _, _) => tool_result)
+  for tool_result in cases {
+    let view = stub_tool(
+      "view_page",
+      (_, _, _) => tool_result,
+      output_schema=Some({ "type": "object" }),
+    )
     let vm = ScriptedVm::{
       sent: [],
       inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
       results_left: 1,
       closed: false,
     }
-    vm.inbox.put(call_frame(1, "echo", "{}"))
-    assert_false(
-      run_codemode(codemode_tool_with(vm, [tool]), "work()").is_error,
-    )
+    vm.inbox.put(call_frame(1, "view_page", "{}"))
+    let result = run_codemode(codemode_tool_with(vm, [view]), "work()")
+    assert_false(result.is_error)
     let mut found = false
     for frame in vm.sent {
       if frame is { "type": "result", "ok": True, "payload": String(value), .. } {
-        assert_eq(@json.parse(value), expected)
+        assert_eq(@json.parse(value), tool_result.structured_content.unwrap())
         found = true
       }
     }
     assert_true(found)
+    if tool_result.is_error {
+      guard result.details is { "calls": [{ "status": "error", .. }], .. } else {
+        fail(
+          "expected an error ledger row, details=\{result.details.stringify()}",
+        )
+      }
+    }
   }
 }
 
 ///|
-async test "nested image errors reject with an omission notice" {
+/// 声明了 `output_schema` 但结果没带 `structured_content` 时,退回文本语义。
+async test "an output schema without structured content falls back to text" {
+  let tool = stub_tool(
+    "view",
+    (_, _, _) => {
+      content: [@agent_loop.InputMessageContent::Text("plain")],
+      details: {},
+      is_error: false,
+      structured_content: None,
+      usage: None,
+    },
+    output_schema=Some({ "type": "string" }),
+  )
+  let vm = ScriptedVm::{
+    sent: [],
+    inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
+    results_left: 1,
+    closed: false,
+  }
+  vm.inbox.put(call_frame(1, "view", "{}"))
+  ignore(run_codemode(codemode_tool_with(vm, [tool]), "work()"))
+  assert_true(
+    vm.sent
+    .iter()
+    .any(frame => {
+      frame
+      is { "type": "result", "ok": True, "payload": String("\"plain\""), .. }
+    }),
+  )
+}
+
+///|
+async test "nested errors reject with the tool's error text" {
   let tool = stub_tool("view", (_, _, _) => {
     content: [
       @agent_loop.InputMessageContent::Text("failed"),
@@ -974,6 +1088,7 @@ async test "nested image errors reject with an omission notice" {
     ],
     details: {},
     is_error: true,
+    structured_content: None,
     usage: None,
   })
   let vm = ScriptedVm::{
@@ -989,7 +1104,176 @@ async test "nested image errors reject with an omission notice" {
     .iter()
     .any(frame => {
       frame is { "type": "result", "ok": False, "payload": String(message), .. } &&
-      message.contains("failed\n[image omitted]")
+      message.contains("failed")
     }),
   )
+}
+
+///|
+/// pi 的 `prepareCodemodeLoadout` mode "on":同时声明 + 可调用的工具描述尾部
+/// 追加 `Codemode: tools.x(args) resolves to ...`;`a string` 是没有
+/// `output_schema` 的默认,object schema 列字段名;codemode 未声明时不改。
+test "prepare_codemode_loadout rewrites declared callable descriptions" {
+  let exec : async (String, Json, @agent_loop.ToolExecUpdateCallback) -> @agent_loop.ToolResult = (
+    _,
+    _,
+    _,
+  ) => {
+    content: [],
+    details: {},
+    is_error: false,
+    structured_content: None,
+    usage: None,
+  }
+  let bash = stub_tool(
+    "bash",
+    exec,
+    exposure=@tools.ToolExposure::Direct,
+    output_schema=Some({
+      "type": "object",
+      "properties": {
+        "output": { "type": "string" },
+        "exit_code": { "type": "number" },
+        "full_output_path": { "type": "string" },
+      },
+      "required": ["output", "exit_code"],
+    }),
+  )
+  let echo = stub_tool("echo", exec, exposure=@tools.ToolExposure::Direct)
+  let mcp_search = stub_tool(
+    "mcp__docs__search",
+    exec,
+    exposure=@tools.ToolExposure::Codemode,
+  )
+  let declared = ["bash", "codemode"]
+  let rewritten = @codemode_tool.prepare_codemode_loadout(
+    [bash, echo, mcp_search],
+    declared=declared[:],
+  )
+  // bash:声明(direct)+ 可调用 → 追加 resolve 行,object schema 列字段名。
+  assert_eq(
+    rewritten[0].description,
+    "bash tool\n\nCodemode: `tools.bash(args)` resolves to `{ output, exit_code, full_output_path? }`.",
+  )
+  // echo:direct 但未声明 → 不可调用,描述不改写。
+  assert_eq(rewritten[1].description, "echo tool")
+  // mcp_search:codemode 曝光但不在 declared → 不改写(由 Nested tools 列出)。
+  assert_eq(rewritten[2].description, "mcp__docs__search tool")
+  // codemode 未声明:全部原样返回。
+  let untouched = @codemode_tool.prepare_codemode_loadout([bash], declared=[
+    "bash",
+  ])
+  assert_eq(untouched[0].description, "bash tool")
+}
+
+///|
+/// 曝光决定脚本可见性:direct 未声明不可调用,codemode/deferred 注册即可调用,
+/// model-only/hidden 永不可调用;`Nested tools:` 只列 codemode 曝光。
+async test "exposure controls script reachability and the nested listing" {
+  let exec : async (String, Json, @agent_loop.ToolExecUpdateCallback) -> @agent_loop.ToolResult = (
+    _,
+    _,
+    _,
+  ) => {
+    content: [@agent_loop.InputMessageContent::Text("ok")],
+    details: {},
+    is_error: false,
+    structured_content: None,
+    usage: None,
+  }
+  let inactive = stub_tool(
+    "inactive",
+    exec,
+    exposure=@tools.ToolExposure::Direct,
+  )
+  let callable = stub_tool(
+    "callable",
+    exec,
+    exposure=@tools.ToolExposure::Codemode,
+  )
+  let quiet = stub_tool("quiet", exec, exposure=@tools.ToolExposure::Deferred)
+  let walled = stub_tool("walled", exec, exposure=@tools.ToolExposure::Hidden)
+  let vm = ScriptedVm::{
+    sent: [],
+    inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
+    results_left: 0,
+    closed: false,
+  }
+  let tool = codemode_tool_with(vm, [inactive, callable, quiet, walled])
+  // 只有 codemode 曝光的 callable 进 Nested tools;deferred 的发现靠 ALL_TOOLS。
+  assert_true(tool.description.contains("### `callable`"))
+  assert_false(tool.description.contains("### `inactive`"))
+  assert_false(tool.description.contains("### `quiet`"))
+  assert_false(tool.description.contains("### `walled`"))
+  // 送进 VM 的 callable 名单:callable + quiet(deferred 可调),其余不在。
+  vm.inbox.put({ "type": "done", "ok": true, "writes": "[]" })
+  ignore(run_codemode(tool, "work()"))
+  guard vm.sent[0] is { "data": { "tools": Array(names), .. }, .. } else {
+    fail("expected a StartVmRequest with tools")
+  }
+  let callable_names = names.filter_map(n => {
+    if n is { "name": String(name), .. } {
+      Some(name)
+    } else {
+      None
+    }
+  })
+  callable_names.sort_by(String::lexical_compare)
+  assert_eq(callable_names, ["callable", "quiet"])
+}
+
+///|
+/// `declared` 在每次执行时读取:共享 ref 被 `set_active_tools` 更新后,
+/// direct 工具的可调用性随之变化,无需重建 codemode 工具。
+async test "a shared declared ref updates direct tool callability" {
+  let exec : async (String, Json, @agent_loop.ToolExecUpdateCallback) -> @agent_loop.ToolResult = (
+    _,
+    _,
+    _,
+  ) => {
+    content: [@agent_loop.InputMessageContent::Text("ok")],
+    details: {},
+    is_error: false,
+    structured_content: None,
+    usage: None,
+  }
+  let direct = stub_tool(
+    "direct_tool",
+    exec,
+    exposure=@tools.ToolExposure::Direct,
+  )
+  let declared : Ref[Array[String]] = Ref(["direct_tool"])
+  let vms : Array[ScriptedVm] = []
+  let tool = @codemode_tool.new_codemode_tool_definition(
+    async fn() -> &@codemode.VmChannel {
+      let vm = ScriptedVm::{
+        sent: [],
+        inbox: @aqueue.Queue(kind=@aqueue.Unbounded),
+        results_left: 0,
+        closed: false,
+      }
+      vm.inbox.put({ "type": "done", "ok": true, "writes": "[]" })
+      vms.push(vm)
+      vm
+    },
+    tools=[direct],
+    declared~,
+  )
+  let sent_names = fn(vm : ScriptedVm) -> Array[String] raise {
+    guard vm.sent[0] is { "data": { "tools": Array(names), .. }, .. } else {
+      fail("expected a StartVmRequest with tools")
+    }
+    names.filter_map(n => {
+      if n is { "name": String(name), .. } {
+        Some(name)
+      } else {
+        None
+      }
+    })
+  }
+  ignore(run_codemode(tool, "work()"))
+  assert_eq(sent_names(vms[0]), ["direct_tool"])
+  declared.val = []
+  ignore(run_codemode(tool, "work()"))
+  assert_eq(sent_names(vms[1]), [])
 }

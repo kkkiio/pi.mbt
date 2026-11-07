@@ -35,21 +35,38 @@ async test "bash tool returns merged output, exit code and details" {
 }
 
 ///|
-/// A non-zero exit fails the call and appends `Command exited with code N`
-/// after the captured output.
+/// A non-zero exit is an error result — not a thrown failure — so its
+/// `structured_content` survives for programmatic callers such as codemode
+/// scripts, which resolve to it instead of rejecting (pi's `toScriptValue`).
 async test "bash tool reports a non-zero exit code" {
-  let message = try {
-    ignore(
-      (bash_tool().execute)("call-2", { "command": "echo before; exit 3" }, (
-        _,
-        _,
-      ) => ()),
-    )
-    fail("expected the tool to fail")
-  } catch {
-    err => failure_message(err.to_string())
+  let result = (bash_tool().execute)(
+    "call-2",
+    { "command": "echo before; exit 3" },
+    (_, _) => (),
+  )
+  assert_true(result.is_error)
+  guard result.content
+    is [
+      @agent_loop.InputMessageContent::Text(
+        "before\n\n\nCommand exited with code 3"
+      ),
+    ] else {
+    fail("unexpected content \{Json(result.content).stringify()}")
   }
-  inspect(message, content="before\n\n\nCommand exited with code 3")
+  guard result.structured_content
+    is Some(
+      {
+        "output": "before\n",
+        "truncated": False,
+        "exit_code": Number(3, ..),
+        "wall_time_seconds": Number(_, ..),
+        ..
+      }
+    ) else {
+    fail(
+      "unexpected structured content \{result.structured_content.unwrap_or(Json::null()).stringify()}",
+    )
+  }
 }
 
 ///|

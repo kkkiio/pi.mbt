@@ -15,6 +15,7 @@ pub struct Agent {
   mut system_prompt_cache : (String, Array[String])?
   mut messages : Array[@agent_loop.AgentMessage]
   mut finish_turn_hook : @agent_loop.FinishTurnHook
+  on_active_tools_changed : (ArrayView[String]) -> Unit
 }
 
 ///|
@@ -26,6 +27,7 @@ pub fn Agent::Agent(
   messages~ : ArrayView[@agent_loop.AgentMessage] = [],
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
   auto_refresh_system_prompt~ : Bool = false,
+  on_active_tools_changed~ : (ArrayView[String]) -> Unit = _ => (),
 ) -> Agent {
   Agent::{
     llm,
@@ -36,6 +38,7 @@ pub fn Agent::Agent(
     system_prompt_cache: None,
     messages: messages.to_owned(),
     finish_turn_hook,
+    on_active_tools_changed,
   }
 }
 
@@ -71,6 +74,7 @@ pub fn Agent::set_active_tools(
   for name in next {
     self.active_tools.push(name)
   }
+  (self.on_active_tools_changed)(self.active_tools)
 }
 
 ///|
@@ -145,6 +149,9 @@ pub async fn Agent::run(
   for name in self.active_tools {
     guard self.tool_registry.get_tool(name) is Some(tool) else {
       fail("unknown tool: \{name}")
+    }
+    if tool.exposure is @tools.ToolExposure::Hidden {
+      continue
     }
     tools.push(tool)
   }

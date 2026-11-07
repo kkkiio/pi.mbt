@@ -18,9 +18,22 @@ pub(all) struct ToolDefinition {
   prompt_guidelines : Array[String]
   description : String
   parameters : @json.Json
+  output_schema : @json.Json?
+  exposure : ToolExposure
   constrained_sampling : @agent_loop.ConstrainedSampling
   execute : async (String, @json.Json, (Array[@agent_loop.InputMessageContent], @json.Json) -> Unit) -> @agent_loop.ToolResult
 }
+
+#derive(Eq)
+pub(all) enum ToolExposure {
+  Direct
+  ModelOnly
+  Codemode
+  Deferred
+  Hidden
+}
+pub fn ToolExposure::equal(Self, Self) -> Bool
+pub fn ToolExposure::not_equal(Self, Self) -> Bool
 
 type ToolRegistry
 pub fn ToolRegistry::ToolRegistry() -> Self

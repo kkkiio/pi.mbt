@@ -271,6 +271,7 @@ pub async fn run_agent_loop(
                   content: [InputMessageContent::Text(err.to_string())],
                   details: {},
                   is_error: true,
+                  structured_content: None,
                   usage: None,
                 }
             }
@@ -362,6 +363,10 @@ pub(all) struct ToolResult {
   content : Array[InputMessageContent]
   details : ToolResultDetail
   is_error : Bool
+  /// Machine-readable result matching the tool's `output_schema`, for
+  /// programmatic callers such as codemode scripts. Not sent to the model;
+  /// `content` remains the model-facing result. pi's `structuredContent`.
+  structured_content : Json?
   /// Usage if the tool use LLM internally.
   usage : Usage?
 }
