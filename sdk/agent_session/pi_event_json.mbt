@@ -1,13 +1,6 @@
 ///|
-/// pi 的 `--mode json` 线协议:把会话/循环事件投影成线上一行的 JSON。
-///
-/// 参考 pi 的 `packages/coding-agent/src/modes/json-event.ts`。
-
-///|
-/// 一个会话事件的一行 JSON。`message_update` 是 delta-only 的:消息快照由
-/// `message_start` / `message_end` 承载,累计 `usage` 单独挂在顶层。
-///
-/// 事件无法忠实投影时 raise(见 `agent_event_to_pi_json`)。
+/// Serializes a session `event` to a single-line `--mode json` event object.
+/// Raises if the inner loop event cannot be projected (see `agent_event_to_pi_json`).
 pub fn to_pi_json(event : AgentSessionEvent) -> Json raise {
   match event {
     Loop(agent_event) => agent_event_to_pi_json(agent_event)
@@ -33,10 +26,8 @@ pub fn to_pi_json(event : AgentSessionEvent) -> Json raise {
 }
 
 ///|
-/// 一个 agent loop 事件的一行 JSON。
-///
-/// `toolcall_start` 剥掉快照后要补上常量大小的 `id`/`toolName` —— 丢了快照,那是
-/// 它们唯一的载体;快照里没有可补的值(位置不是 tool call 或越界)时 raise。
+/// Serializes an agent loop `event` to its `--mode json` wire representation.
+/// Raises if a `ToolCallStart` update references an out-of-range or non-tool-call content block.
 pub fn agent_event_to_pi_json(event : @agent_loop.AgentEvent) -> Json raise {
   match event {
     AgentStart => { "type": "agent_start" }
@@ -94,7 +85,6 @@ pub fn agent_event_to_pi_json(event : @agent_loop.AgentEvent) -> Json raise {
 }
 
 ///|
-/// 流式事件携带的 in-flight 快照;线上去掉它之后,`usage` 是唯一还要从中取的字段。
 fn generation_partial(
   event : @agent_loop.GenerationEvent,
 ) -> @agent_loop.AssistantMessage {
@@ -113,8 +103,6 @@ fn generation_partial(
 }
 
 ///|
-/// 流式增量的线上形状:累积的 `partial` 快照被剥掉,这样流的字节数随回复长度
-/// 线性增长。
 fn generation_event_to_pi_json(
   event : @agent_loop.GenerationEvent,
 ) -> Json raise {

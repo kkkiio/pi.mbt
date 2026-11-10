@@ -1,23 +1,4 @@
 ///|
-/// JavaScript (Node.js) file-system layer for `coding_agent`.
-///
-/// The package targets js only, so every operation here is a thin
-/// synchronous wrapper over `node:fs` (plus `node:os` / `node:path` for the
-/// temp and home directories). Two rules shape the FFI below:
-///
-/// - Throwing Node APIs are wrapped in JavaScript `try`/`catch` and return a
-///   `{ ok, content }` record. A JS exception cannot be observed by MoonBit
-///   `catch` (MoonBit errors are values, not JS exceptions), so the JS side
-///   has to turn failures into data.
-/// - Failures surface as `FsError` carrying Node's own message, which already
-///   names the syscall and the path, e.g. `ENOENT: no such file or directory,
-///   open '/x/y'`.
-///
-/// All operations are synchronous: the call sites are `async fn`s and the
-/// payloads are small (project context files, one journal, chunked spill
-/// writes), so there is nothing to gain from `node:fs/promises` plumbing.
-
-///|
 #derive(Debug)
 pub(all) suberror FsError {
   FsError(String)
@@ -35,12 +16,7 @@ pub impl Show for FsError with fn output(self, logger) {
 ///|
 pub extend FsError with Show::{to_string, output}
 
-// ---------------------------------------------------------------------------
-// FFI
-// ---------------------------------------------------------------------------
-
 ///|
-/// Opaque handles for values that only exist inside JavaScript.
 #external
 priv type FsStats
 
@@ -49,9 +25,6 @@ priv type FsStats
 priv type FsOptions
 
 ///|
-/// The `{ ok, content }` record every wrapper below returns. `content` holds
-/// the payload on success and Node's error message on failure, so the accessor
-/// must match the operation that produced it.
 #external
 priv type FsResult
 
@@ -140,8 +113,7 @@ extern "js" fn os_tmpdir() -> String = "tmpdir"
 extern "js" fn os_homedir() -> String = "homedir"
 
 ///|
-/// The user's home directory (`os.homedir()`, which resolves `HOME` on POSIX
-/// and `USERPROFILE` on Windows). 
+/// Returns the current user's home directory.
 pub fn home_dir() -> String {
   os_homedir()
 }
@@ -262,9 +234,6 @@ extern "js" fn open_file_ffi(
   #| }
 
 ///|
-/// `writeSync` may write fewer bytes than requested, so loop until the whole
-/// chunk is on disk. A zero-byte write would spin forever, so treat it as an
-/// error instead.
 extern "js" fn write_all_ffi(
   write : (Int32, Bytes) -> Int32,
   fd : Int32,
@@ -297,9 +266,6 @@ extern "js" fn read_sync(
 ) -> Int32 = "readSync"
 
 ///|
-/// `fs.readSync` needs a preallocated buffer and takes the position explicitly;
-/// the wrapper owns both, so a short read near the end of file comes back as a
-/// shorter byte string.
 extern "js" fn read_at_ffi(
   open : (String, String, Int32) -> Int32,
   read : (Int32, Bytes, Int32, Int32, Double) -> Int32,
@@ -353,28 +319,21 @@ extern "js" fn mkdtemp_ffi(
   #|   }
   #| }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 ///|
-/// Whether `path` exists. Never raises: this mirrors the previous native call
-/// sites, which treated any error as "missing".
+/// Returns whether `path` exists.
 pub fn path_exists(path : String) -> Bool {
   exists_sync(path)
 }
 
 ///|
-/// Whether `path` is a regular file. Never raises: a missing path, an
-/// unreadable path and a directory all report `false`.
+/// Returns whether `path` exists and is a regular file.
 pub fn is_regular_file(path : String) -> Bool {
   let res = is_regular_file_ffi(stat_sync, path)
   res.is_ok() && res.as_bool()
 }
 
 ///|
-/// Read a whole file as UTF-8 text. Malformed bytes raise `FsError`, matching
-/// the strict `&Data::text()` decoding used by the previous implementation.
+/// Reads a file as strict UTF-8 text; raises `FsError` on I/O failure or invalid UTF-8.
 pub fn read_text_file(path : String) -> String raise FsError {
   let bytes = read_bytes_file(path)
   @utf8.decode(bytes) catch {
@@ -383,7 +342,7 @@ pub fn read_text_file(path : String) -> String raise FsError {
 }
 
 ///|
-/// Read a whole file as raw bytes.
+/// Reads a file as raw bytes.
 pub fn read_bytes_file(path : String) -> Bytes raise FsError {
   let res = read_file_ffi(read_file_sync, path)
   guard res.is_ok() else { raise FsError(res.as_message()) }
@@ -391,8 +350,7 @@ pub fn read_bytes_file(path : String) -> Bytes raise FsError {
 }
 
 ///|
-/// Read `length` bytes of `path` starting at byte `position`. Returns fewer
-/// bytes near the end of file.
+/// Reads up to `length` bytes of `path` starting at byte `position`.
 pub fn read_file_at(
   path : String,
   position~ : Int64,
@@ -411,7 +369,7 @@ pub fn read_file_at(
 }
 
 ///|
-/// The byte size of `path`.
+/// Returns the byte size of `path`.
 pub fn file_size(path : String) -> Int64 raise FsError {
   let res = file_size_ffi(stat_sync, path)
   guard res.is_ok() else { raise FsError(res.as_message()) }
@@ -419,7 +377,7 @@ pub fn file_size(path : String) -> Int64 raise FsError {
 }
 
 ///|
-/// Write bytes to `path`, replacing any existing file.
+/// Writes `data` to `path`, replacing any existing file.
 pub fn write_bytes_file(path : String, data : Bytes) -> Unit raise FsError {
   let res = write_file_ffi(write_file_sync, path, data)
   guard res.is_ok() else { raise FsError(res.as_message()) }
@@ -445,10 +403,7 @@ extern "js" fn rename_file_ffi(
   #| }
 
 ///|
-/// Replace `path` in one step: stage the new content in `path.tmp`, then
-/// rename it over the target, so a crash leaves either the old or the new
-/// content behind (pi's `publishFileAtomically`). The staged file is created
-/// with `permission` so the rename cannot widen the target's mode.
+/// Atomically replaces `path` with `data` by staging to `path.tmp` with `permission` and renaming.
 pub fn write_file_atomically(
   path : String,
   data : Bytes,
@@ -477,8 +432,7 @@ pub fn write_file_atomically(
 }
 
 ///|
-/// List the entry names of a directory (no hidden-file filtering and no
-/// sorting: callers apply their own policy).
+/// Lists entry names in directory `path`.
 pub fn read_dir(path : String) -> FixedArray[String] raise FsError {
   let res = read_dir_ffi(read_dir_sync, path)
   guard res.is_ok() else { raise FsError(res.as_message()) }
@@ -486,29 +440,28 @@ pub fn read_dir(path : String) -> FixedArray[String] raise FsError {
 }
 
 ///|
-/// Create `path` and any missing parent directories.
+/// Creates directory `path` and any missing parent directories.
 pub fn create_dir(path : String) -> Unit raise FsError {
   let res = create_dir_ffi(mkdir_sync, path)
   guard res.is_ok() else { raise FsError(res.as_message()) }
 }
 
 ///|
-/// Remove a file.
+/// Removes file `path`.
 pub fn remove_file(path : String) -> Unit raise FsError {
   let res = remove_file_ffi(unlink_sync, path)
   guard res.is_ok() else { raise FsError(res.as_message()) }
 }
 
 ///|
-/// Remove a directory and everything below it.
+/// Recursively removes directory `path`.
 pub fn remove_dir(path : String) -> Unit raise FsError {
   let res = remove_dir_ffi(rm_sync, path)
   guard res.is_ok() else { raise FsError(res.as_message()) }
 }
 
 ///|
-/// Create a fresh temporary directory under the system temp dir, prefixed with
-/// `prefix`, and return its path. `mkdtempSync` creates it with mode 0700.
+/// Creates a temporary directory under the system temp dir with `prefix` (mode 0700) and returns its path.
 pub fn create_temp_dir(prefix : String) -> String raise FsError {
   let res = mkdtemp_ffi(mkdtemp_sync, path_join(os_tmpdir(), prefix))
   guard res.is_ok() else { raise FsError(res.as_message()) }
@@ -516,14 +469,13 @@ pub fn create_temp_dir(prefix : String) -> String raise FsError {
 }
 
 ///|
-/// A file opened for sequential writes: the bash tool's output spill file.
+/// File handle opened for sequential writes.
 pub struct FsFile {
   fd : Int32
 }
 
 ///|
-/// Open `path` for writing. `allow_existing=false` (the default) fails when
-/// the file already exists, mirroring `@async/fs.create`.
+/// Opens `path` for writing; fails when `allow_existing` is `false` and `path` already exists.
 pub fn create_file(
   path : String,
   allow_existing~ : Bool = false,
@@ -536,15 +488,13 @@ pub fn create_file(
 }
 
 ///|
-/// Append `data` at the current write position.
+/// Writes `data` at the current file position.
 pub fn FsFile::write_bytes(self : FsFile, data : Bytes) -> Unit raise FsError {
   let res = write_all_ffi(write_sync, self.fd, data)
   guard res.is_ok() else { raise FsError(res.as_message()) }
 }
 
 ///|
-/// `FsFile` writes sequentially, so one `write_once` always consumes the whole
-/// slice (`write_bytes` loops internally because `writeSync` may write less).
 #warnings("-unused_async")
 pub impl @io.Writer for FsFile with fn write_once(
   self : FsFile,
@@ -560,17 +510,13 @@ pub impl @io.Writer for FsFile with fn write_once(
 pub extend FsFile with @io.Writer::{write_once, write, write_reader}
 
 ///|
-/// Close the file. Idempotent at the OS level is not guaranteed, so call it
-/// once.
+/// Closes the file descriptor.
 pub fn FsFile::close(self : FsFile) -> Unit {
   close_sync(self.fd)
 }
 
 ///|
-/// Open `path` for appending, creating it when absent.
-///
-/// Unlike `create_file`, an existing file is never truncated — this is how a
-/// resumed session keeps writing after its recorded entries.
+/// Opens `path` for appending, creating it if absent without truncating existing content.
 pub fn open_append_file(
   path : String,
   permission~ : Int32 = 0o600,
@@ -581,11 +527,7 @@ pub fn open_append_file(
 }
 
 ///|
-/// 延迟打开的会话文件:第一次写入时才创建/打开。
-///
-/// 会话在启动时就构造 journal,但用户可能一句话都没说(或第一轮就失败)。
-/// 早开文件会留下一堆空会话,`/resume` 也会挑中它们——所以在真正有东西可写之前,
-/// 不碰文件系统。
+/// Lazily opened file that defers creating or opening `path` until the first write.
 pub struct LazyFile {
   path : String
   append : Bool
@@ -594,8 +536,7 @@ pub struct LazyFile {
 }
 
 ///|
-/// `append=false` 时首次写入独占创建(已存在则报错),`append=true` 时首次写入
-/// 追加到已有文件(续写已恢复的会话)。
+/// Creates a `LazyFile` at `path` (exclusive creation when `append=false`, append mode when `append=true`).
 pub fn open_lazy_file(
   path : String,
   append~ : Bool = false,
@@ -605,7 +546,6 @@ pub fn open_lazy_file(
 }
 
 ///|
-/// 第一次需要写入时打开底层文件。
 fn LazyFile::ensure_open(self : LazyFile) -> FsFile raise FsError {
   match self.file {
     Some(file) => file
@@ -622,7 +562,7 @@ fn LazyFile::ensure_open(self : LazyFile) -> FsFile raise FsError {
 }
 
 ///|
-/// 没写过任何东西时关闭是空操作(文件也没被创建)。
+/// Closes the underlying file if it was opened.
 pub fn LazyFile::close(self : LazyFile) -> Unit {
   match self.file {
     Some(file) => file.close()

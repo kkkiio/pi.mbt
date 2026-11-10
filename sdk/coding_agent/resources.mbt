@@ -14,9 +14,7 @@ pub struct Skill {
   name : String
   description : String
   path : String
-  /// `disable-model-invocation: true` in `SKILL.md` frontmatter: keep the
-  /// skill out of the system prompt so only an explicit `/skill:<name>`
-  /// command can load it.
+  /// Whether `disable-model-invocation: true` is set in `SKILL.md` frontmatter.
   disable_model_invocation : Bool
 }
 
@@ -86,8 +84,8 @@ fn try_load_context_file(dir : String) -> ProjectContextFile? {
 }
 
 ///|
-/// Discover skills under `dir`: every `<dir>/<name>.md`, plus every
-/// `<dir>/<name>/SKILL.md`. A missing or unreadable directory returns empty.
+/// Discovers skills under `dir` (`<dir>/<name>.md` and `<dir>/<name>/SKILL.md`), sorted by name.
+/// Returns an empty array if `dir` is missing or unreadable.
 pub fn discover_skills(dir : String) -> Array[Skill] {
   let skills : Array[Skill] = []
   let entries = read_dir(dir) catch { _ => return skills }
@@ -100,7 +98,6 @@ pub fn discover_skills(dir : String) -> Array[Skill] {
       add_skill_file(skills, entry_path)
     } else {
       let nested = "\{entry_path}/SKILL.md"
-      // A non-directory entry simply has no nested `SKILL.md`.
       let has_nested = path_exists(nested)
       if has_nested {
         add_skill_file(skills, nested)
@@ -116,7 +113,6 @@ fn add_skill_file(skills : Array[Skill], path : String) -> Unit {
   let text = read_text_file(path) catch { _ => return }
   let fallback = match skill_fallback_name(path) {
     "SKILL" => {
-      // For <name>/SKILL.md layouts the directory carries the name.
       let parent = match path.rev_split_once("/") {
         Some((parent, _)) => parent
         None => path
@@ -198,8 +194,6 @@ pub fn parse_frontmatter(
 }
 
 ///|
-/// Drop a leading `---` … `---` frontmatter block, returning the body. Text
-/// without a closed block is returned unchanged.
 fn strip_frontmatter(text : String) -> String {
   let lines = [..text.split("\n")]
   guard lines is [first, .. rest] && first.trim() == "---" else { return text }
@@ -212,9 +206,7 @@ fn strip_frontmatter(text : String) -> String {
 }
 
 ///|
-/// Expand a `/skill:<name> [args]` command into the `<skill>` block the model
-/// receives (pi's `_expandSkillCommand`). Anything else — a non-command, an
-/// unknown skill name, an unreadable file — passes through unchanged.
+/// Expands a `/skill:<name> [args]` command into a `<skill>` XML block, or returns `text` unchanged if it does not match an installed skill.
 pub fn expand_skill_command(text : String, cwd~ : String) -> String {
   guard text.has_prefix("/skill:") else { return text }
   let rest = text[7:]
@@ -241,16 +233,13 @@ pub fn expand_skill_command(text : String, cwd~ : String) -> String {
 }
 
 ///|
-/// A `/skill:` block as `expand_skill_command` writes it: what the model saw,
-/// and therefore what a journal replay shows.
+/// Parsed `<skill>` block produced by `expand_skill_command`.
 #derive(Debug)
 pub struct SkillInvocation {
   name : String
   location : String
-  /// The `References are relative to <dir>.` line the block carries.
   references : String
   body : String
-  /// Text the user appended after the command, if any.
   args : String
 }
 
@@ -258,9 +247,7 @@ pub struct SkillInvocation {
 pub extend SkillInvocation with @debug.Debug::{to_repr}
 
 ///|
-/// Parse a `<skill …>` block back into its parts. Any other text returns
-/// `None`, so callers can render blocks specially and leave everything else
-/// alone.
+/// Parses a `<skill ...>` block into a `SkillInvocation`, or returns `None` if `text` is not a skill block.
 pub fn parse_skill_block(text : String) -> SkillInvocation? {
   let prefix = "<skill name=\""
   guard text.has_prefix(prefix) else { return None }
@@ -281,9 +268,7 @@ pub fn parse_skill_block(text : String) -> SkillInvocation? {
 }
 
 ///|
-/// The inverse of `parse_skill_block`: the text `expand_skill_command` would
-/// have produced. Keeping both in one place is what lets a reader rebuild a
-/// block it had to bound or rewrite.
+/// Formats the `SkillInvocation` back into a `<skill ...>` XML block.
 pub fn SkillInvocation::block_text(self : SkillInvocation) -> String {
   let block = "<skill name=\"\{self.name}\" location=\"\{self.location}\">\n\{self.references}\n\n\{self.body}\n</skill>"
   if self.args == "" {
@@ -294,7 +279,7 @@ pub fn SkillInvocation::block_text(self : SkillInvocation) -> String {
 }
 
 ///|
-/// The same invocation with a different body, for callers that must bound it.
+/// Returns a copy of `self` with its `body` replaced.
 pub fn SkillInvocation::with_body(
   self : SkillInvocation,
   body : String,

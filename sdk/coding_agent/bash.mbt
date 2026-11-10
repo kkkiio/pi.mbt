@@ -39,11 +39,6 @@ pub fn new_bash_tool_definition(
 }
 
 ///|
-/// pi's `bashOutputSchema`: the shape of `structured_content`, which codemode
-/// scripts resolve to. `output` is not limited like the model-facing output:
-/// it holds up to 1 MiB, and longer output keeps its first and last 512 KiB
-/// around an omission marker, with `truncated` set and the full output in
-/// `full_output_path`.
 let bash_output_schema : Json = {
   "type": "object",
   "properties": {
@@ -70,9 +65,7 @@ pub(all) struct BashExecParams {
   command : String
   cwd : String
   timeout : Int32?
-  /// Called from the JS `data` handler for stdout and stderr, so it has no
-  /// coroutine context: it must stay synchronous. The throttled UI update is
-  /// scheduled with a JS timer for the same reason.
+  /// Synchronous callback invoked on stdout and stderr chunks.
   on_data : ((BytesView) -> Unit)?
   override_envs : Map[String, String]
   inherit_env : Bool
@@ -114,11 +107,6 @@ async fn execute_bash_tool(
   let mut updateTimer : JsTimer? = None
   let mut updateDirty = false
   let mut lastUpdateAt : UInt64 = 0
-
-  // Data-path failures cannot cross the JS callback boundary (`on_data` is
-  // called from Node's `data` handler, which has no way to carry a MoonBit
-  // error), so the first one is recorded here and surfaced once the child has
-  // exited.
   let mut dataError : String? = None
 
   let emitOutputUpdate = () => {
@@ -126,8 +114,6 @@ async fn execute_bash_tool(
     updateDirty = false
     lastUpdateAt = @env.now()
     let snapshot = output.snapshot(persist_if_truncated=true) catch {
-      // A throttled UI refresh is best effort: a failure here is reported by
-      // the terminal snapshot in `finish_output`.
       _ => return
     }
     onUpdate([@agent_loop.InputMessageContent::Text(snapshot.content)], {
@@ -320,8 +306,6 @@ struct BashToolDetails {
 }
 
 ///|
-/// pi's `BashToolDetails` is `{ truncation?, fullOutputPath? }` with camelCase
-/// keys, so this is written by hand rather than derived.
 pub impl ToJson for BashToolDetails with fn to_json(self : BashToolDetails) -> Json {
   {
     "truncation": match self.truncation {

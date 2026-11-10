@@ -2,26 +2,26 @@
 
 [![Coverage Status](https://coveralls.io/repos/github/kkkiio/pi.mbt/badge.svg?branch=main)](https://coveralls.io/github/kkkiio/pi.mbt?branch=main)
 
-用 MoonBit 重新实现的 [pi](https://github.com/earendil-works/pi) coding agent 子集。
+A subset of the [pi](https://github.com/earendil-works/pi) coding agent reimplemented in MoonBit.
 
-![pim 全屏 TUI：示例对话、思考过程、bash 工具输出与输入框](docs/assets/tui-session.png)
+![pim full-screen TUI: sample conversation, thinking block, bash tool output, and prompt editor](docs/assets/tui-session.png)
 
 ## Install
 
 ```bash
-just package          # 构建 npm dist
-npm install -g .      # symlink 到全局
+just package          # build npm dist
+npm install -g .      # symlink globally
 ```
 
 ## Usage
 
-在终端中直接运行 `pim` 进入全屏 TUI:
+Run `pim` in a terminal to start the full-screen TUI:
 
 ```bash
 pim
 ```
 
-`-p/--print` 单轮、非交互模式:
+Single-turn, non-interactive print mode (`-p/--print`):
 
 ```bash
 DEEPSEEK_API_KEY=sk-xxx
@@ -29,7 +29,7 @@ pim -p "What's the capital of France? Respond with only the city name."
 # Paris
 ```
 
-使用 `--mode json` 启动, 可以输出 JSONL 事件流:
+Use `--mode json` to stream JSONL events:
 
 ```bash
 pim -p "What's the capital of France? Respond with only the city name." --mode json
@@ -42,19 +42,17 @@ pim -p "What's the capital of France? Respond with only the city name." --mode j
 
 ## Configuration
 
-| 变量              | 作用                                                 |
-| ----------------- | ---------------------------------------------------- |
-| `PIM_CONFIG_DIR`  | 配置目录,默认 `~/.pim`                               |
-| `PIM_SESSION_DIR` | 会话 JSONL 目录(等价于 `--session-dir`) |
-| `PIM_TOOLS`       | 启用的工具列表(逗号分隔,等价于 `--tools`) |
+| Variable          | Description                                               |
+| ----------------- | --------------------------------------------------------- |
+| `PIM_CONFIG_DIR`  | Configuration directory (default: `~/.pim`)               |
+| `PIM_SESSION_DIR` | Session JSONL directory (equivalent to `--session-dir`)   |
+| `PIM_TOOLS`       | Comma-separated list of enabled tools (same as `--tools`) |
 
-配置目录, 默认是 `~/.pim`.
+Sessions are persisted by default under `~/.pim/sessions/`.
 
-会话默认会持久化, 保存到 `~/.pim/sessions/` 下(同时创建会话目录)。
+### Authentication
 
-### 认证配置
-
-认证优先使用文件配置 `~/.pim/auth.json`:
+Credentials are read first from `~/.pim/auth.json`:
 
 ```json
 {
@@ -62,7 +60,7 @@ pim -p "What's the capital of France? Respond with only the city name." --mode j
 }
 ```
 
-也支持环境变量:
+Or from environment variables:
 
 ```bash
 DEEPSEEK_API_KEY=sk-xxx pim -p "hi"

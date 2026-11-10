@@ -21,8 +21,6 @@ pub extend TruncationResult with Eq::{not_equal, equal}
 pub extend TruncationResult with @debug.Debug::{to_repr}
 
 ///|
-/// pi's `TruncationResult` uses camelCase keys, so this is written by hand:
-/// `derive(ToJson)` would serialize the field names as written.
 pub impl ToJson for TruncationResult with fn to_json(self : TruncationResult) -> Json {
   {
     "content": self.content,
@@ -102,8 +100,6 @@ pub struct OutputAccumulator {
 }
 
 ///|
-/// Spill the full output into a fresh temp directory:
-/// `<tmpdir>/<prefix><random>/output.log`, created 0700/0600.
 fn create_temp_output_file(prefix : String) -> (String, FsFile) raise FsError {
   let directory = create_temp_dir(prefix)
   let path = "\{directory}/output.log"
@@ -398,17 +394,14 @@ pub fn OutputAccumulator::snapshot(
 }
 
 ///|
-/// pi's `FullOutput`: the complete output for callers that can take more than
-/// the display snapshot, such as a tool's `structured_content`.
+/// Complete output returned by `OutputAccumulator::read_full_output`.
 pub(all) struct FullOutput {
   content : String
   truncated : Bool
 }
 
 ///|
-/// The complete output. Call after `finish()` and `close_temp_file()`. Output
-/// longer than `max_bytes` keeps its first and last `max_bytes / 2` bytes
-/// around an omission marker, and `truncated` is set — pi's `readFullOutput`.
+/// Reads the accumulated output up to `max_bytes` (preserving the first and last `max_bytes / 2` bytes around an omission marker when truncated).
 pub fn OutputAccumulator::read_full_output(
   self : OutputAccumulator,
   max_bytes : Int32,
@@ -454,9 +447,6 @@ pub fn OutputAccumulator::read_full_output(
 }
 
 ///|
-/// `head` and `tail` joined around an `omitted`-byte marker, cut at UTF-8
-/// character boundaries: the head holds back an incomplete trailing sequence
-/// and the tail skips leading continuation bytes.
 fn head_tail_output(head : Bytes, tail : Bytes, omitted : Int32) -> FullOutput {
   let mut head_end = head.length()
   if head_end > 0 {

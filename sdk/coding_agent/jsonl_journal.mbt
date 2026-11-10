@@ -1,10 +1,5 @@
 ///|
-/// A JSON Lines session journal that implements `SessionJournal`.
-///
-/// The on-disk format is pi v3: a `type: "session"` header followed by
-/// direct entry objects.
-
-///|
+/// JSON Lines session journal implementing `SessionJournal` (v3 format).
 pub struct JsonlSessionJournal[W] {
   writer : W
   entries : Array[@agent_session.SessionEntry]
@@ -14,24 +9,16 @@ pub struct JsonlSessionJournal[W] {
   header_id : String
   created_at : UInt64
   mut leaf_id : String?
-  /// 构造时已存在的条目数(已落盘)。flush 只写这个下标之后的条目。
+  /// Number of pre-existing persisted entries at construction; only entries from `start_index` onward are flushed.
   start_index : Int32
-  /// 是否已经开始落盘。`false` 时新条目只在内存里。
+  /// Whether the initial flush has occurred.
   mut flushed : Bool
   now : () -> UInt64
 }
 
 ///|
-/// Create a JSONL session journal that writes to the given `writer`.
-///
-/// Nothing is written — and, when `writer` is a `LazyFile`, no file is even
-/// created — until the session has an assistant message, mirroring pi's
-/// `_persist`: a session that never got a reply leaves no trace on disk.
-/// The header is written at that first flush, so a resumed session passes
-/// `fresh=false` and appends straight to the entries already on file.
-///
-/// The caller is responsible for any parent directories, filename choice, and
-/// closing `writer` when done.
+/// Creates a JSONL session journal backed by `writer`.
+/// When `fresh` is `true`, nothing is written to `writer` until the first assistant message is appended.
 pub fn[W] JsonlSessionJournal::JsonlSessionJournal(
   writer : W,
   entries~ : Array[@agent_session.SessionEntry] = [],
@@ -80,10 +67,7 @@ pub extend JsonlSessionJournal with @agent_session.SessionJournal::{
 }
 
 ///|
-/// Append entries, flushing lazily like pi's `_persist`: until the buffer holds
-/// an assistant message nothing reaches the writer —— 配合惰性打开的 writer,
-/// 文件也不会被创建。第一轮没跑完的会话因此不会在磁盘上留下痕迹。
-/// 首次 flush 写出 header + 全部缓冲条目,之后的条目随即追加。
+/// Appends `provisioned` entries and lazily flushes the session header and buffered entries once an assistant message is present.
 pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
   W,
 ] with fn append(self, provisioned) {
@@ -112,12 +96,10 @@ pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
       }
       self.writer.write(header.stringify())
       self.writer.write("\n")
-      // 只写本次新增的;构造时传入的条目已经在盘上了。
       for i in self.start_index..<self.entries.length() {
         self.writer.write(self.entries[i].to_json().stringify())
         self.writer.write("\n")
       }
-      // 在批次内也要立刻置位,否则同一批的下一条会再 flush 一次。
       self.flushed = true
     }
   }
@@ -125,8 +107,6 @@ pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
 }
 
 ///|
-/// 本次新增的条目里是否已经有 assistant 消息(pi 用它决定何时创建文件)。
-/// 只在未 flush 时调用,那时新条目最多几条用户消息,扫描成本可忽略。
 fn[W] JsonlSessionJournal::has_assistant(self : JsonlSessionJournal[W]) -> Bool {
   for i in self.start_index..<self.entries.length() {
     match self.entries[i].content {
@@ -138,9 +118,6 @@ fn[W] JsonlSessionJournal::has_assistant(self : JsonlSessionJournal[W]) -> Bool 
 }
 
 ///|
-/// pi 的 `buildSessionPath`:没有显式 leaf 时以最后一个条目为 leaf,沿 `parentId`
-/// 回到根。分支被放弃的条目不属于活动路径 —— 既不该进模型上下文,也不该成为
-/// 续写的父节点。
 fn active_path(
   entries : Array[@agent_session.SessionEntry],
 ) -> Array[@agent_session.SessionEntry] raise Failure {
@@ -169,7 +146,7 @@ fn active_path(
 }
 
 ///|
-/// 恢复用:读 journal 并只保留当前活动的 `parentId` 链。
+/// Reads the journal at `path` and returns the active `parentId` chain ending at the last entry.
 pub fn fetch_active_entries(
   path : String,
 ) -> Array[@agent_session.SessionEntry] raise Failure {
@@ -177,8 +154,6 @@ pub fn fetch_active_entries(
 }
 
 ///|
-/// pi's `splitCompleteLines`: only a line that ends in `\n` is known to have
-/// been written whole, so an unterminated tail is a torn write.
 fn split_complete_lines(content : String) -> (String, Bool) {
   if content.length() == 0 || content.has_suffix("\n") {
     (content, false)
@@ -189,7 +164,8 @@ fn split_complete_lines(content : String) -> (String, Bool) {
 }
 
 ///|
-/// Repair an interrupted final write before resuming append-only persistence.
+/// Reads all entries from the journal at `path`, repairing any torn final line before returning.
+/// Raises `Failure` if the file cannot be read, has an invalid header, or contains malformed JSON entries.
 pub fn fetch_entries(
   path : String,
 ) -> Array[@agent_session.SessionEntry] raise Failure {
@@ -232,7 +208,6 @@ pub fn fetch_entries(
     match json {
       None =>
         if last {
-          // tolerate a torn final line (crash mid-append)
           continue
         } else {
           fail("session journal has invalid JSON at line \{i + 1}")

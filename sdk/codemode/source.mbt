@@ -1,19 +1,16 @@
 ///|
-/// pi's `CODEMODE_OPTIONS_PREFIX`(codemode/src/source.ts):可选的第一行
-/// `// @options: {...}` 指令。
+/// Prefix of the optional first-line `// @options: {...}` directive in codemode source.
 pub const CODEMODE_OPTIONS_PREFIX = "// @options:"
 
 ///|
-/// pi's `SUPPORTED_FIELDS_TEXT`:`@options` 仅支持的字段,错误信息原样引用。
 const SUPPORTED_FIELDS_TEXT = "`max_output_tokens` and `timeout_ms`"
 
 ///|
-/// pi's `MAX_TIMEOUT_MS`:`setTimeout` 支持的最大延迟,即 `timeout_ms` 上界。
+/// Maximum allowed value for `timeout_ms` in `@options`.
 pub const MAX_TIMEOUT_MS : Int32 = 2147483647
 
 ///|
-/// pi's `CODEMODE_SOURCE_GRAMMAR`:约束 options 行形状的 Lark 文法,逐字保留。
-/// pim 的 codemode 工具仍走 JsonSchema strict sampling,文法仅作对齐导出。
+/// Lark grammar constraining the optional first-line `@options` directive.
 pub const CODEMODE_SOURCE_GRAMMAR : String =
   #|
   #|start: options_source | plain_source
@@ -25,7 +22,7 @@ pub const CODEMODE_SOURCE_GRAMMAR : String =
   #|SOURCE: /[\s\S]+/
 
 ///|
-/// pi's `CodemodeSourceError`。
+/// Error raised when codemode source or its `@options` directive is invalid.
 pub(all) suberror CodemodeSourceError {
   CodemodeSourceError(String)
 }
@@ -40,25 +37,27 @@ pub impl Show for CodemodeSourceError with fn output(self, logger) {
 pub extend CodemodeSourceError with Show::{to_string, output}
 
 ///|
-/// pi's `ParsedCodemodeSource`:`code` 中 options 行被替换为空行,行号不变。
+/// Parsed codemode source with the `@options` line replaced by a blank line to preserve line numbers.
 pub(all) struct ParsedCodemodeSource {
   code : String
   options : CodemodeSourceOptions
 }
 
 ///|
-/// pi's `CodemodeSourceOptions`。
+/// Execution options parsed from the leading `// @options:` directive.
 pub(all) struct CodemodeSourceOptions {
-  /// 脚本输出的 token 预算。
+  /// Maximum output token budget for the script.
   max_output_tokens : Int64?
-  /// 整个脚本的硬超时(毫秒,含工具调用)。
+  /// Hard execution timeout in milliseconds, including nested tool calls.
   timeout_ms : Int32?
 }
 
 ///|
-/// pi's `parseCodemodeSource`:把可选的第一行 `// @options: {...}` 从脚本里
-/// 剥出来。空输入、非法 options、options 行不在第一行(否则会被静默忽略)
-/// 都抛 `CodemodeSourceError`。
+/// Parse JavaScript source and extract an optional first-line `// @options: {...}` directive.
+///
+/// - `input`: Raw JavaScript source text.
+/// - Returns: `ParsedCodemodeSource` with extracted options and line-preserving source code.
+/// - Raises `CodemodeSourceError` if `input` is empty, has no code after `@options`, has `@options` past line 1, or contains invalid options JSON/fields.
 pub fn parse_codemode_source(
   input : String,
 ) -> ParsedCodemodeSource raise CodemodeSourceError {
@@ -106,14 +105,11 @@ pub fn parse_codemode_source(
 }
 
 ///|
-/// pi's `isSafeInteger`:整数且 `|v| <= 2^53 - 1`。
 fn is_safe_integer(value : Double) -> Bool {
   value.trunc() == value && value.abs() <= 9007199254740991.0
 }
 
 ///|
-/// pi's `parseOptions`:options 必须是 JSON object、只允许已知字段、字段值
-/// 必须是非负 safe integer(`timeout_ms` 另要求 `1..=MAX_TIMEOUT_MS`)。
 fn parse_codemode_options(
   directive : String,
 ) -> CodemodeSourceOptions raise CodemodeSourceError {
@@ -165,8 +161,8 @@ fn parse_codemode_options(
 }
 
 ///|
-/// pi's `toCodemodeIdentifier`: characters that are not valid in a JavaScript
-/// identifier become `_`; an empty name becomes `_`.
+/// Convert a tool name into a valid JavaScript identifier by replacing invalid characters with `_`.
+/// Returns `"_"` when `name` is empty.
 pub fn to_codemode_identifier(name : String) -> String {
   let builder = StringBuilder()
   for c in name.iter() {

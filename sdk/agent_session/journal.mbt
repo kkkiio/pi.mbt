@@ -43,15 +43,9 @@ pub(all) enum SessionEntryContent {
     usage~ : @agent_loop.Usage?
   )
   Custom(custom_type~ : String, data~ : Json?)
-  /// pi metadata entries not used by the current agent (for example thinking levels).
+  /// Session metadata entries not directly interpreted by the agent loop.
   Metadata(Json)
-  /// pi's `context_edit`: an append-only change to one earlier entry's
-  /// contribution to the model context.
-  ///
-  /// Only pi's `replacement: null` form is represented — omit the target — which
-  /// is what the auto-retry lifecycle writes. pi's other form swaps the target's
-  /// content; nothing in pi.mbt emits it, so decoding one is an error instead of
-  /// a silent no-op. `project_messages` applies the edits.
+  /// Append-only context edit that omits `target_id` from projected model context.
   ContextEdit(target_id~ : String)
 }
 
@@ -96,7 +90,6 @@ pub impl ToJson for SessionEntry with fn to_json(self) -> Json {
     ContextEdit(target_id~) => {
       obj["type"] = Json("context_edit")
       obj["targetId"] = Json(target_id)
-      // pi always writes the field; `null` is the omit form this type represents.
       obj["replacement"] = Json::null()
     }
     Metadata(Object(fields)) =>
@@ -184,8 +177,6 @@ pub impl FromJson for SessionEntry with fn from_json(json, path) {
       guard fields.get("targetId") is Some(String(target_id)) else {
         decode_error(content_path, "context_edit entry is missing targetId")
       }
-      // pi also allows `{content}` here. Rejecting it keeps a decoded entry
-      // meaningful: the projection has no way to honour a replacement.
       guard fields.get("replacement") is Some(Null) else {
         decode_error(
           content_path, "context_edit content replacement is not supported",
@@ -228,7 +219,7 @@ pub fn SessionEntry::auxiliary_usage(self : SessionEntry) -> @agent_loop.Usage? 
 }
 
 ///|
-/// Shared by the session header and entries, matching Date.toISOString().
+/// Formats a Unix millisecond `timestamp` as a UTC ISO-8601 string (`YYYY-MM-DDTHH:mm:ss.sssZ`).
 pub fn format_journal_timestamp(timestamp : UInt64) -> String {
   let millis = timestamp.reinterpret_as_int64()
   let date = @time.PlainDateTime::from_unix_second(
@@ -274,7 +265,6 @@ fn[T] decode_error(
 }
 
 ///|
-/// pi stores timestamps as JSON numbers (Unix ms).
 fn parse_timestamp(
   json : Json?,
   path : @json.JsonPath,
@@ -321,9 +311,6 @@ fn parse_agent_message(
         match
           parse_assistant_content(item, path.add_key("content").add_index(i)) {
           Some(content) => contents.push(content)
-          // Legacy `hostedToolCall` blocks (pre-removal `web_search`) are kept
-          // readable: dropping them loads the rest of the journal instead of
-          // rejecting a session this version can no longer describe.
           None => ()
         }
       }
@@ -477,8 +464,6 @@ fn parse_assistant_content(
 }
 
 ///|
-/// Restore structured provider replay data while keeping opaque strings
-/// (including strings that happen to parse as JSON primitives) verbatim.
 fn parse_signature(json : Json?) -> Json {
   match json {
     Some(String(text)) => {

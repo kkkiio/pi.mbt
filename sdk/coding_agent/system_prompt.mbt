@@ -71,7 +71,6 @@ pub fn tools_guidelines_system_prompt(
 pub fn project_context_system_prompt_contributor(
   cwd~ : String,
 ) -> (ArrayView[String]) -> String {
-  // TODO: watch for changes to AGENTS.md and reload
   let context_files = load_agents_files(cwd)
   let prompt = project_context_system_prompt(context_files)
   _ => prompt
@@ -110,16 +109,13 @@ pub fn project_context_system_prompt(
 pub fn skills_system_prompt_contributor(
   cwd~ : String,
 ) -> (ArrayView[String]) -> String {
-  // TODO: watch for changes to skills and reload
   let skills = discover_skills("\{cwd}/.agents/skills")
   let prompt = skills_system_prompt(skills)
   _ => prompt
 }
 
 ///|
-/// Format the `<available_skills>` block. Skills with
-/// `disable_model_invocation = true` are omitted: they stay loadable through an
-/// explicit `/skill:<name>` command but must not be selected automatically.
+/// Formats the `<available_skills>` system prompt block, omitting skills with `disable_model_invocation = true`.
 pub fn skills_system_prompt(skills : ArrayView[Skill]) -> String {
   let visible = skills
     .iter()

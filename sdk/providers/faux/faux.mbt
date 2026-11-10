@@ -1,24 +1,14 @@
 ///|
-/// Scripted stand-in for a real provider, mirroring pi's `faux` provider
-/// (`packages/ai/src/providers/faux.ts`): a test enqueues terminal
-/// `AssistantMessage`s and each `generate` replays the next one through `sink`
-/// as streaming events before returning it. This keeps agent-loop / session
-/// tests free of network and credentials, and makes the sequence of model turns
-/// an explicit part of the test.
-///
-/// Deliberately small: no deferred responses, token-rate pacing, usage
-/// estimation or prompt caching. What is here is what loop-level tests need —
-/// scripted text, thinking and tool calls, streamed in chunks so a test can
-/// abort mid-stream.
+/// Scripted stand-in LLM provider that replays enqueued `AssistantMessage`s as streaming events.
 pub struct FauxLLM {
   api : String
   provider : String
   model : String
   mut responses : Array[@agent_loop.AssistantMessage]
   mut cursor : Int32
-  /// 流式分片之间的间隔(毫秒);0 表示不等待,让分片背靠背发出。
+  /// Delay between streamed chunks in milliseconds (`0` disables pacing).
   chunk_delay_ms : Int32
-  /// 每个流式分片的最大 UTF-16 长度(至少 1)。
+  /// Maximum UTF-16 code units per streamed chunk (at least `1`).
   chunk_size : Int32
 }
 

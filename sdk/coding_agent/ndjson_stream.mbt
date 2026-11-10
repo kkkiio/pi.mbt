@@ -1,9 +1,5 @@
 ///|
-/// Multiplexed `{ "stream_id", "data" }` NDJSON frames over a byte stream —
-/// pim's wire shape toward `scripts/codemode-sidecar.mjs`, which runs
-/// pi-codemode's `serveCodemodeRemote` behind it. `run` pumps the stream;
-/// `new_stream` allocates a `NdJsonStream`, a transparent `@codemode.VmChannel`
-/// ready for `Codemode::execute`.
+/// Multiplexer for `{ "stream_id", "data" }` NDJSON frames over a byte stream.
 pub struct NdJsonStreams[R, W] {
   priv reader : R
   priv writer : W
@@ -16,8 +12,7 @@ pub struct NdJsonStreams[R, W] {
 }
 
 ///|
-/// Create a demultiplexer over `reader`/`writer`. `run` must be called to
-/// pump frames, usually in a background task.
+/// Creates an NDJSON stream multiplexer over `reader` and `writer`.
 pub fn[R, W] NdJsonStreams::new(reader : R, writer : W) -> NdJsonStreams[R, W] {
   let send_slots : @aqueue.Queue[Unit] = @aqueue.Queue(kind=@aqueue.Unbounded)
   for _ in 0..<10 {
@@ -36,15 +31,11 @@ pub fn[R, W] NdJsonStreams::new(reader : R, writer : W) -> NdJsonStreams[R, W] {
 }
 
 ///|
-const MAX_FRAME_SIZE : Int32 = 16 * 1024 * 1024 // 16MB
+const MAX_FRAME_SIZE : Int32 = 16 * 1024 * 1024
 
 ///|
-/// Pump frames until the reader ends: a writer task serializes `send` calls
-/// onto the stream (the single writer, so frames never interleave) while the
-/// reader splits input on newlines and puts each `{ "stream_id", "data" }`
-/// frame's `data` into that stream's queue, dropping frames for unknown or
-/// closed stream ids. On EOF or error every stream queue is closed so
-/// pending `recv` raises, and `send_queue` is closed so the writer exits.
+/// Pumps incoming and outgoing NDJSON frames until `reader` reaches EOF or `close` is called.
+/// Raises if an incoming frame exceeds `MAX_FRAME_SIZE`, is truncated at EOF, or contains invalid JSON.
 pub async fn[R : @io.Reader, W : @io.Writer] NdJsonStreams::run(
   self : NdJsonStreams[R, W],
 ) -> Unit {

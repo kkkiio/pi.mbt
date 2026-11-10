@@ -1,9 +1,8 @@
 ///|
-/// 将会话日志条目转换为确定性的 YAML 转录文本。
+/// Render session journal entries into a deterministic YAML transcript.
 ///
-/// - `entries`: 会话日志中的 `SessionEntry` 序列。
-/// - 返回值: 经过 `ContextEdit` 过滤后的 YAML 格式对话转录字符串。
-/// - 边界条件: 当没有有效消息条目时返回 `"[]\n"`。
+/// - `entries`: `SessionEntry` sequence from a session journal.
+/// - Returns: YAML conversation transcript after applying `ContextEdit` omissions, or `"[]\n"` when no messages remain.
 pub fn from_entries(entries : ArrayView[@agent_session.SessionEntry]) -> String {
   let omitted : Set[String] = Set([])
   for entry in entries {
@@ -23,11 +22,10 @@ pub fn from_entries(entries : ArrayView[@agent_session.SessionEntry]) -> String 
 }
 
 ///|
-/// 将 Agent 消息序列转换为确定性的 YAML 转录文本。
+/// Render `AgentMessage` items into a deterministic YAML transcript.
 ///
-/// - `messages`: 对话中的 `AgentMessage` 序列（包含 `User`、`Assistant`、`ToolResult`）。
-/// - 返回值: 适合人类阅读与快照测试的 YAML 格式转录字符串。
-/// - 边界条件: 空序列返回 `"[]\n"`。
+/// - `messages`: `AgentMessage` sequence (`User`, `Assistant`, `ToolResult`).
+/// - Returns: Human-readable YAML transcript string, or `"[]\n"` when `messages` is empty.
 pub fn from_messages(messages : ArrayView[@agent_loop.AgentMessage]) -> String {
   if messages.is_empty() {
     return "[]\n"
@@ -192,10 +190,6 @@ fn write_yaml_block_lines(
 }
 
 ///|
-/// Whether `value` cannot survive a YAML round trip as a plain scalar:
-/// multiline text, leading indicator characters, `: `/` #`/`:` sequences
-/// that form mappings or comments, or text that reparses as a non-string
-/// (numbers, booleans, null, JSON fragments).
 fn needs_yaml_block(value : StringView) -> Bool {
   if value.contains("\n") ||
     value.contains(": ") ||
