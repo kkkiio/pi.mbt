@@ -5,12 +5,10 @@ pub(all) struct StartVmRequest {
 }
 
 ///|
-/// What the remote sends to the client: VM messages, or a failure outside the VM bridge. 
+/// Message sent from the VM or remote bridge to the host.
 pub(all) enum VmToHostMessage {
   Started(fingerprint~ : String)
-  /// `args` is the raw JSON text from the wire, parsed per call like pi's
-  /// `handleCall` — a malformed payload rejects that call instead of
-  /// failing the execution.
+  /// Raw JSON argument text parsed per call.
   CallTool(id~ : Int32, name~ : String, args~ : String?)
   CallGlobal(id~ : Int32, name~ : String, args~ : String?)
   Output(item~ : CodemodeOutputItem)
@@ -27,8 +25,7 @@ pub(all) enum HostToVmMessage {
 }
 
 ///|
-/// One item of the script's output, in the order the script produced it: `text()` and `console.*`
-/// produce text items, with `console: true` for `console.*`, and `image()` image items. `data` is base64.
+/// One item of script output (`text()`, `console.*`, or `image()`). `data` is base64-encoded.
 pub(all) enum CodemodeOutputItem {
   Text(text~ : String, console~ : Bool)
   Image(data~ : String, mimeType~ : String)
@@ -41,7 +38,7 @@ pub(all) enum WriteItem {
 }
 
 ///|
-/// The result the VM was processing when the script finished, 0 for its first run, and the calls issued by then.
+/// Call sequence and issued-call count at the moment the script finished.
 #derive(ToJson, FromJson)
 pub(all) struct CodemodeDuring {
   seq : Int32
@@ -55,20 +52,17 @@ pub extend CodemodeDuring with @json.ToJson::{to_json}
 pub extend CodemodeDuring with @json.FromJson::{from_json}
 
 ///|
-/// `{ name?, message, stack? }` of an error thrown by the script, carried on
-/// the wire as a JSON-encoded string.
 type ScriptErrorJson = Json
 
 ///|
 pub(all) enum CodemodeErrorKind {
-  /// The script threw or failed to parse. `name` and `stack` come from the script's error.
+  /// The script threw or failed to parse.
   Script
-  /// The overall deadline expired, or a VM on the calling thread used up its interrupt budget.
-  /// The execution ended and the VM was asked to stop; a worker or remote VM may still be computing.
+  /// The execution deadline or interrupt budget expired.
   Timeout
-  /// The remote VM reported an aborted execution. Local task cancellation propagates without a result.
+  /// The remote VM reported an aborted execution.
   Aborted
-  /// The VM or its transport failed outside the script's control (for example a wasm trap, a missing worker file, or a remote sandbox that failed).
+  /// The VM or transport failed outside the script's control.
   Sandbox
 }
 
@@ -81,38 +75,29 @@ pub(all) struct CodemodeError {
 }
 
 ///|
-/// A call's answer, pi's `CodemodeOutcome`: `Ok` resolves the script's
-/// promise with `value`, `Err` rejects it with an `Error` that carries
-/// `message` plus the own properties of `properties`.
+/// Outcome of a tool or global call: resolves with `value` or rejects with `message` and optional `properties`.
 pub(all) enum CallOutcome {
-  /// `payload` on the wire is the JSON text of `value`; absent means `undefined`.
   Resolve(value~ : Json?)
-  /// `payload` on the wire is `message` verbatim, not JSON-encoded. `properties`
-  /// is a JSON object the deterministic VM copies onto the script's `Error`.
   Reject(message~ : String, properties~ : Map[String, Json]?)
 }
 
 ///|
-/// The result of a tool or global call.
+/// Result frame for a tool or global call.
 pub(all) struct CallResponse {
   id : Int32
   outcome : CallOutcome
-  /// Deterministic mode: the sequence number of this result.
   seq : Int32?
-  /// Deterministic mode: the VM's clock when this result was produced.
   now : Double?
 }
 
 ///|
-/// Everything a VM needs to run one script, independent of where it runs. Plain data, so it can
-/// cross a `postMessage` or a Workers RPC call unchanged.
+/// Initial VM startup payload for running a script.
 pub(all) struct VmStartData {
   code : String
-  /// ALL_TOOLS
   tools : Array[Tool]
   globals : Array[Global]
   memory_limit_bytes : Double?
-  /// Snapshot for `load()`: key to stored JSON.
+  /// Initial snapshot for `load()`.
   store : Map[String, Json]
   deterministic : Deterministic?
 }
@@ -120,7 +105,6 @@ pub(all) struct VmStartData {
 ///|
 pub(all) struct Tool {
   name : String
-  /// the identifier the script uses; 
   js_name : String
   description : String
 }
@@ -139,9 +123,7 @@ pub extend Global with @json.ToJson::{to_json}
 pub extend Global with @json.FromJson::{from_json}
 
 ///|
-/// Run deterministically (`CodemodeSandboxBase.start()`): UTC, a virtual clock starting at `started_at` (ms since
-/// the epoch) that moves only with delivered results, randomness from `seed`, no `WeakRef`, results applied in
-/// `seq` order, and `started`/`idle` messages.
+/// Deterministic VM configuration with a virtual clock (`started_at` in ms) and PRNG `seed`.
 pub(all) struct Deterministic {
   started_at : Double
   seed : UInt32
@@ -156,7 +138,6 @@ fn[T] decode_error(
 }
 
 ///|
-/// Decode a field whose wire value is a JSON-encoded string.
 fn parse_json_text(
   text : String,
   path : @json.JsonPath,
@@ -167,7 +148,6 @@ fn parse_json_text(
 }
 
 ///|
-/// pi's `CodemodeRemoteRequest`: `{ data, interruptBudget? }`.
 pub impl @json.ToJson for StartVmRequest with fn to_json(self) -> Json {
   let obj : Map[String, Json] = Map([])
   obj["data"] = Json(self.data)
@@ -200,8 +180,6 @@ pub impl FromJson for StartVmRequest with fn from_json(json, path) {
 pub extend StartVmRequest with @json.FromJson::{from_json}
 
 ///|
-/// pi's `CodemodeRemoteMessage`: the tagged `WorkerToHostMessage` union plus
-/// the remote-side `{ "type": "failure", error }` wrapper.
 pub impl @json.ToJson for VmToHostMessage with fn to_json(self) -> Json {
   match self {
     Started(fingerprint~) => { "type": "started", "fingerprint": fingerprint }
@@ -241,8 +219,6 @@ pub impl @json.ToJson for VmToHostMessage with fn to_json(self) -> Json {
 pub extend VmToHostMessage with @json.ToJson::{to_json}
 
 ///|
-/// The `{ "type": "call", id, target, name, args? }` frame shared by
-/// `CallTool` (`target: "tool"`) and `CallGlobal` (`target: "global"`).
 fn call_message(
   id : Int32,
   target : String,
@@ -261,9 +237,6 @@ fn call_message(
 }
 
 ///|
-/// Missing optional fields decode as `None`. An unknown `type`, a `call`
-/// with an unknown `target`, or a `done` whose `writes` string does not
-/// parse raises `JsonDecodeError`.
 pub impl FromJson for VmToHostMessage with fn from_json(json, path) {
   guard json is Object(fields) else {
     decode_error(path, "VmToHostMessage: expected object")
@@ -401,8 +374,6 @@ pub impl FromJson for HostToVmMessage with fn from_json(json, path) {
 pub extend HostToVmMessage with @json.FromJson::{from_json}
 
 ///|
-/// `{ "type": "text", text, console?: true } | { "type": "image", data, mimeType }`.
-/// `console` is emitted only when `true`, matching pi's `console?: true`.
 pub impl @json.ToJson for CodemodeOutputItem with fn to_json(self) -> Json {
   match self {
     Text(text~, console~) => {
@@ -449,8 +420,6 @@ pub impl FromJson for CodemodeOutputItem with fn from_json(json, path) {
 pub extend CodemodeOutputItem with @json.FromJson::{from_json}
 
 ///|
-/// Inside a `done` message's `writes` string: `[key, json]` for `store()`
-/// sets and `[key]` for deletions.
 pub impl @json.ToJson for WriteItem with fn to_json(self) -> Json {
   match self {
     Set(key~, value~) =>
@@ -476,7 +445,6 @@ pub impl FromJson for WriteItem with fn from_json(json, path) {
 pub extend WriteItem with @json.FromJson::{from_json}
 
 ///|
-/// `"script" | "timeout" | "aborted" | "sandbox"`.
 pub impl @json.ToJson for CodemodeErrorKind with fn to_json(self) -> Json {
   Json::string(
     match self {
@@ -506,8 +474,6 @@ pub impl FromJson for CodemodeErrorKind with fn from_json(json, path) {
 pub extend CodemodeErrorKind with @json.FromJson::{from_json}
 
 ///|
-/// `{ kind, name?, message, stack? }`; `name` and `stack` are emitted only
-/// when set.
 pub impl @json.ToJson for CodemodeError with fn to_json(self) -> Json {
   let obj : Map[String, Json] = Map([])
   obj["kind"] = Json(self.kind)
@@ -553,9 +519,6 @@ pub impl FromJson for CodemodeError with fn from_json(json, path) {
 pub extend CodemodeError with @json.FromJson::{from_json}
 
 ///|
-/// `{ id, ok, payload?, seq?, now?, properties? }`; `payload` is JSON text
-/// when `ok` and a plain error message otherwise. Absent optional fields
-/// are omitted rather than written as `null`, matching pi's optional keys.
 pub impl @json.ToJson for CallResponse with fn to_json(self) -> Json {
   Json::object(self.fields())
 }
@@ -564,8 +527,6 @@ pub impl @json.ToJson for CallResponse with fn to_json(self) -> Json {
 pub extend CallResponse with @json.ToJson::{to_json}
 
 ///|
-/// The `result` frame's fields, shared by `CallResponse` itself and the
-/// `CallResult` variant that adds `"type": "result"`.
 fn CallResponse::fields(self : CallResponse) -> Map[String, Json] {
   let obj : Map[String, Json] = Map([])
   obj["id"] = Json(self.id)
@@ -594,8 +555,6 @@ fn CallResponse::fields(self : CallResponse) -> Map[String, Json] {
 }
 
 ///|
-/// Unknown keys (for example the `"type": "result"` tag) are ignored so the
-/// same object decodes as a bare response or a tagged `CallResult`.
 pub impl FromJson for CallResponse with fn from_json(json, path) {
   guard json is Object(fields) else {
     decode_error(path, "CallResponse: expected object")
@@ -613,7 +572,6 @@ pub impl FromJson for CallResponse with fn from_json(json, path) {
         },
       )
     Some(False) => {
-      // The VM does `new Error(payload)`; an absent payload means an empty message.
       let message = match fields.get("payload") {
         Some(String(message)) => message
         _ => ""
@@ -652,8 +610,6 @@ pub impl FromJson for CallResponse with fn from_json(json, path) {
 pub extend CallResponse with @json.FromJson::{from_json}
 
 ///|
-/// pi's `VmStartData`: `{ code, tools, globals, memoryLimitBytes?, store,
-/// deterministic? }`.
 pub impl @json.ToJson for VmStartData with fn to_json(self) -> Json {
   let obj : Map[String, Json] = Map([])
   obj["code"] = Json(self.code)
@@ -677,8 +633,6 @@ pub impl @json.ToJson for VmStartData with fn to_json(self) -> Json {
 pub extend VmStartData with @json.ToJson::{to_json}
 
 ///|
-/// `memoryLimitBytes` and `deterministic` may be absent or `null`; every
-/// other field is required.
 pub impl FromJson for VmStartData with fn from_json(json, path) {
   guard json is Object(fields) else {
     decode_error(path, "VmStartData: expected object")
@@ -728,7 +682,6 @@ pub impl FromJson for VmStartData with fn from_json(json, path) {
 pub extend VmStartData with @json.FromJson::{from_json}
 
 ///|
-/// `{ name, jsName, description }`.
 pub impl @json.ToJson for Tool with fn to_json(self) -> Json {
   { "name": self.name, "jsName": self.js_name, "description": self.description }
 }
@@ -754,7 +707,6 @@ pub impl FromJson for Tool with fn from_json(json, path) {
 pub extend Tool with @json.FromJson::{from_json}
 
 ///|
-/// `{ startedAt, seed }`.
 pub impl @json.ToJson for Deterministic with fn to_json(self) -> Json {
   { "startedAt": self.started_at, "seed": self.seed }
 }

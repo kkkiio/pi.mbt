@@ -27,16 +27,8 @@ pub fn Codemode::Codemode(
 }
 
 ///|
-/// Run `code` to completion on a fresh VM, answering the script's tool and
-/// global calls from `tools`/`globals` and accumulating its output. `store`
-/// is the `load()` snapshot; writes are reported in the result for the
-/// caller to apply.
-///
-/// The deadline includes VM launch and returns a `Timeout` error after cancelling
-/// in-flight calls and waiting for their cleanup. Nonpositive deadlines disable it.
-/// External task cancellation propagates after cleanup without producing a result.
-/// Every acquired VM is closed on exit; closing must stop the remote execution.
-/// A stream ending before a terminal frame produces a `Sandbox` error.
+/// Runs `code` on a fresh VM with the given `store` snapshot and `timeout_ms` deadline.
+/// Returns a `Timeout` error if `timeout_ms` (> 0) expires, or a `Sandbox` error if the VM stream ends prematurely.
 pub async fn Codemode::execute(
   self : Codemode,
   code : String,
@@ -245,10 +237,6 @@ priv struct PendingCall {
 }
 
 ///|
-/// Record the call and answer it. A missing tool/global gets an immediate
-/// error result; a found one runs in a background task so concurrent script
-/// calls stay concurrent. `pending` tracks in-flight calls, and finishing
-/// the execution clears it so a late reply sends nothing.
 async fn Codemode::dispatch_call(
   self : Codemode,
   tg : @async.TaskGroup[CodemodeResult],
@@ -333,34 +321,27 @@ async fn Codemode::dispatch_call(
 }
 
 ///|
-/// A `tools.<name>` or global the script can call. `execute` receives the
-/// call's first argument after a JSON round trip — `None` for `undefined`,
-/// `Some(Null)` for explicit `null` — or the whole arguments array when
-/// `spread`. Its return value is serialized
-/// back to the script; raising rejects the script's promise with the error
-/// message.
+/// A `tools.<name>` or global function exposed to the script.
+/// `execute` receives the first argument (`None` for `undefined`, or the full arguments array when `spread` is `true`) and returns the JSON result, or raises to reject the promise.
 pub(all) struct CodemodeTool {
   name : String
-  /// The identifier the script uses; `to_codemode_identifier(name)` when unset.
+  /// Identifier used in JS; defaults to `to_codemode_identifier(name)` when `None`.
   js_name : String?
-  /// Listed in `ALL_TOOLS` for tools.
+  /// Description listed in `ALL_TOOLS`.
   description : String
-  /// Schema of the single argument, for declaration rendering.
+  /// Input JSON schema for declaration rendering.
   input_schema : Json?
-  /// Schema of the resolved value, for declaration rendering.
+  /// Output JSON schema for declaration rendering.
   output_schema : Json?
-  /// Globals only: `execute` receives all call arguments as an array.
+  /// Whether `execute` receives all call arguments as an array (globals only).
   spread : Bool
-  /// Globals only: TypeScript parameter list and return type for
-  /// `render_declarations`, replacing the rendering from the schemas.
+  /// Custom TypeScript signature for `render_declarations` (globals only).
   signature : String?
   execute : async (Json?) -> Json
 }
 
 ///|
-/// pi's `CodemodeResult`. `output` is kept for failed executions too, up to
-/// the failure. `during` is the result the VM was processing when a
-/// script-ended run finished.
+/// Result of a codemode execution, preserving `output` and `calls` on both success and failure.
 pub(all) enum CodemodeResult {
   Ok(
     value~ : Json?,
@@ -378,9 +359,7 @@ pub(all) enum CodemodeResult {
 }
 
 ///|
-/// pi's `CodemodeCall`: one `tools.*` call's entry in the `calls` ledger,
-/// `status` is `"ok"`, `"error"`, or `"cancelled"` (still in flight when the
-/// execution ended).
+/// Ledger entry for a `tools.*` call (`status` is `"ok"`, `"error"`, or `"cancelled"`).
 pub(all) struct CodemodeCall {
   name : String
   mut status : String
@@ -388,7 +367,7 @@ pub(all) struct CodemodeCall {
 }
 
 ///|
-/// Keys the script changed with `store()`. Only successful executions report writes.
+/// Store mutations (`set` and `delete`) reported by a successful script execution.
 pub(all) struct CodemodeStoreWrites {
   set : Map[String, Json]
   delete : Array[String]

@@ -55,25 +55,16 @@ struct SidecarProcess {
 }
 
 ///|
-/// Spawn `node <script>`. The process keeps running until `kill` or until it
-/// exits on its own; either way `stdout` reads EOF.
-///
-/// `stdout` goes through `@js_async.ReadableStream`, whose reads suspend on
-/// `Promise::wait` — settling a JS promise is what re-arms the coroutine
-/// scheduler on this backend. A raw `stdout.on("data", ...)` callback would
-/// only enqueue the waiting coroutine without rescheduling it, stalling the
-/// stream whenever the scheduler's task chain has gone idle.
+/// Spawns `node <script>` with piped stdin/stdout and returns its `SidecarProcess` handle.
 pub fn SidecarProcess::spawn(script : String) -> SidecarProcess {
   let child = node_spawn([script], sidecar_spawn_options())
   let stdout = @js_async.ReadableStream::from_js(child.stdout_to_web())
-  // `stdin.write` can raise EPIPE asynchronously when the sidecar dies;
-  // surface it as the end of stdout so the pump unwinds like a normal exit.
   child.on_stdin_error(() => stdout.close())
   { child, stdout, stdin: SidecarStdin::{ child, }, }
 }
 
 ///|
-/// Signal the child to exit. Idempotent on the Node side.
+/// Signals the sidecar process to terminate.
 pub fn SidecarProcess::kill(self : SidecarProcess) -> Unit {
   self.child.kill()
 }

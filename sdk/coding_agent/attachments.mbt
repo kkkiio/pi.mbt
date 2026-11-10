@@ -1,16 +1,5 @@
-// @file 附件处理:把 CLI 的 `@path` 参数变成首条用户消息里的 `<file>` 文本块
-// 和 base64 内联图片附件。
-//
-// 行为对齐 pi 的 `processFileArguments`(packages/coding-agent/src/cli/
-// file-processor.ts):逐 arg 解析路径(`~` 展开、相对 cwd)、跳过空文件、
-// 按魔数嗅探图片类型;支持内联的图片走 base64,不支持(如 BMP)降级为占位
-// 文案,其余一律当 utf-8 文本注入。
-//
-// 图片嗅探逻辑复刻 pi 的 `detectSupportedImageMimeType`(utils/mime.ts),
-// 包括 JPEG-XL / APNG 的排除规则和 BMP 的 DIB 头校验。
-
 ///|
-/// 已处理的 `@file` 参数:拼接进首条用户消息的文本与图片附件。
+/// Processed `@file` arguments containing `<file>` text blocks and inline image attachments.
 #derive(Eq, Debug)
 pub struct ProcessedFiles {
   text : String
@@ -24,7 +13,7 @@ pub extend ProcessedFiles with Eq::{not_equal, equal}
 pub extend ProcessedFiles with @debug.Debug::{to_repr}
 
 ///|
-/// base64 内联的图片附件(mirrors pi's ImageContent)。
+/// Base64-encoded inline image attachment.
 #derive(Eq, Debug)
 pub struct AttachedImage {
   data : String
@@ -38,16 +27,8 @@ pub extend AttachedImage with Eq::{not_equal, equal}
 pub extend AttachedImage with @debug.Debug::{to_repr}
 
 ///|
-/// 把 `@file` 参数处理成文本引用 + 图片附件(pi `processFileArguments`)。
-///
-/// `file_args` 里的每个参数先按 `cwd` 解析成绝对路径(`~`/`~/` 展开为
-/// home 目录),不存在的路径抛 `FsError("File not found: <abs>")`;空文件
-/// 直接跳过。之后按前 4100 字节的魔数分流:
-///
-/// - jpeg/png/gif/webp → base64 进 `images`,text 记 `<file name="abs"></file>`;
-/// - bmp → 不做格式转换,text 记 pi 转换失败的降级文案;
-/// - 其余 → 当 utf-8 文本(lossy 解码、去 BOM),text 记
-///   `<file name="abs">\n<content>\n</file>`。
+/// Resolves `@file` arguments against `cwd` (`~` expanded to home directory) into `<file>` text blocks and base64 `images`.
+/// Skips empty files; raises `FsError` if a file does not exist or cannot be read.
 pub fn process_file_arguments(
   cwd~ : String,
   file_args : ArrayView[String],
@@ -65,7 +46,6 @@ pub fn process_file_arguments(
     if bytes.length() == 0 {
       continue
     }
-    // 嗅探只需要文件头,与 pi 的 IMAGE_TYPE_SNIFF_BYTES 一致。
     let sniff_bytes = if bytes.length() > 4100 {
       bytes[:4100]
     } else {
@@ -73,8 +53,6 @@ pub fn process_file_arguments(
     }
     match detect_supported_image_mime_type(sniff_bytes) {
       Some("image/bmp") =>
-        // pi 会把 bmp 转成 png 再内联;这里没有格式转换,直接用它
-        // processImage 失败时的降级文案。
         text.write_string(
           "<file name=\"\{abs}\">[Image omitted: could not be converted to a supported inline image format.]</file>\n",
         )
@@ -96,13 +74,9 @@ pub fn process_file_arguments(
 }
 
 ///|
-/// 魔数嗅探图片类型;不支持/非图片返回 `None`。
-///
-/// 识别 jpeg/png/gif/webp/bmp 五种;JPEG-XL(`FF D8 FF F7`)和动画 PNG
-/// (IDAT 前出现 acTL chunk)被明确排除,bmp 还要过 DIB 头校验才算数。
+/// Sniffs a supported image MIME type (`image/jpeg`, `image/png`, `image/gif`, `image/webp`, or `image/bmp`) from magic `bytes`, or returns `None` (excluding JPEG-XL and animated PNG).
 pub fn detect_supported_image_mime_type(bytes : BytesView) -> String? {
   if bytes.has_prefix(b"\xff\xd8\xff"[:]) {
-    // 第四字节 F7 是 JPEG-XL 的容器签名,不是 jpeg。
     return if bytes.get(3) is Some(0xf7) { None } else { Some("image/jpeg") }
   }
   if bytes.has_prefix(png_signature[:]) {
@@ -126,16 +100,10 @@ pub fn detect_supported_image_mime_type(bytes : BytesView) -> String? {
   None
 }
 
-// ---------------------------------------------------------------------------
-// 内部:路径解析与二进制嗅探
-// ---------------------------------------------------------------------------
-
 ///|
 let png_signature : Bytes = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a"
 
 ///|
-/// 展开 `~`、相对路径拼到 `cwd` 后,再做 POSIX 段规范化(`.`、`..`、
-/// 重复斜杠),得到展示用的绝对路径。
 fn resolve_attachment_path(cwd : String, arg : String) -> String {
   let joined = if arg == "~" || arg.has_prefix("~/") {
     home_dir() + arg[1:].to_owned()
@@ -156,13 +124,11 @@ fn resolve_attachment_path(cwd : String, arg : String) -> String {
 }
 
 ///|
-/// 读小端 u16;越界位置按 0 处理(对齐上游 `buffer[i] ?? 0`)。
 fn read_u16le(bytes : BytesView, offset : Int32) -> Int32 {
   byte_or_zero(bytes, offset) | (byte_or_zero(bytes, offset + 1) << 8)
 }
 
 ///|
-/// 读大端 u32;用 Int64 承载避免 >0x7fffffff 时回绕成负数。
 fn read_u32be(bytes : BytesView, offset : Int32) -> Int64 {
   (byte_or_zero(bytes, offset).to_int64() << 24) |
   (byte_or_zero(bytes, offset + 1).to_int64() << 16) |
@@ -171,7 +137,6 @@ fn read_u32be(bytes : BytesView, offset : Int32) -> Int64 {
 }
 
 ///|
-/// 读小端 u32;同 `read_u32be` 用 Int64 防回绕。
 fn read_u32le(bytes : BytesView, offset : Int32) -> Int64 {
   byte_or_zero(bytes, offset).to_int64() |
   (byte_or_zero(bytes, offset + 1).to_int64() << 8) |
@@ -188,7 +153,6 @@ fn byte_or_zero(bytes : BytesView, offset : Int32) -> Int32 {
 }
 
 ///|
-/// PNG 结构校验:签名后是 length=13 的 IHDR chunk。
 fn is_png(bytes : BytesView) -> Bool {
   bytes.length() >= 16 &&
   read_u32be(bytes, 8) == 13 &&
@@ -196,7 +160,6 @@ fn is_png(bytes : BytesView) -> Bool {
 }
 
 ///|
-/// 动画 PNG 判定:扫 chunk 序列,在 IDAT 之前出现 acTL 即动画。
 fn is_animated_png(bytes : BytesView) -> Bool {
   let mut offset = 8
   while offset + 8 <= bytes.length() {
@@ -218,7 +181,6 @@ fn is_animated_png(bytes : BytesView) -> Bool {
 }
 
 ///|
-/// BMP 校验:文件头声明的尺寸自洽,且 DIB 头里的 planes/bpp 合法。
 fn is_bmp(bytes : BytesView) -> Bool {
   if bytes.length() < 26 {
     return false

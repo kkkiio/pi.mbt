@@ -149,7 +149,6 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
       async fn() { idle_timeout_task(idle_timeout_ms) },
     ])
     match raced {
-      // 读到一行:空行 = 事件边界,flush;非空行缓存。
       Race::Line(raw) => {
         let trimmed = raw.trim()
         if trimmed.is_empty() {
@@ -170,11 +169,8 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
         } else if !trimmed.has_prefix(":") {
           data_lines.push(trimmed)
         }
-        // 读到的是数据行,继续下一轮竞速。
         continue
       }
-      // EOF 或空闲超时赢了:fall through 到下面的 flush,超时分支改报
-      // 重试型超时错误,EOF 分支报提前结束。
       Race::Eof | Race::IdleTimeout => ()
     }
     let idle_timed_out = raced is Race::IdleTimeout
@@ -194,12 +190,6 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
     }
     match idle_timed_out {
       true =>
-        // A silent stall is a transient provider/network condition: it is
-        // retried (within the caller's retry window, i.e. while no event has
-        // streamed) instead of failing the run.
-        // Wording matters: the session-level retry policy matches "timed out"
-        // (pi's phrasing), so a stall past the provider's retry window still
-        // reads as a transient condition there.
         raise RetryableApiError(
           "Responses stream timed out (idle for \{idle_timeout_ms}ms)",
         )
@@ -210,19 +200,13 @@ pub async fn[R : @io.Reader] read_responses_sse_stream(
 }
 
 ///|
-/// 竞速结果:胜者身份。`any` 只返回胜者的返回值,不吿知下标,所以每个分支
-/// 都要在返回值里带上自己的编码。
 priv enum Race {
-  /// 读到一行(可能为空行,即 SSE 事件分隔符)。
   Line(String)
-  /// 流结束(EOF)。
   Eof
-  /// 空闲超时:既不读数据也不中断时的停滞保护。
   IdleTimeout
 }
 
 ///|
-/// 竞速分支:读一行。读到 = Line,EOF = Eof。
 async fn[R : @io.Reader] read_until_task(reader : R) -> Race {
   match reader.read_until("\n") {
     Some(raw) => Race::Line(raw.to_string())
@@ -231,7 +215,6 @@ async fn[R : @io.Reader] read_until_task(reader : R) -> Race {
 }
 
 ///|
-/// 竞速分支:空闲超时。既不读到数据也不中断时,把流当作停滞报错。
 async fn idle_timeout_task(timeout_ms : Int32) -> Race {
   @async.sleep(timeout_ms)
   Race::IdleTimeout

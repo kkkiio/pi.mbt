@@ -1,16 +1,16 @@
 # github_issues_codemode
 
-codemode 调用自定义工具 `github_list_issues` 统计 GitHub open issues 的示例。
+Example of using `codemode` with a custom `github_list_issues` tool to count and group open GitHub issues.
 
-## 运行
+## Run
 
-需要 `gh`(已登录 GitHub)和 DeepSeek key(`DEEPSEEK_API_KEY`、`.env` 或 `~/.pim/auth.json`):
+Requires `gh` (authenticated with GitHub) and a DeepSeek API key (`DEEPSEEK_API_KEY`, `.env`, or `~/.pim/auth.json`):
 
 ```bash
 moon run --target js examples/github_issues_codemode
 ```
 
-## 输出
+## Output
 
 ```text
 - user: Count all open issues (excluding pull requests) in https://github.com/earendil-works/pi and group them by label name (sorted by count descending, plus an `(unlabeled)` count for issues with no labels). Also report total open issues.

@@ -1,18 +1,15 @@
 ///|
-/// Session-level events delivered to `AgentSession.subscribe` listeners.
-/// Loop events are wrapped so session-level signals (auto-retry) stay out of
-/// the agent loop's `AgentEvent` protocol.
+/// Session-level events delivered to `AgentSession::subscribe` listeners.
 pub enum AgentSessionEvent {
   Loop(@agent_loop.AgentEvent)
-  /// Emitted before the backoff sleep of each auto-retry of a failed prompt.
+  /// Emitted before the backoff sleep of each auto-retry attempt.
   AutoRetryStart(
     attempt~ : Int32,
     max_attempts~ : Int32,
     delay_ms~ : Int32,
     error_message~ : String
   )
-  /// Emitted once a retried prompt settles: success after a retry, or the
-  /// budget exhausted / error not retryable / retry cancelled.
+  /// Emitted once a retried prompt settles.
   AutoRetryEnd(attempt~ : Int32, success~ : Bool, final_error~ : String?)
 }
 

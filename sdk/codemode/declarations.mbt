@@ -1,24 +1,17 @@
 ///|
-/// pi's `DEFAULT_INPUT_SCHEMA_MAX_CHARS`: the largest rendered input type, in
-/// characters, before it becomes `unknown`.
+/// Maximum rendered character length for an input schema before falling back to `unknown`.
 pub const DEFAULT_INPUT_SCHEMA_MAX_CHARS = 16000
 
 ///|
-/// pi's `MAX_REF_EXPANSIONS`: local `$ref` expansions per rendered schema, so
-/// shared definitions cannot blow up the output.
 const MAX_REF_EXPANSIONS = 32
 
 ///|
-/// pi's `TAG_KEYWORDS`: JSON Schema keywords with a number or string value
-/// shown as `@keyword value` property tags.
 let tag_keywords : Array[String] = [
   "minimum", "exclusiveMinimum", "maximum", "exclusiveMaximum", "multipleOf", "minLength",
   "maxLength", "pattern", "format", "minItems", "maxItems",
 ]
 
 ///|
-/// pi's `LOWER_BOUNDS`/`UPPER_BOUNDS`: tag keywords whose values all hold at
-/// once, so only the largest (lower) or smallest (upper) matters.
 let lower_bounds : Array[String] = [
   "minimum", "exclusiveMinimum", "minLength", "minItems",
 ]
@@ -29,22 +22,17 @@ let upper_bounds : Array[String] = [
 ]
 
 ///|
-/// pi's `MAX_TAG_CHARS`: the longest property tag; longer ones (large
-/// defaults, long patterns) are left out.
 const MAX_TAG_CHARS = 80
 
 ///|
-/// pi's `INDENT`.
 const INDENT = "  "
 
 ///|
-/// Render TypeScript declarations for the script-visible API, pi's
-/// `renderDeclarations`. Tools become members of `declare const tools`,
-/// globals become `declare function` statements, and `ns.member` globals
-/// become members of `declare const ns`. `tools`/`globals` are the
-/// script-callable entries; the result is the declaration text, empty when
-/// there is nothing to declare. Descriptions become doc comments and schemas
-/// become types; a global's `signature` overrides the schema rendering.
+/// Render TypeScript declarations for tools and globals exposed to codemode scripts.
+///
+/// - `tools`: Tool definitions rendered under `declare const tools`.
+/// - `globals`: Global functions or `namespace.member` entries.
+/// - Returns: TypeScript declaration text, or `""` when both inputs are empty.
 pub fn render_declarations(
   tools~ : ArrayView[CodemodeTool] = [],
   globals~ : ArrayView[CodemodeTool] = [],
@@ -88,10 +76,8 @@ pub fn render_declarations(
 }
 
 ///|
-/// One tool as a member of the `tools` object, pi's `renderToolSignature`:
-/// `name(args: T): Promise<R>;` with the identifier scripts use. `tool` is the
-/// declared tool and `input_max_chars` the largest rendered input type; a
-/// longer one renders as `unknown` (no tags first, then `unknown`).
+/// Render a single tool signature (`name(args: T): Promise<R>;`) for the `tools` declaration object.
+/// Falls back to untagged types or `unknown` if the input type exceeds `input_max_chars`.
 pub fn render_tool_signature(
   tool : CodemodeTool,
   input_max_chars~ : Int32 = DEFAULT_INPUT_SCHEMA_MAX_CHARS,
@@ -105,10 +91,7 @@ pub fn render_tool_signature(
 }
 
 ///|
-/// A tool's sample, pi's `renderToolSample`: the description followed by the
-/// tool's declaration, for tool listings and `ALL_TOOLS` entries. `tool` is
-/// the declared tool and `input_max_chars` the largest rendered input type;
-/// the result is the sample text.
+/// Render a tool's description and TypeScript declaration block for tool listings and `ALL_TOOLS`.
 pub fn render_tool_sample(
   tool : CodemodeTool,
   input_max_chars~ : Int32 = DEFAULT_INPUT_SCHEMA_MAX_CHARS,
@@ -118,8 +101,7 @@ pub fn render_tool_sample(
 }
 
 ///|
-/// The type a tool call resolves to, pi's `renderToolOutputType`: the output
-/// schema's type, or `unknown` when `schema` is `None`.
+/// Render the TypeScript return type for a tool's `output_schema`, or `"unknown"` when `None`.
 pub fn render_tool_output_type(schema : Json?) -> String {
   match schema {
     Some(json) => schema_to_type(json)
@@ -128,15 +110,11 @@ pub fn render_tool_output_type(schema : Json?) -> String {
 }
 
 ///|
-/// Convert a JSON Schema to a TypeScript type expression, pi's `schemaToType`:
-/// objects on one line (`{ a: string; b?: number; }`) with properties sorted by
-/// name, or one property per line with `//` comments when a property has a
-/// description or constraints the type cannot express (`// @integer @minimum 1
-/// @default 20`); `Array<T>` for arrays. Local references (`#/$defs/...`,
-/// `#/definitions/...`) resolve against `schema`; recursive, remote and
-/// malformed references render as `unknown`. When `max_chars` is `Some` and the
-/// tagged result is longer, it is rendered again without the constraint tags,
-/// and renders as `unknown` if it is still too long.
+/// Convert a JSON Schema to a TypeScript type expression.
+///
+/// - `schema`: JSON Schema value.
+/// - `max_chars`: Optional character limit; when exceeded, retries without constraint tags and then falls back to `"unknown"`.
+/// - Returns: TypeScript type string (`"unknown"` for unresolvable, recursive, or oversized schemas).
 pub fn schema_to_type(schema : Json, max_chars~ : Int32? = None) -> String {
   fn render(tags : Bool) -> String {
     to_type(schema, SchemaContext::{
@@ -160,10 +138,8 @@ pub fn schema_to_type(schema : Json, max_chars~ : Int32? = None) -> String {
 ///|
 priv struct SchemaContext {
   root : Json
-  /// References being expanded on the current path, to stop at recursive types.
   resolving : Map[String, Bool]
   mut expansions : Int32
-  /// Whether property comments include constraint tags.
   tags : Bool
 }
 
@@ -293,15 +269,8 @@ fn array_type(obj : Map[String, Json], context : SchemaContext) -> String {
 }
 
 ///|
-/// Constraints of a property that its TypeScript type cannot express, as
-/// JSDoc-style tags: `@integer @minimum 1 @maximum 100 @default 20`. `schema`
-/// is the property value; the result is the tag text, empty when there are
-/// none or it is not a schema object.
 fn constraint_tags(schema : Json) -> String {
   guard schema is Object(property) else { return "" }
-  // Optional fields such as Pydantic's `int | None` keep their constraints in
-  // the non-null branch. The branch's constraints apply together with the
-  // property's, so both are read.
   let variants = match property.get("anyOf") {
     Some(Array(list)) => list
     _ =>
@@ -319,8 +288,6 @@ fn constraint_tags(schema : Json) -> String {
   } else {
     [property]
   }
-  // Draft-04 and OpenAPI 3.0 make `minimum`/`maximum` exclusive with a boolean
-  // `exclusiveMinimum`/`exclusiveMaximum`.
   let schemas = branches.map(schema => {
     let normalized = schema.copy()
     if normalized.get("exclusiveMinimum") is Some(True) {
@@ -397,7 +364,6 @@ fn constraint_tags(schema : Json) -> String {
   if schemas.iter().any(schema => schema.get("uniqueItems") is Some(True)) {
     tags.push("@uniqueItems")
   }
-  // Annotations, unlike constraints, come from the property itself.
   if property.get("default") is Some(value) && !(value is Null) {
     tags.push("@default \{value.stringify()}")
   }
@@ -575,7 +541,6 @@ fn description_of(property : Json) -> String {
 }
 
 ///|
-/// `\r`, `\n`, `\u2028` and `\u2029` each end a `//` comment.
 fn is_line_terminator(c : Char) -> Bool {
   c == '\r' || c == '\n' || c == '\u2028' || c == '\u2029'
 }
@@ -597,7 +562,6 @@ fn split_line_terminators(text : String) -> Array[String] {
 }
 
 ///|
-/// Split on `\r?\n`: a `\r` is only a split point together with `\n`.
 fn split_crlf(text : StringView) -> Array[String] {
   let lines : Array[String] = []
   let mut current = StringBuilder()

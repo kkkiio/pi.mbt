@@ -264,7 +264,7 @@ pub fn AgentSession::active_tool_names(
 }
 
 ///|
-/// 中断当前运行(如果没有正在跑的,则无效果)。
+/// Cancels the currently active prompt run, if any.
 pub fn AgentSession::abort(self : AgentSession) -> Unit {
   guard self.active_run is Some(run) else { return }
   if !run.val.1 {
@@ -280,13 +280,6 @@ pub fn AgentSession::abort(self : AgentSession) -> Unit {
 pub type SystemPromptContributor = (ArrayView[String]) -> String
 
 ///|
-/// 从 journal 条目投影出模型上下文。压缩条目把此前的历史换成"总结 + 保留尾部"
-/// (pi 的 `buildContextEntries` + `sessionEntryToContextMessages`):总结作为一条
-/// user 消息注入,被摘要掉的历史不再进上下文。
-///
-/// `context_edit` 条目剔除它指向的目标(pi 的 `projectContextEntry` 在
-/// `replacement === null` 时返回空)。edits 从选中的条目里收集,所以被最新
-/// 压缩丢掉的那一段里的 edit 不再生效。
 fn project_messages(
   entries : ArrayView[SessionEntry],
 ) -> Array[@agent_loop.AgentMessage] {

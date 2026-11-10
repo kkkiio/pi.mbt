@@ -1,11 +1,6 @@
 ///|
-/// Stateful wrapper around `@agent_loop.run_agent_loop`, mirroring pi's
-/// `Agent`: it owns the transcript, the active tool set, the assembled system
-/// prompt and one run.
-///
-/// Session policy stays outside on purpose — the journal and the auto-retry
-/// window are not agent state. `Agent::run` executes one attempt so a session
-/// can own a cancellable retry window and persist events as they happen.
+/// Stateful wrapper around `@agent_loop.run_agent_loop` that owns the transcript,
+/// active tool set, and assembled system prompt.
 pub struct Agent {
   llm : &@agent_loop.LLM
   tool_registry : @tools.ToolRegistry
@@ -43,13 +38,13 @@ pub fn Agent::Agent(
 }
 
 ///|
-/// The transcript handed to the next run.
+/// Returns the transcript for the next run.
 pub fn Agent::messages(self : Agent) -> ArrayView[@agent_loop.AgentMessage] {
   self.messages
 }
 
 ///|
-/// Replace the transcript, e.g. after projecting a journal or editing context.
+/// Replaces the agent's transcript with `messages`.
 pub fn Agent::set_messages(
   self : Agent,
   messages : ArrayView[@agent_loop.AgentMessage],
@@ -58,6 +53,7 @@ pub fn Agent::set_messages(
 }
 
 ///|
+/// Sets the active tool names. Raises if any name in `names` is not registered.
 pub fn Agent::set_active_tools(
   self : Agent,
   names : ArrayView[String],
@@ -67,8 +63,6 @@ pub fn Agent::set_active_tools(
       fail("unknown tool: \{name}")
     }
   }
-  // Copy first: `names` may alias `active_tools` itself, and `blit_to` leaves
-  // the tail in place (so an empty view would not deactivate everything).
   let next = names.to_owned()
   self.active_tools.clear()
   for name in next {
@@ -83,9 +77,7 @@ pub fn Agent::active_tool_names(self : Agent) -> ArrayView[String] {
 }
 
 ///|
-/// Replace the finish-turn hook, mirroring pi's `agent.finishTurn = ...`. A
-/// wrapper can read the current hook first and delegate to it, which is how pi
-/// layers a further policy on top of the app's.
+/// Replaces the finish-turn hook.
 pub fn Agent::set_finish_turn_hook(
   self : Agent,
   hook : @agent_loop.FinishTurnHook,
@@ -94,16 +86,13 @@ pub fn Agent::set_finish_turn_hook(
 }
 
 ///|
-/// Whether `name` resolves in the tool registry. Lets a session reject a
-/// misconfigured tool set before a run turns the error into a failed turn.
+/// Returns whether `name` resolves in the tool registry.
 pub fn Agent::has_tool(self : Agent, name : String) -> Bool {
   self.tool_registry.get_tool(name) is Some(_)
 }
 
 ///|
-/// The assembled system prompt. Recomputed only when
-/// `auto_refresh_system_prompt` is set and a contributor's output changed;
-/// otherwise the first result is reused so provider prefix caches keep hitting.
+/// Returns the assembled system prompt, recomputing only when `auto_refresh_system_prompt` is enabled.
 pub fn Agent::system_prompt(self : Agent) -> String {
   let contributions = () => {
     let parts = self.system_prompt_contributes.filter_map(f => {
