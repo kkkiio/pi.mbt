@@ -5,6 +5,7 @@ pub struct Agent {
   llm : &@agent_loop.LLM
   tool_registry : @tools.ToolRegistry
   active_tools : Array[String]
+  hosted_tools : Array[@agent_loop.HostedTool]
   system_prompt_contributes : Array[SystemPromptContributor]
   auto_refresh_system_prompt : Bool
   mut system_prompt_cache : (String, Array[String])?
@@ -19,6 +20,7 @@ pub fn Agent::Agent(
   system_prompt_contributes~ : Array[SystemPromptContributor] = [],
   tool_registry~ : @tools.ToolRegistry = @tools.ToolRegistry(),
   active_tools~ : ArrayView[String] = [],
+  hosted_tools~ : ArrayView[@agent_loop.HostedTool] = [],
   messages~ : ArrayView[@agent_loop.AgentMessage] = [],
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
   auto_refresh_system_prompt~ : Bool = false,
@@ -28,6 +30,7 @@ pub fn Agent::Agent(
     llm,
     tool_registry,
     active_tools: active_tools.to_owned(),
+    hosted_tools: hosted_tools.to_owned(),
     system_prompt_contributes,
     auto_refresh_system_prompt,
     system_prompt_cache: None,
@@ -169,6 +172,7 @@ pub async fn Agent::run(
       self.messages.copy(),
       agent_tools,
       prompts,
+      hosted_tools=self.hosted_tools,
       tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
       event_sink=sink,
       finish_turn_hook=self.finish_turn_hook,
@@ -179,6 +183,7 @@ pub async fn Agent::run(
       system_prompt,
       self.messages.copy(),
       agent_tools,
+      hosted_tools=self.hosted_tools,
       tool_executor=(c, hook) => @tools.run_tool(tool_map, c, hook),
       event_sink=sink,
       finish_turn_hook=self.finish_turn_hook,

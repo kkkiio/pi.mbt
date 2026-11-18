@@ -56,6 +56,18 @@ pub fn from_messages(messages : ArrayView[@agent_loop.AgentMessage]) -> String {
                 write_yaml_field(buf, "    - thinking", thinking, 8)
               @agent_loop.AssistantMessageContent::Text(text, ..) =>
                 write_yaml_field(buf, "    - text", text, 8)
+              @agent_loop.AssistantMessageContent::HostedToolCall(
+                WebSearch(call),
+                ..
+              ) => {
+                buf.write_string("    - hosted_tool_call: web_search\n")
+                write_yaml_field(
+                  buf,
+                  "      result",
+                  call.to_json().stringify(),
+                  8,
+                )
+              }
               @agent_loop.AssistantMessageContent::ToolCall(call, ..) => {
                 buf.write_string("    - tool_call: \{call.name}\n")
                 if call.name == "codemode" &&

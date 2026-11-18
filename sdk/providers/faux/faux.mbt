@@ -256,6 +256,8 @@ pub impl @agent_loop.LLM for FauxLLM with fn generate(
           ),
         )
       }
+      @agent_loop.AssistantMessageContent::HostedToolCall(_, ..) =>
+        acc.push(block)
       @agent_loop.AssistantMessageContent::ToolCall(tool_call, signature~) => {
         acc.push(
           @agent_loop.AssistantMessageContent::ToolCall(

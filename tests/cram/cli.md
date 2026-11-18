@@ -28,7 +28,7 @@ Options:
   --session-dir <session_dir>  directory to store session JSONL files (default: <config>/sessions/<cwd>) [env: PIM_SESSION_DIR]
   --mode <mode>                output mode: text or json (default text)
   --thinking <thinking>        thinking effort level: low, high (default), or max
-  --tools <tools>              comma-separated tools to enable (default: bash,codemode) [env: PIM_TOOLS]
+  --tools <tools>              comma-separated tools to enable (default: bash,codemode,web_search) [env: PIM_TOOLS]
 ```
 
 ## 会话参数
@@ -198,4 +198,17 @@ $ node tests/cram/testdata/json-cli.mjs
 {"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"pim-offline"}}
 {"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"\n\"complete\""}}
 {"type":"message_update","usage":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"totalTokens":0,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_end","contentIndex":0,"content":"pim-offline\n\"complete\""}}
+```
+
+
+## 网页搜索默认开启
+
+离线 fixture 检查默认请求包含 DeepSeek 托管搜索，并验证显式工具列表可以选用或排除它。
+
+```mooncram
+$ node tests/cram/testdata/json-cli.mjs bash,codemode > /dev/null
+```
+
+```mooncram
+$ node tests/cram/testdata/json-cli.mjs bash,web_search > /dev/null
 ```

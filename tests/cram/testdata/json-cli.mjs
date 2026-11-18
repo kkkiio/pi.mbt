@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 
+const selection = process.argv[2];
+const tools = selection === undefined ? [] : ["--tools", selection];
+const expectWebSearch = selection === undefined || selection.split(",").includes("web_search");
+const env = { ...process.env };
+delete env.PIM_TOOLS;
+
 const result = spawnSync("moon", [
-  "run", "--target", "js", "cmd/pim", "--", "--no-session", "--mode", "json", "-p", "offline-json",
+  "run", "--target", "js", "cmd/pim", "--", "--no-session", "--mode", "json", ...tools, "-p", "offline-json",
 ], {
   encoding: "utf8",
   env: {
-    ...process.env,
+    ...env,
+    PIM_TEST_EXPECTED_WEB_SEARCH: expectWebSearch ? "1" : "0",
     PIM_CONFIG_DIR: "tests/cram/testdata/auth-absent",
     DEEPSEEK_API_KEY: "offline-fixture-key",
     NODE_OPTIONS: `--import=${new URL("./json-fetch.mjs", import.meta.url).href}`,

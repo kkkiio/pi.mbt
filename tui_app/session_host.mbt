@@ -10,6 +10,7 @@ pub struct SessionHost {
   llm : &@agent_loop.LLM
   cwd : String
   session_dir : String?
+  hosted_tools : Array[@agent_loop.HostedTool]
   mut session : @agent_session.AgentSession
   mut close_journal : () -> Unit
   /// 当前会话的 journal 文件路径;内存 journal 时为 `None`。
@@ -26,17 +27,20 @@ pub fn SessionHost::new(
     @coding_agent.BASH_TOOL_NAME,
     @coding_agent.CODEMODE_TOOL_NAME,
   ],
+  hosted_tools~ : ArrayView[@agent_loop.HostedTool] = [],
 ) -> SessionHost raise @coding_agent.FsError {
   let (journal, close_journal, session_path) = open_journal(session_dir)
   SessionHost::{
     llm,
     cwd,
     session_dir,
+    hosted_tools: hosted_tools.to_owned(),
     session: @coding_agent.new_coding_session(
       llm,
       cwd~,
       journal~,
       active_tools~,
+      hosted_tools~,
     ),
     close_journal,
     session_path,
@@ -90,6 +94,7 @@ pub fn SessionHost::new_session(
     cwd=self.cwd,
     journal~,
     active_tools~,
+    hosted_tools=self.hosted_tools,
   )
 }
 
@@ -198,6 +203,7 @@ pub fn SessionHost::load_session(
     cwd=self.cwd,
     journal~,
     active_tools~,
+    hosted_tools=self.hosted_tools,
   )
   app.reset_transcript()
   replay(entries, app)
@@ -275,6 +281,7 @@ fn replay_assistant(
       Text(text, ..) => content.push((text, false))
       Thinking(text, ..) => content.push((text, true))
       ToolCall(call, ..) => calls.push(call)
+      HostedToolCall(_, ..) => ()
     }
   }
   app.transcript.set_assistant_content(content)
@@ -289,8 +296,55 @@ fn replay_assistant(
       update_cache_hit=usage.input + usage.cache_read + usage.cache_write > 0,
     )
   }
+  show_hosted_tools(message, app)
   for call in calls {
     app.tool_call(call.name, call.arguments, id=call.id)
+  }
+}
+
+///|
+fn show_hosted_tools(
+  message : @agent_loop.AssistantMessage,
+  app : TuiApp,
+) -> Unit {
+  for block in message.content {
+    guard block is HostedToolCall(WebSearch(call), ..) else { continue }
+    let (args, result) : (Json, String) = match call.action {
+      Search(queries~, sources~) => {
+        let lines : Array[String] = []
+        if sources is Some(sources) {
+          for source in sources {
+            let title = source.title.unwrap_or(source.url)
+            let headline = if title == source.url {
+              title
+            } else {
+              title + "\n" + source.url
+            }
+            let date = source.published_at
+              .map(value => "\n" + value)
+              .unwrap_or("")
+            let snippet = source.snippet
+              .map(value => "\n" + value)
+              .unwrap_or("")
+            lines.push(headline + date + snippet)
+          }
+          if sources.is_empty() {
+            lines.push("No results")
+          }
+        }
+        ({ "queries": queries }, lines.join("\n\n"))
+      }
+      OpenPage(url~) => ({ "url": url }, "")
+      FindInPage(url~, pattern~) => ({ "url": url, "pattern": pattern }, "")
+      Unknown => ({}, "")
+    }
+    let summary = if result.is_empty() {
+      call.error_code.unwrap_or(call.status)
+    } else {
+      result
+    }
+    app.tool_call("web_search", args, id=call.id)
+    app.tool_result("web_search", summary, call.status == "failed", id=call.id)
   }
 }
 
@@ -379,7 +433,7 @@ fn SessionHost::on_event(
           | TextEnd(partial~, ..)
           | ThinkingStart(partial~, ..)
           | ThinkingDelta(partial~, ..)
-          | ThinkingEnd(partial~, ..)
+          | ThinkingEnd(partial~, ..),
         ) => self.sync_assistant(partial, app)
         MessageUpdate(_) => ()
         MessageEnd(Assistant(message)) => {
@@ -388,6 +442,7 @@ fn SessionHost::on_event(
             stop_reason_name(message.stop_reason),
             message.error_message,
           )
+          show_hosted_tools(message, app)
           match message.usage {
             Some(usage) => app.set_usage(usage)
             None => ()

@@ -13,6 +13,7 @@ pub async fn run_agent_loop(
   messages : Array[AgentMessage],
   tools : ArrayView[ToolDefinition],
   prompts : ArrayView[UserMessage],
+  hosted_tools~ : ArrayView[HostedTool] = [],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
   steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
   event_sink~ : EventSink = (_, _) => (),
@@ -148,36 +149,39 @@ pub async fn run_agent_loop(
         event_sink(MessageEnd(msg), context)
         @async.pause()
       }
-      let message = llm.generate({ system_prompt, messages, tools, }, sink=event => {
-        match event {
-          Start(partial~) => {
-            assistant = Some(partial)
-            assistant_slot = Some(messages.length())
-            messages.push(Assistant(partial))
-            assistant_started = true
-            event_sink(MessageStart(Assistant(partial)), context) catch {
-              err => raise ListenerError(err)
-            }
-          }
-          TextStart(partial~, ..)
-          | TextDelta(partial~, ..)
-          | TextEnd(partial~, ..)
-          | ThinkingStart(partial~, ..)
-          | ThinkingDelta(partial~, ..)
-          | ThinkingEnd(partial~, ..)
-          | ToolCallStart(partial~, ..)
-          | ToolCallDelta(partial~, ..)
-          | ToolCallEnd(partial~, ..) =>
-            if assistant_slot is Some(index) {
+      let message = llm.generate(
+        { system_prompt, messages, tools, hosted_tools, },
+        sink=event => {
+          match event {
+            Start(partial~) => {
               assistant = Some(partial)
-              messages[index] = Assistant(partial)
-              event_sink(MessageUpdate(event), context) catch {
+              assistant_slot = Some(messages.length())
+              messages.push(Assistant(partial))
+              assistant_started = true
+              event_sink(MessageStart(Assistant(partial)), context) catch {
                 err => raise ListenerError(err)
               }
             }
-        }
-        @async.pause()
-      }) catch {
+            TextStart(partial~, ..)
+            | TextDelta(partial~, ..)
+            | TextEnd(partial~, ..)
+            | ThinkingStart(partial~, ..)
+            | ThinkingDelta(partial~, ..)
+            | ThinkingEnd(partial~, ..)
+            | ToolCallStart(partial~, ..)
+            | ToolCallDelta(partial~, ..)
+            | ToolCallEnd(partial~, ..) =>
+              if assistant_slot is Some(index) {
+                assistant = Some(partial)
+                messages[index] = Assistant(partial)
+                event_sink(MessageUpdate(event), context) catch {
+                  err => raise ListenerError(err)
+                }
+              }
+          }
+          @async.pause()
+        },
+      ) catch {
         ListenerError(err) => raise err
         err => {
           let text = err.to_string()
@@ -333,6 +337,7 @@ pub async fn run_agent_loop_continue(
   system_prompt : String,
   messages : Array[AgentMessage],
   tools : ArrayView[ToolDefinition],
+  hosted_tools~ : ArrayView[HostedTool] = [],
   tool_executor~ : async (ToolCall, ToolExecUpdateCallback) -> ToolResult,
   steer_channel~ : () -> ArrayView[UserMessage] = fn() { [] },
   event_sink~ : EventSink = (_, _) => (),
@@ -351,6 +356,7 @@ pub async fn run_agent_loop_continue(
     messages,
     tools,
     [],
+    hosted_tools~,
     tool_executor~,
     steer_channel~,
     event_sink~,

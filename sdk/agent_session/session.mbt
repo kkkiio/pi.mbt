@@ -18,6 +18,7 @@ pub fn AgentSession::AgentSession(
   journal~ : &SessionJournal = InMemorySessionJournal(),
   tool_registry~ : @tools.ToolRegistry = @tools.ToolRegistry(),
   active_tools~ : ArrayView[String] = [],
+  hosted_tools~ : ArrayView[@agent_loop.HostedTool] = [],
   retry_settings~ : RetrySettings = RetrySettings::default(),
   finish_turn_hook~ : @agent_loop.FinishTurnHook = (_, _) => None,
   auto_refresh_system_prompt~ : Bool = false,
@@ -28,6 +29,7 @@ pub fn AgentSession::AgentSession(
     system_prompt_contributes~,
     tool_registry~,
     active_tools~,
+    hosted_tools~,
     messages=project_messages(journal.get_entries()),
     finish_turn_hook~,
     auto_refresh_system_prompt~,
@@ -154,8 +156,8 @@ pub async fn AgentSession::prompt(
             if self.agent.messages().last()
               is Some(
                 @agent_loop.AgentMessage::Assistant(
-                  { stop_reason: Error, error_message, .. }
-                )
+                  { stop_reason: Error, error_message, .. },
+                ),
               ) {
               if self.retry_settings.enabled &&
                 error_message is Some(message) &&

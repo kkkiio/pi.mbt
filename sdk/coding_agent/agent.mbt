@@ -10,6 +10,7 @@ pub fn new_coding_session(
   journal~ : &@agent_session.SessionJournal = @agent_session.InMemorySessionJournal(),
   tools~ : ArrayView[@tools.ToolDefinition] = [],
   active_tools~ : ArrayView[String] = [BASH_TOOL_NAME, CODEMODE_TOOL_NAME],
+  hosted_tools~ : ArrayView[@agent_loop.HostedTool] = [],
 ) -> @agent_session.AgentSession {
   let tool_registry = @tools.ToolRegistry()
   let bash_tool = new_bash_tool_definition(cwd~)
@@ -40,6 +41,7 @@ pub fn new_coding_session(
     journal~,
     tool_registry~,
     active_tools~,
+    hosted_tools~,
     on_active_tools_changed=names => {
       declared.val = names.to_owned()
       for
