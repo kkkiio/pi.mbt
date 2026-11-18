@@ -40,16 +40,6 @@ pim -p "What's the capital of France? Respond with only the city name." --mode j
 # {"type":"agent_end"}
 ```
 
-DeepSeek-hosted web search is enabled by default. Use `--tools` to select the tools available to the session.
-
-```bash
-pim --tools bash,codemode           # Use local tools only
-pim --tools web_search -p "Find the official MoonBit documentation."
-```
-
-SDK callers can pass `hosted_tools=[WebSearch]` when creating a session.
-In JSON mode, searches are recorded as assistant `hostedToolCall` blocks.
-
 ## Configuration
 
 | Variable          | Description                                               |
