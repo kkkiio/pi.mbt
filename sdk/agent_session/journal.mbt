@@ -40,7 +40,7 @@ pub(all) enum SessionEntryContent {
     first_kept_entry_id~ : String,
     tokens_before~ : Int32,
     details~ : Json?,
-    usage~ : @agent_loop.Usage?
+    usage~ : @agent_loop.Usage?,
   )
   Custom(custom_type~ : String, data~ : Json?)
   /// Session metadata entries not directly interpreted by the agent loop.
@@ -422,7 +422,22 @@ fn parse_assistant_content(
     decode_error(path, "AssistantMessageContent: missing type")
   }
   match content_type {
-    "hostedToolCall" => None
+    "hostedToolCall" =>
+      match fields.get("call") {
+        Some(value) => {
+          let call : @agent_loop.HostedToolCall = @json.from_json(
+            value,
+            path=path.add_key("call"),
+          )
+          Some(
+            HostedToolCall(
+              call,
+              signature=parse_signature(fields.get("signature")),
+            ),
+          )
+        }
+        None => None
+      }
     "text" => {
       guard fields.get("text") is Some(String(text)) else {
         decode_error(path, "Text content: missing text")

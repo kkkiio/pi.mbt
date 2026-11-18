@@ -197,7 +197,7 @@ pub fn fetch_entries(
         "timestamp": String(_),
         "cwd": String(_),
         ..
-      }
+      },
     ) &&
     version == 3 else {
     fail("session journal at \{path} has an invalid or unsupported header")

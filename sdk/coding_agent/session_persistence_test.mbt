@@ -367,3 +367,51 @@ async test "resuming a journal with a legacy hosted tool call" {
   }
   assert_eq(text, "found it")
 }
+
+///|
+async test "hosted search survives journal round trip without executing a local tool" {
+  let dir = @coding_agent.create_temp_dir("pim-hosted-search-")
+  let path = "\{dir}/search.jsonl"
+  let file = @coding_agent.open_lazy_file(path)
+  let journal = @coding_agent.JsonlSessionJournal::JsonlSessionJournal(file)
+    as &@agent_session.SessionJournal
+  let call : @agent_loop.AssistantMessageContent = HostedToolCall(
+    WebSearch({
+      id: "ws_saved",
+      status: "completed",
+      action: Search(
+        queries=["MoonBit"],
+        sources=Some([
+          {
+            url: "https://www.moonbitlang.com/",
+            title: Some("MoonBit"),
+            snippet: None,
+            published_at: None,
+          },
+        ]),
+      ),
+      error_code: None,
+    }),
+    signature={
+      "type": "web_search_call",
+      "id": "ws_saved",
+      "status": "completed",
+    },
+  )
+  let llm = @faux.FauxLLM::FauxLLM()
+  llm.set_responses([@faux.faux_message([call, @faux.faux_text("found it")])])
+  let session = @coding_agent.new_coding_session(llm, cwd=dir, journal~, hosted_tools=[
+    WebSearch,
+  ])
+  session.prompt([user_message("find MoonBit")])
+  file.close()
+  let entries = @coding_agent.fetch_active_entries(path)
+  assert_eq(entries.length(), 2)
+  guard entries[1].content
+    is Message(Assistant({ content: [restored, Text("found it", ..)], .. })) else {
+    fail("expected only the user and assistant messages")
+  }
+  assert_eq(restored.to_json(), call.to_json())
+  @coding_agent.remove_file(path)
+  @coding_agent.remove_dir(dir)
+}

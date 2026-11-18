@@ -13,6 +13,14 @@ pub(all) struct Context {
   system_prompt : String
   messages : ArrayView[AgentMessage]
   tools : ArrayView[ToolDefinition]
+  hosted_tools : ArrayView[HostedTool]
+}
+
+///|
+/// A tool executed by the model provider.
+#derive(Eq)
+pub(all) enum HostedTool {
+  WebSearch
 }
 
 ///|
@@ -30,7 +38,7 @@ pub(all) enum ConstrainedSampling {
   Grammar(
     format~ : GrammarFormat,
     definition~ : String,
-    input_property~ : String
+    input_property~ : String,
   )
 }
 
@@ -58,34 +66,34 @@ pub(all) enum GenerationEvent {
   TextDelta(
     content_index~ : Int32,
     delta~ : String,
-    partial~ : AssistantMessage
+    partial~ : AssistantMessage,
   )
   TextEnd(
     content_index~ : Int32,
     content~ : String,
-    partial~ : AssistantMessage
+    partial~ : AssistantMessage,
   )
   ThinkingStart(content_index~ : Int32, partial~ : AssistantMessage)
   ThinkingDelta(
     content_index~ : Int32,
     delta~ : String,
-    partial~ : AssistantMessage
+    partial~ : AssistantMessage,
   )
   ThinkingEnd(
     content_index~ : Int32,
     content~ : String,
-    partial~ : AssistantMessage
+    partial~ : AssistantMessage,
   )
   ToolCallStart(content_index~ : Int32, partial~ : AssistantMessage)
   ToolCallDelta(
     content_index~ : Int32,
     delta~ : String,
-    partial~ : AssistantMessage
+    partial~ : AssistantMessage,
   )
   ToolCallEnd(
     content_index~ : Int32,
     tool_call~ : ToolCall,
-    partial~ : AssistantMessage
+    partial~ : AssistantMessage,
   )
 }
 

@@ -5,6 +5,7 @@
 fn encode_responses_input(
   context : @agent_loop.Context,
   supports_images~ : Bool,
+  provider~ : String,
 ) -> Array[Json] raise {
   let input : Array[Json] = []
   let custom_call_ids : Set[String] = Set([])
@@ -34,6 +35,10 @@ fn encode_responses_input(
       Assistant(message) =>
         for content in message.content {
           match content {
+            Text(
+              _,
+              signature={ "type": "message", "content": Array(_), .. } as item,
+            ) => input.push(item)
             Text(text, signature~) => {
               guard signature is { "id": String(item_id), .. } else {
                 fail("Responses text signature is missing type or id")
@@ -53,6 +58,12 @@ fn encode_responses_input(
               input.push(Json(item))
             }
             Thinking(_, signature~) => input.push(signature)
+            HostedToolCall(_, signature~) =>
+              if message.provider == provider &&
+                message.api == "openai-responses" &&
+                signature is { "type": "web_search_call", .. } {
+                input.push(signature)
+              }
             ToolCall(call, signature~) => {
               guard signature
                 is { "type": String(signature_type), "id": String(item_id), .. } else {
@@ -226,6 +237,7 @@ priv enum ResponsesOutputSlot {
   Text(Int32)
   FunctionCall(Int32, String)
   CustomToolCall(Int32, String, String)
+  HostedTool(Int32)
 }
 
 ///|
@@ -295,6 +307,67 @@ priv enum SseOutcome {
 ///|
 fn sse_delta(evt : @agent_loop.GenerationEvent) -> SseOutcome? {
   Some(SseOutcome::Delta(evt))
+}
+
+///|
+fn responses_text_replay_item(item : Json) -> Json? {
+  if item is { "content": Array(parts), .. } &&
+    (
+      parts.length() > 1 ||
+      parts.any(part => part is { "annotations": Array([_, ..]), .. })
+    ) {
+    Some(item)
+  } else {
+    None
+  }
+}
+
+///|
+fn merge_terminal_output(
+  content : Array[@agent_loop.AssistantMessageContent],
+  output : Array[Json],
+) -> Unit {
+  let mut next_content_index = content.length()
+  let mut index = output.length()
+  while index > 0 {
+    index -= 1
+    let item = output[index]
+    guard item is { "id": String(id), "type": String(kind), .. } else {
+      continue
+    }
+    let content_index = content.search_by(block => {
+      let signature = match block {
+        Text(_, signature~)
+        | Thinking(_, signature~)
+        | ToolCall(_, signature~)
+        | HostedToolCall(_, signature~) => signature
+      }
+      signature is { "id": String(block_id), .. } && block_id == id
+    })
+    match content_index {
+      Some(position) => {
+        next_content_index = position
+        match (kind, content[position]) {
+          ("reasoning", Thinking(text, ..)) =>
+            content[position] = Thinking(text, signature=item)
+          ("message", Text(text, ..)) =>
+            if responses_text_replay_item(item) is Some(signature) {
+              content[position] = Text(text, signature~)
+            }
+          ("web_search_call", HostedToolCall(_, ..)) =>
+            if decode_web_search_call(item) is Some(block) {
+              content[position] = block
+            }
+          _ => ()
+        }
+      }
+      None =>
+        if kind == "web_search_call" &&
+          decode_web_search_call(item) is Some(block) {
+          content.insert(next_content_index, block)
+        }
+    }
+  }
 }
 
 ///|
@@ -385,6 +458,13 @@ fn parse_sse_event(
           )
           slots[output_index] = Text(content_index)
           sse_delta(@agent_loop.TextStart(content_index~, partial=in_flight()))
+        }
+        "web_search_call" => {
+          if decode_web_search_call(item_json) is Some(block) {
+            acc.push(block)
+            slots[output_index] = HostedTool(content_index)
+          }
+          None
         }
         "function_call" => {
           let item : ResponseFunctionToolCall = @json.from_json(item_json)
@@ -600,9 +680,14 @@ fn parse_sse_event(
           } else {
             text.to_string()
           }
-          let signature : Json = match item.phase {
-            Some(phase) => { "type": "message", "id": item.id, "phase": phase }
-            None => { "type": "message", "id": item.id }
+          let signature = match responses_text_replay_item(item_json) {
+            Some(item) => item
+            None =>
+              match item.phase {
+                Some(phase) =>
+                  { "type": "message", "id": item.id, "phase": phase }
+                None => { "type": "message", "id": item.id }
+              }
           }
           acc[content_index] = @agent_loop.AssistantMessageContent::Text(
             final_text,
@@ -616,6 +701,16 @@ fn parse_sse_event(
               partial=in_flight(),
             ),
           )
+        }
+        ("web_search_call", _) => {
+          if decode_web_search_call(item_json) is Some(block) {
+            match slots.get(output_index) {
+              Some(HostedTool(content_index)) => acc[content_index] = block
+              _ => acc.push(block)
+            }
+          }
+          slots.remove(output_index)
+          None
         }
         ("function_call", Some(FunctionCall(content_index, _))) => {
           let item : ResponseFunctionToolCall = @json.from_json(item_json)
@@ -686,32 +781,7 @@ fn parse_sse_event(
     "response.completed" | "response.incomplete" | "response.failed" => {
       let payload : ResponseTerminalEvent = @json.from_json(json)
       let terminal = payload.response
-      for terminal_item in terminal.output {
-        guard terminal_item
-          is { "type": String(item_type), "id": String(terminal_id), .. } else {
-          continue
-        }
-        if item_type != "reasoning" {
-          continue
-        }
-        for index, content in acc {
-          match content {
-            @agent_loop.AssistantMessageContent::Thinking(text, signature~) => {
-              guard signature is { "id": String(signature_id), .. } else {
-                continue
-              }
-              if item_type == "reasoning" && terminal_id == signature_id {
-                acc[index] = @agent_loop.AssistantMessageContent::Thinking(
-                  text,
-                  signature=terminal_item,
-                )
-                break
-              }
-            }
-            _ => ()
-          }
-        }
-      }
+      merge_terminal_output(acc, terminal.output)
       let usage = match terminal.usage {
         None => None
         Some(usage) => {

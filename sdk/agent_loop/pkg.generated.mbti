@@ -7,9 +7,9 @@ import {
 }
 
 // Values
-pub async fn run_agent_loop(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], ArrayView[UserMessage], tool_executor~ : async (ToolCall, (Array[InputMessageContent], @json.Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], event_sink? : async (AgentEvent, EventContext) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage]) -> AgentTurnDecision?) -> Unit
+pub async fn run_agent_loop(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], ArrayView[UserMessage], hosted_tools? : ArrayView[HostedTool], tool_executor~ : async (ToolCall, (Array[InputMessageContent], @json.Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], event_sink? : async (AgentEvent, EventContext) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage]) -> AgentTurnDecision?) -> Unit
 
-pub async fn run_agent_loop_continue(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], tool_executor~ : async (ToolCall, (Array[InputMessageContent], @json.Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], event_sink? : async (AgentEvent, EventContext) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage]) -> AgentTurnDecision?) -> Unit
+pub async fn run_agent_loop_continue(&LLM, String, Array[AgentMessage], ArrayView[ToolDefinition], hosted_tools? : ArrayView[HostedTool], tool_executor~ : async (ToolCall, (Array[InputMessageContent], @json.Json) -> Unit) -> ToolResult, steer_channel? : () -> ArrayView[UserMessage], event_sink? : async (AgentEvent, EventContext) -> Unit, finish_turn_hook? : async (ArrayView[AgentMessage], ArrayView[ToolResultMessage]) -> AgentTurnDecision?) -> Unit
 
 pub fn usage_json(Usage?) -> @json.Json
 
@@ -61,6 +61,7 @@ pub(all) enum AssistantMessageContent {
   Text(String, signature~ : @json.Json)
   Thinking(String, signature~ : @json.Json)
   ToolCall(ToolCall, signature~ : @json.Json)
+  HostedToolCall(HostedToolCall, signature~ : @json.Json)
 }
 pub fn AssistantMessageContent::to_json(Self) -> @json.Json
 pub fn AssistantMessageContent::to_repr(Self) -> @debug.Repr
@@ -75,6 +76,7 @@ pub(all) struct Context {
   system_prompt : String
   messages : ArrayView[AgentMessage]
   tools : ArrayView[ToolDefinition]
+  hosted_tools : ArrayView[HostedTool]
 }
 
 pub(all) struct EventContext {
@@ -99,6 +101,16 @@ pub fn GenerationEvent::to_repr(Self) -> @debug.Repr
 pub(all) enum GrammarFormat {
   Lark
   Regex
+}
+
+#derive(Eq)
+pub(all) enum HostedTool {
+  WebSearch
+}
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) enum HostedToolCall {
+  WebSearch(WebSearchCall)
 }
 
 pub(all) enum InputMessageContent {
@@ -194,6 +206,31 @@ pub(all) struct UserMessage {
 }
 pub fn UserMessage::to_json(Self) -> @json.Json
 pub impl @json.ToJson for UserMessage
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) enum WebSearchAction {
+  Search(queries~ : Array[String], sources~ : Array[WebSearchSource]?)
+  OpenPage(url~ : String)
+  FindInPage(url~ : String, pattern~ : String)
+  Unknown
+}
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) struct WebSearchCall {
+  id : String
+  status : String
+  action : WebSearchAction
+  error_code : String?
+}
+pub fn WebSearchCall::to_json(Self) -> @json.Json
+
+#derive(@debug.Debug, @json.FromJson, @json.ToJson)
+pub(all) struct WebSearchSource {
+  url : String
+  title : String?
+  snippet : String?
+  published_at : String?
+}
 
 // Type aliases
 pub type EventSink = async (AgentEvent, EventContext) -> Unit

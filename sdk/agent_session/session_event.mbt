@@ -7,7 +7,7 @@ pub enum AgentSessionEvent {
     attempt~ : Int32,
     max_attempts~ : Int32,
     delay_ms~ : Int32,
-    error_message~ : String
+    error_message~ : String,
   )
   /// Emitted once a retried prompt settles.
   AutoRetryEnd(attempt~ : Int32, success~ : Bool, final_error~ : String?)

@@ -12,17 +12,20 @@ async test "faux replays scripted responses in order and streams events" {
   ])
   assert_eq(llm.pending_responses(), 2)
   let events : Array[String] = []
-  let first = llm.generate({ system_prompt: "", messages: [], tools: [], }, sink=event => {
-    events.push(
-      match event {
-        Start(..) => "start"
-        TextStart(..) => "text_start"
-        TextDelta(..) => "text_delta"
-        TextEnd(..) => "text_end"
-        _ => "other"
-      },
-    )
-  })
+  let first = llm.generate(
+    { system_prompt: "", messages: [], tools: [], hosted_tools: [], },
+    sink=event => {
+      events.push(
+        match event {
+          Start(..) => "start"
+          TextStart(..) => "text_start"
+          TextDelta(..) => "text_delta"
+          TextEnd(..) => "text_end"
+          _ => "other"
+        },
+      )
+    },
+  )
   assert_true(first.stop_reason is @agent_loop.StopReason::Stop)
   // "hello world" (11 chars) split into 4-char chunks → 3 deltas.
   assert_eq(events, [
@@ -34,11 +37,10 @@ async test "faux replays scripted responses in order and streams events" {
       assert_eq(text, "hello world")
     _ => fail("expected a single text block")
   }
-  let second = llm.generate({ system_prompt: "", messages: [], tools: [], }, sink=fn(
-    _,
-  ) {
-    ()
-  })
+  let second = llm.generate(
+    { system_prompt: "", messages: [], tools: [], hosted_tools: [], },
+    sink=fn(_) { () },
+  )
   assert_true(second.stop_reason is @agent_loop.StopReason::ToolUse)
   assert_eq(llm.pending_responses(), 0)
 }
@@ -49,9 +51,10 @@ async test "faux fails when the script is exhausted" {
   let llm = @faux.FauxLLM::FauxLLM()
   let error_text = try {
     ignore(
-      llm.generate({ system_prompt: "", messages: [], tools: [], }, sink=fn(_) {
-        ()
-      }),
+      llm.generate(
+        { system_prompt: "", messages: [], tools: [], hosted_tools: [], },
+        sink=fn(_) { () },
+      ),
     )
     fail("expected generate to fail on an empty script")
   } catch {
@@ -69,12 +72,15 @@ async test "faux cancellation leaves the latest streamed partial with the caller
     let active : Ref[@async.Task[@agent_loop.AssistantMessage?]?] = Ref(None)
     let task = group.spawn(() => {
       @async.handle_cancellation(() => {
-        llm.generate({ system_prompt: "", messages: [], tools: [], }, sink=event => {
-          if event is TextDelta(partial=message, ..) {
-            partial.val = Some(message)
-            active.val.unwrap().cancel()
-          }
-        })
+        llm.generate(
+          { system_prompt: "", messages: [], tools: [], hosted_tools: [], },
+          sink=event => {
+            if event is TextDelta(partial=message, ..) {
+              partial.val = Some(message)
+              active.val.unwrap().cancel()
+            }
+          },
+        )
       })
     })
     active.val = Some(task)

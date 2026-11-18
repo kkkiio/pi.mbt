@@ -195,6 +195,7 @@ pub(all) enum AssistantMessageContent {
   Text(String, signature~ : Json)
   Thinking(String, signature~ : Json)
   ToolCall(ToolCall, signature~ : Json)
+  HostedToolCall(HostedToolCall, signature~ : Json)
 }
 
 ///|
@@ -229,6 +230,12 @@ pub impl ToJson for AssistantMessageContent with fn to_json(
       )
     ToolCall(tool_call, signature~) =>
       (tool_call_fields(tool_call), "thoughtSignature", signature)
+    HostedToolCall(call, signature~) =>
+      (
+        { "type": Json("hostedToolCall"), "call": @json.to_json(call) },
+        "signature",
+        signature,
+      )
   }
   match signature {
     Null => ()

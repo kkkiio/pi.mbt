@@ -211,7 +211,7 @@ async test "nested tool images reach model content through the real pi sandbox" 
       item
       is Image(
         data="iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=",
-        mime_type="image/png"
+        mime_type="image/png",
       )
     }),
   )

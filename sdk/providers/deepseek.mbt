@@ -105,6 +105,7 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
   let input = encode_responses_input(
     context,
     supports_images=self.supports_images,
+    provider="deepseek",
   )
   let custom_tool_input_properties = Map([])
   let tools : Array[Json] = []
@@ -136,15 +137,36 @@ pub impl @agent_loop.LLM for DeepSeekResponsesAPILLM with fn generate(
       }
     }
   }
-  let body : Json = {
+  let hosted_search = context.hosted_tools.contains(WebSearch)
+  if hosted_search {
+    let tool_type = match self.model_id {
+      "deepseek-flash" | "deepseek-v4-flash" => "deepseek_web_search"
+      "deepseek-v4-pro" => "web_search"
+      _ =>
+        fail(
+          "Hosted web search is unsupported for DeepSeek model \{self.model_id}",
+        )
+    }
+    if tool_type == "deepseek_web_search" &&
+      !custom_tool_input_properties.is_empty() {
+      fail(
+        "DeepSeek Flash hosted web search cannot be combined with custom grammar tools",
+      )
+    }
+    tools.insert(0, { "type": tool_type })
+  }
+  let fields : Map[String, Json] = {
     "model": self.model_id,
     "instructions": context.system_prompt,
     "stream": true,
     "reasoning": { "effort": self.thinking },
     "tools": tools,
-    "tool_choice": "auto",
     "input": input,
   }
+  if !hosted_search {
+    fields["tool_choice"] = "auto"
+  }
+  let body = Json::object(fields)
   @async.pause()
   let mut produced = false
   let attempt_sink = (event : @agent_loop.GenerationEvent) => {

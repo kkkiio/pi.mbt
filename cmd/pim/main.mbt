@@ -38,7 +38,7 @@ async fn main {
           "tools",
           long="tools",
           env="PIM_TOOLS",
-          about="comma-separated tools to enable (default: bash,codemode)",
+          about="comma-separated tools to enable (default: bash,codemode,web_search)",
         ),
       ],
       positionals=[
@@ -207,7 +207,7 @@ async fn main {
       }
     }
   }
-  let active_tools : Array[String] = match matches.values {
+  let enabled_tools : Array[String] = match matches.values {
     { "tools": [tools, ..], .. } => {
       let names : Array[String] = []
       for name in tools.split(",") {
@@ -218,7 +218,20 @@ async fn main {
       }
       names
     }
-    _ => [@coding_agent.BASH_TOOL_NAME, @coding_agent.CODEMODE_TOOL_NAME]
+    _ =>
+      [
+        @coding_agent.BASH_TOOL_NAME,
+        @coding_agent.CODEMODE_TOOL_NAME,
+        "web_search",
+      ]
+  }
+  let active_tools = enabled_tools.filter(name => name != "web_search")
+  let hosted_tools : Array[@agent_loop.HostedTool] = if enabled_tools.contains(
+      "web_search",
+    ) {
+    [WebSearch]
+  } else {
+    []
   }
   // TUI 模式:会话(含 journal)由 tui_app 的 SessionHost 负责,这里不再自建。
   if interactive {
@@ -231,6 +244,7 @@ async fn main {
       resume_path~,
       initial=messages,
       active_tools~,
+      hosted_tools~,
     ) catch {
       err => fatal("Error: \{clean_error_message("\{err}")}")
     }
@@ -280,6 +294,7 @@ async fn main {
     cwd~,
     journal~,
     active_tools~,
+    hosted_tools~,
   )
   let mut last_message : @agent_loop.AgentMessage? = None
   if mode is Json {
@@ -311,7 +326,7 @@ async fn main {
       match content {
         Text(text, ..) => output.write_string(text)
         ToolCall(_, ..) => fatal("unexpected tool call in reply")
-        Thinking(_, ..) => ()
+        Thinking(_, ..) | HostedToolCall(_, ..) => ()
       }
     }
     write_stdout(output.to_string())

@@ -16,21 +16,39 @@ extern "js" fn install_fetch(mode : String) -> FetchFixture =
   #|   globalThis.fetch = (_url, options) => {
   #|     fixture.calls++;
   #|     fixture.body = new TextDecoder().decode(options.body);
-  #|     if (mode === "capture") {
+  #|     if (mode === "capture" || mode === "hosted") {
   #|       const message = {
   #|         type: "message", id: "msg_capture", role: "assistant", status: "completed",
   #|         content: [{ type: "output_text", text: "ok", annotations: [] }],
   #|       };
+  #|       const search = {
+  #|         type: "web_search_call", id: "ws_1", status: "completed", kind: "deep_search",
+  #|         action: { type: "search", queries: ["MoonBit"], sources: [
+  #|           { type: "url", url: "https://www.moonbitlang.com/", title: "MoonBit", snippet: "A programming language" }
+  #|         ] }
+  #|       };
+  #|       if (mode === "hosted") {
+  #|         message.content.push({ type: "output_text", text: " MoonBit", annotations: [
+  #|           { type: "url_citation", url: "https://www.moonbitlang.com/", title: "MoonBit", start_index: 1, end_index: 8 }
+  #|         ] });
+  #|       }
+  #|       const index = mode === "hosted" ? 1 : 0;
   #|       const events = [
   #|         ["response.created", { response: { status: "in_progress" } }],
+  #|         ...(mode === "hosted" ? [
+  #|           ["response.output_item.added", { output_index: 0, item: {
+  #|             ...search, status: "in_progress", action: { type: "search", queries: ["MoonBit"] }
+  #|           } }],
+  #|           ...(fixture.calls === 1 ? [["response.output_item.done", { output_index: 0, item: search }]] : []),
+  #|         ] : []),
   #|         ["response.output_item.added", {
-  #|           output_index: 0,
+  #|           output_index: index,
   #|           item: { ...message, content: [], status: "in_progress" },
   #|         }],
-  #|         ["response.output_text.delta", { output_index: 0, delta: "ok" }],
-  #|         ["response.output_item.done", { output_index: 0, item: message }],
+  #|         ["response.output_text.delta", { output_index: index, delta: "ok" }],
+  #|         ["response.output_item.done", { output_index: index, item: message }],
   #|         ["response.completed", { response: {
-  #|           status: "completed", output: [message], error: null, incomplete_details: null,
+  #|           status: "completed", output: mode === "hosted" ? [search, message] : [message], error: null, incomplete_details: null,
   #|           usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
   #|         } }],
   #|       ];
@@ -89,7 +107,7 @@ extern "js" fn FetchFixture::request_body(self : FetchFixture) -> String =
 
 ///|
 fn empty_context() -> @agent_loop.Context {
-  { system_prompt: "", messages: [], tools: [], }
+  { system_prompt: "", messages: [], tools: [], hosted_tools: [], }
 }
 
 ///|
@@ -213,6 +231,7 @@ async test "image blocks encode as input_image for vision models" {
       }),
     ],
     tools: [],
+    hosted_tools: [],
   }
   for index, model_id in ["deepseek-v4-flash", "deepseek-flash"] {
     let llm = @providers.DeepSeekProvider(api_key="offline").new_llm(model_id)
@@ -275,6 +294,7 @@ async test "image blocks downgrade to placeholder for non-vision models" {
       }),
     ],
     tools: [],
+    hosted_tools: [],
   }
   let llm = @providers.DeepSeekProvider(api_key="offline").new_llm("test-model")
   let message = llm.generate(context, sink=_ => ())
@@ -295,4 +315,94 @@ async test "image blocks downgrade to placeholder for non-vision models" {
       ],
     },
   ])
+}
+
+///|
+async test "hosted search is declared by model and its output items replay intact" {
+  fetch_gate.acquire()
+  defer fetch_gate.release()
+  let fixture = install_fetch("hosted")
+  defer fixture.restore()
+  let provider = @providers.DeepSeekProvider(api_key="offline")
+  let flash = provider.new_llm("deepseek-flash")
+  let user : @agent_loop.AgentMessage = User({
+    content: [Text("Search for MoonBit")],
+    timestamp: 1,
+  })
+  let context : @agent_loop.Context = {
+    ..empty_context(),
+    messages: [user],
+    hosted_tools: [WebSearch, WebSearch],
+    tools: [
+      {
+        name: "test_function",
+        description: "A client-executed function",
+        parameters: { "type": "object" },
+        constrained_sampling: JsonSchema(strict=false),
+      },
+    ],
+  }
+  let first = flash.generate(context, sink=_ => ())
+  assert_true(first.stop_reason is Stop)
+  guard @json.parse(fixture.request_body())
+    is {
+      "tools": [
+        { "type": "deepseek_web_search", .. },
+        { "type": "function", "name": "test_function", .. },
+      ],
+      ..
+    } else {
+    fail("expected one Flash hosted declaration alongside the local function")
+  }
+  guard first.content
+    is [
+      HostedToolCall(
+        WebSearch(
+          {
+            action: Search(queries~, sources=Some([source])),
+            id: "ws_1",
+            status: "completed",
+            ..
+          },
+        ),
+        signature=search_item,
+      ),
+      Text("ok MoonBit", signature=text_item),
+    ] else {
+    fail("expected a completed web search followed by assistant text")
+  }
+  assert_eq(queries, ["MoonBit"])
+  assert_eq(source.url, "https://www.moonbitlang.com/")
+  assert_eq(source.snippet, Some("A programming language"))
+  guard text_item
+    is {
+      "content": [
+        { "text": "ok", .. },
+        { "annotations": [{ "type": "url_citation", .. }], .. },
+      ],
+      ..
+    } else {
+    fail("expected annotations attached to the original text part")
+  }
+  let second = flash.generate(
+    { ..context, messages: [user, Assistant(first), user], hosted_tools: [], },
+    sink=_ => (),
+  )
+  guard @json.parse(fixture.request_body())
+    is {
+      "tools": [{ "type": "function", .. }],
+      "input": [_, replayed_search, replayed_text, _],
+      ..
+    } else {
+    fail("expected replay even when hosted search is disabled")
+  }
+  assert_eq(replayed_search, search_item)
+  assert_eq(replayed_text, text_item)
+  assert_eq(second.content[0].to_json(), first.content[0].to_json())
+  let pro = provider.new_llm("deepseek-v4-pro")
+  ignore(pro.generate({ ..context, tools: [], }, sink=_ => ()))
+  guard @json.parse(fixture.request_body())
+    is { "tools": [{ "type": "web_search", .. }], .. } else {
+    fail("expected Pro hosted declaration")
+  }
 }

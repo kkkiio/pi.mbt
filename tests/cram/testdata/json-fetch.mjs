@@ -17,6 +17,8 @@ globalThis.fetch = async (url, options) => {
   assert.equal(options.method, "POST");
   const body = JSON.parse(new TextDecoder().decode(options.body));
   assert.equal(body.stream, true);
+  const hostedSearch = body.tools.filter(tool => tool.type === "deepseek_web_search");
+  assert.equal(hostedSearch.length, Number(process.env.PIM_TEST_EXPECTED_WEB_SEARCH));
   assert.equal(body.input[0].role, "user");
   assert.deepEqual(body.input[0].content, [{ type: "input_text", text: "offline-json" }]);
   const events = [["response.created", { response: { status: "in_progress" } }]];
