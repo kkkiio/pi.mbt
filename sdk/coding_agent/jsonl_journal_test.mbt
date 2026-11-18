@@ -578,7 +578,7 @@ async test "a user image entry survives a journal round trip" {
     is [
       {
         content: @agent_session.SessionEntryContent::Message(
-          @agent_loop.AgentMessage::User(user)
+          @agent_loop.AgentMessage::User(user),
         ),
         ..
       },

@@ -218,16 +218,17 @@ async fn main {
       }
       names
     }
-    _ => [
-      @coding_agent.BASH_TOOL_NAME,
-      @coding_agent.CODEMODE_TOOL_NAME,
-      "web_search",
-    ]
+    _ =>
+      [
+        @coding_agent.BASH_TOOL_NAME,
+        @coding_agent.CODEMODE_TOOL_NAME,
+        "web_search",
+      ]
   }
   let active_tools = enabled_tools.filter(name => name != "web_search")
   let hosted_tools : Array[@agent_loop.HostedTool] = if enabled_tools.contains(
-    "web_search",
-  ) {
+      "web_search",
+    ) {
     [WebSearch]
   } else {
     []

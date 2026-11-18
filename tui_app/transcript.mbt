@@ -224,7 +224,7 @@ pub fn Transcript::update_tool_result(
         _,
         started,
         None,
-        id=call_id
+        id=call_id,
       ) if call_id == id => {
         self.items[index] = TranscriptItem::Tool(
           tool_name,
@@ -267,7 +267,7 @@ pub fn Transcript::push_tool_result(
         _,
         started,
         None,
-        id=call_id
+        id=call_id,
       ) if call_id == id => {
         self.items[index] = TranscriptItem::Tool(
           tool_name,

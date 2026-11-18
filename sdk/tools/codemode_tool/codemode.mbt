@@ -274,7 +274,7 @@ fn read_codemode_store(
     guard entry.content
       is @agent_session.SessionEntryContent::Custom(
         custom_type~,
-        data=Some(Object(fields))
+        data=Some(Object(fields)),
       ) &&
       custom_type == "codemode-store" &&
       fields.get("set") is Some(Object(set)) &&

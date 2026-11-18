@@ -348,13 +348,13 @@ pub(all) enum CodemodeResult {
     output~ : Array[CodemodeOutputItem],
     calls~ : Array[CodemodeCall],
     store_writes~ : CodemodeStoreWrites,
-    during~ : CodemodeDuring?
+    during~ : CodemodeDuring?,
   )
   Err(
     error~ : CodemodeError,
     output~ : Array[CodemodeOutputItem],
     calls~ : Array[CodemodeCall],
-    during~ : CodemodeDuring?
+    during~ : CodemodeDuring?,
   )
 }
 

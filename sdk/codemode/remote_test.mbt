@@ -271,7 +271,7 @@ async test "every execution exit cancels tools and globals before returning" {
                 calls=[{ status: "cancelled", .. }],
                 output=[Text(text="partial", ..)],
                 ..
-              )
+              ),
             ),
           ) => ()
           ("script-error", Some(Err(error={ kind: Script, .. }, ..))) => ()
@@ -284,7 +284,7 @@ async test "every execution exit cancels tools and globals before returning" {
                 calls=[{ status: "cancelled", .. }],
                 output=[Text(text="partial", ..)],
                 ..
-              )
+              ),
             ),
           ) => ()
           _ => fail("unexpected result for \{ending}")

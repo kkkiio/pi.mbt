@@ -48,7 +48,7 @@ async test "bash tool reports a non-zero exit code" {
   guard result.content
     is [
       @agent_loop.InputMessageContent::Text(
-        "before\n\n\nCommand exited with code 3"
+        "before\n\n\nCommand exited with code 3",
       ),
     ] else {
     fail("unexpected content \{Json(result.content).stringify()}")
@@ -61,7 +61,7 @@ async test "bash tool reports a non-zero exit code" {
         "exit_code": Number(3, ..),
         "wall_time_seconds": Number(_, ..),
         ..
-      }
+      },
     ) else {
     fail(
       "unexpected structured content \{result.structured_content.unwrap_or(Json::null()).stringify()}",

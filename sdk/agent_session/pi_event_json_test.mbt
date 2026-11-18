@@ -135,7 +135,7 @@ async test "tool_execution_update carries the partial result on the wire" {
       is Loop(
         ToolExecutionStart(_)
         | ToolExecutionUpdate(_, _, _)
-        | ToolExecutionEnd(_)
+        | ToolExecutionEnd(_),
       ) else {
       return
     }
