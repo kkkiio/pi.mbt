@@ -99,7 +99,7 @@ pub(all) struct SessionEntry {
   content : SessionEntryContent
 }
 pub fn SessionEntry::auxiliary_usage(Self) -> @agent_loop.Usage?
-pub fn SessionEntry::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn SessionEntry::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn SessionEntry::to_json(Self) -> @json.Json
 pub impl @json.FromJson for SessionEntry
 pub impl @json.ToJson for SessionEntry

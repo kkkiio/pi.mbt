@@ -23,7 +23,7 @@ pub fn prepare_codemode_loadout(ArrayView[@tools.ToolDefinition], declared~ : Ar
 // Types and methods
 #derive(@json.FromJson)
 type CodemodeToolInput
-pub fn CodemodeToolInput::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodemodeToolInput::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 
 // Type aliases
 pub type TempFileWriter = (String, Bytes) -> Result[String, String]

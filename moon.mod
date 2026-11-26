@@ -26,7 +26,7 @@ preferred_target = "native"
 description = "MoonBit agent SDK and pim coding agent CLI"
 
 import {
-  "moonbitlang/async@0.22.5",
-  "moonbitlang/x@0.5.5",
+  "moonbitlang/async@0.22.10",
+  "moonbitlang/x@0.5.9",
   "moonbitlang/jsonl@0.2.1",
 }

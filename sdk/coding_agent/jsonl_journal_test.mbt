@@ -17,7 +17,7 @@ pub impl @io.Writer for BufferWriter with fn write_once(
   offset~ : Int32,
   len~ : Int32,
 ) -> Int32 {
-  self.buf.write_bytes(bytes[offset:offset + len])
+  self.buf.write_bytesview(bytes[offset:offset + len])
   len
 }
 

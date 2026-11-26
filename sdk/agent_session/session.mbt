@@ -313,7 +313,7 @@ fn project_messages(
   let omitted : Set[String] = Set([])
   for entry in selected {
     if entry.content is ContextEdit(target_id~) {
-      omitted.add(target_id)
+      omitted.insert(target_id)
     }
   }
   for i, entry in selected {

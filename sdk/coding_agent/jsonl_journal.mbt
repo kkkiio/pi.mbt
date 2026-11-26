@@ -30,7 +30,7 @@ pub fn[W] JsonlSessionJournal::JsonlSessionJournal(
   let ids = Set([])
   let mut leaf_id : String? = None
   for entry in entries {
-    ids.add(entry.id)
+    ids.insert(entry.id)
     leaf_id = Some(entry.id)
   }
   {
@@ -80,7 +80,7 @@ pub impl[W : @io.Writer] @agent_session.SessionJournal for JsonlSessionJournal[
       content: p.content,
     }
     self.leaf_id = Some(p.id)
-    self.ids.add(p.id)
+    self.ids.insert(p.id)
     self.entries.push(entry)
     stored.push(entry)
     if self.flushed {

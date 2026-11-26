@@ -8,7 +8,7 @@ pub fn from_entries(entries : ArrayView[@agent_session.SessionEntry]) -> String 
   for entry in entries {
     if entry.content
       is @agent_session.SessionEntryContent::ContextEdit(target_id~) {
-      omitted.add(target_id)
+      omitted.insert(target_id)
     }
   }
   let messages : Array[@agent_loop.AgentMessage] = []

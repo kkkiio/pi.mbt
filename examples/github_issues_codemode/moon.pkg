@@ -5,7 +5,6 @@ import {
   "KKKIIO/pi/sdk/providers",
   "KKKIIO/pi/sdk/tools",
   "KKKIIO/pi/sdk/transcript",
-  "moonbitlang/async",
   "moonbitlang/core/env",
   "moonbitlang/core/json",
 }
