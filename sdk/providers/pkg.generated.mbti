@@ -30,7 +30,7 @@ pub struct ResponseOutputContent {
   text : String?
   refusal : String?
 }
-pub fn ResponseOutputContent::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn ResponseOutputContent::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 
 #derive(@json.FromJson)
 pub struct ResponseOutputMessage {
@@ -40,7 +40,7 @@ pub struct ResponseOutputMessage {
   status : String
   phase : String?
 }
-pub fn ResponseOutputMessage::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn ResponseOutputMessage::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 
 #derive(@json.FromJson)
 pub struct ResponseReasoningItem {
@@ -50,13 +50,13 @@ pub struct ResponseReasoningItem {
   encrypted_content : String?
   status : String?
 }
-pub fn ResponseReasoningItem::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn ResponseReasoningItem::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 
 #derive(@json.FromJson)
 pub struct ResponseTextPart {
   text : String
 }
-pub fn ResponseTextPart::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn ResponseTextPart::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 
 // Type aliases
 

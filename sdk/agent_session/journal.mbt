@@ -605,7 +605,7 @@ pub impl SessionJournal for InMemorySessionJournal with fn append(
       content: p.content,
     }
     self.leaf_id = Some(p.id)
-    self.ids.add(p.id)
+    self.ids.insert(p.id)
     self.journal.push(entry)
     stored.push(entry)
   }

@@ -48,7 +48,7 @@ pub(all) struct CallResponse {
   seq : Int32?
   now : Double?
 }
-pub fn CallResponse::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CallResponse::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn CallResponse::to_json(Self) -> @json.Json
 pub impl @json.FromJson for CallResponse
 pub impl @json.ToJson for CallResponse
@@ -68,7 +68,7 @@ pub(all) struct CodemodeDuring {
   seq : Int32
   issued : Int32
 }
-pub fn CodemodeDuring::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodemodeDuring::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn CodemodeDuring::to_json(Self) -> @json.Json
 
 pub(all) struct CodemodeError {
@@ -77,7 +77,7 @@ pub(all) struct CodemodeError {
   message : String
   stack : String?
 }
-pub fn CodemodeError::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodemodeError::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn CodemodeError::to_json(Self) -> @json.Json
 pub impl @json.FromJson for CodemodeError
 pub impl @json.ToJson for CodemodeError
@@ -88,7 +88,7 @@ pub(all) enum CodemodeErrorKind {
   Aborted
   Sandbox
 }
-pub fn CodemodeErrorKind::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodemodeErrorKind::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn CodemodeErrorKind::to_json(Self) -> @json.Json
 pub impl @json.FromJson for CodemodeErrorKind
 pub impl @json.ToJson for CodemodeErrorKind
@@ -97,7 +97,7 @@ pub(all) enum CodemodeOutputItem {
   Text(text~ : String, console~ : Bool)
   Image(data~ : String, mimeType~ : String)
 }
-pub fn CodemodeOutputItem::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn CodemodeOutputItem::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn CodemodeOutputItem::to_json(Self) -> @json.Json
 pub impl @json.FromJson for CodemodeOutputItem
 pub impl @json.ToJson for CodemodeOutputItem
@@ -132,7 +132,7 @@ pub(all) struct Deterministic {
   started_at : Double
   seed : UInt32
 }
-pub fn Deterministic::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn Deterministic::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn Deterministic::to_json(Self) -> @json.Json
 pub impl @json.FromJson for Deterministic
 pub impl @json.ToJson for Deterministic
@@ -142,13 +142,13 @@ pub(all) struct Global {
   name : String
   spread : Bool
 }
-pub fn Global::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn Global::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn Global::to_json(Self) -> @json.Json
 
 pub(all) enum HostToVmMessage {
   CallResult(CallResponse)
 }
-pub fn HostToVmMessage::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn HostToVmMessage::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn HostToVmMessage::to_json(Self) -> @json.Json
 pub impl @json.FromJson for HostToVmMessage
 pub impl @json.ToJson for HostToVmMessage
@@ -162,7 +162,7 @@ pub(all) struct StartVmRequest {
   data : VmStartData
   interrupt_budget : Double?
 }
-pub fn StartVmRequest::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn StartVmRequest::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn StartVmRequest::to_json(Self) -> @json.Json
 pub impl @json.FromJson for StartVmRequest
 pub impl @json.ToJson for StartVmRequest
@@ -172,7 +172,7 @@ pub(all) struct Tool {
   js_name : String
   description : String
 }
-pub fn Tool::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn Tool::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn Tool::to_json(Self) -> @json.Json
 pub impl @json.FromJson for Tool
 pub impl @json.ToJson for Tool
@@ -185,7 +185,7 @@ pub(all) struct VmStartData {
   store : Map[String, @json.Json]
   deterministic : Deterministic?
 }
-pub fn VmStartData::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn VmStartData::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn VmStartData::to_json(Self) -> @json.Json
 pub impl @json.FromJson for VmStartData
 pub impl @json.ToJson for VmStartData
@@ -201,7 +201,7 @@ pub(all) enum VmToHostMessage {
   Idle(seq~ : Int32, issued~ : Int32)
   Failure(error~ : CodemodeError)
 }
-pub fn VmToHostMessage::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn VmToHostMessage::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn VmToHostMessage::to_json(Self) -> @json.Json
 pub impl @json.FromJson for VmToHostMessage
 pub impl @json.ToJson for VmToHostMessage
@@ -210,7 +210,7 @@ pub(all) enum WriteItem {
   Set(key~ : String, value~ : @json.Json)
   Delete(key~ : String)
 }
-pub fn WriteItem::from_json(@json.Json, @json.JsonPath) -> Self raise @json.JsonDecodeError
+pub fn WriteItem::from_json(@json.Json, @json.DecodeContext) -> Self raise @json.JsonDecodeError
 pub fn WriteItem::to_json(Self) -> @json.Json
 pub impl @json.FromJson for WriteItem
 pub impl @json.ToJson for WriteItem

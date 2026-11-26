@@ -66,7 +66,7 @@ pub fn transform_messages(
       }
       result.push(message)
     } else if message is @agent_loop.AgentMessage::ToolResult(tool_result) {
-      answered.add(tool_result.tool_call_id)
+      answered.insert(tool_result.tool_call_id)
       result.push(message)
     } else {
       close_pending()

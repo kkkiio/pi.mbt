@@ -52,7 +52,7 @@ pub fn load_agents_files(cwd : String) -> Array[ProjectContextFile] {
     if parent == current || visited.contains(parent) {
       break
     }
-    visited.add(parent)
+    visited.insert(parent)
     current = parent
   }
   files

@@ -91,7 +91,7 @@ fn encode_responses_input(
                   is Some(String(custom_input)) else {
                   fail("Responses custom tool call is missing string input")
                 }
-                custom_call_ids.add(call.id)
+                custom_call_ids.insert(call.id)
                 input.push({
                   "type": "custom_tool_call",
                   "id": item_id,
